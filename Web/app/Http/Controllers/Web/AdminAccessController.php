@@ -92,6 +92,42 @@ class AdminAccessController extends Controller
             'is_primary_admin' => ['nullable', 'boolean'],
         ]);
 
+        $validator->after(function ($validator) use ($request) {
+            $role = $request->input('role');
+            $organization = $request->filled('organization_id')
+                ? Organization::find($request->input('organization_id'))
+                : null;
+
+            if ($role === 'Society Admin' && !$organization) {
+                $validator->errors()->add('organization_id', 'Select a Society organization for Society Admin assignments.');
+                return;
+            }
+
+            if ($role === 'Society Admin' && $organization?->type !== 'society') {
+                $validator->errors()->add('organization_id', 'Society Admin assignments must use a Society organization.');
+            }
+
+            if ($role === 'LSG Admin' && !$request->filled('college_id')) {
+                $validator->errors()->add('college_id', 'Select a College for LSG Admin assignments.');
+            }
+
+            if ($role === 'LSG Admin' && $organization && $organization->type !== 'lsg') {
+                $validator->errors()->add('organization_id', 'LSG Admin assignments must use an LSG organization.');
+            }
+
+            if ($role === 'USG Admin' && $organization && $organization->type !== 'usg') {
+                $validator->errors()->add('organization_id', 'USG Admin assignments must use the USG organization.');
+            }
+
+            if ($role === 'ARO Admin' && $organization && $organization->type !== 'aro') {
+                $validator->errors()->add('organization_id', 'ARO Admin assignments must use the ARO organization.');
+            }
+
+            if ($request->filled('college_id') && $organization?->college_id && $organization->college_id !== $request->input('college_id')) {
+                $validator->errors()->add('organization_id', 'Select an organization inside the selected College.');
+            }
+        });
+
         if ($validator->fails()) {
             return redirect()->back()->withErrors($validator)->withInput();
         }

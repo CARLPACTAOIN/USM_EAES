@@ -115,7 +115,7 @@
     </header>
 
     {{-- ─── Mobile Overlay ─────────────────────────────────── --}}
-    <div x-show="open" @click="close()" class="lg:hidden fixed inset-0 z-30 bg-black/50" x-transition.opacity x-cloak></div>
+    <div x-show="open" @click="close()" class="lg:hidden fixed inset-0 z-50 bg-black/50" x-transition.opacity x-cloak></div>
 
     {{-- ─── Sidebar ────────────────────────────────────────── --}}
     <aside class="sidebar" :class="{ 'open': open }" x-cloak>

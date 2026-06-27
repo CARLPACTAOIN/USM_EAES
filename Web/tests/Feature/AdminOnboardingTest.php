@@ -115,6 +115,22 @@ class AdminOnboardingTest extends TestCase
         $this->assertSame(1, AdminApplication::count());
     }
 
+    public function test_osa_admin_access_page_renders_assignment_filter_controls(): void
+    {
+        [$college] = $this->createCollegeAndProgram();
+        Organization::create(['college_id' => $college->id, 'name' => 'PSITS', 'acronym' => 'PSITS', 'type' => 'society']);
+        Organization::create(['college_id' => $college->id, 'name' => 'CEIT Local Student Government', 'acronym' => 'CEIT LSG', 'type' => 'lsg']);
+        Organization::create(['college_id' => null, 'name' => 'University Student Government', 'acronym' => 'USG', 'type' => 'usg']);
+        Organization::create(['college_id' => null, 'name' => 'Admission and Records Office', 'acronym' => 'ARO', 'type' => 'aro']);
+
+        $this->actingAs($this->createOsa())
+            ->get(route('dashboard.admin-users'))
+            ->assertOk()
+            ->assertSee('Assign Admin')
+            ->assertSee('roleTypes', false)
+            ->assertSee('filteredOrganizations', false);
+    }
+
     public function test_assignment_service_blocks_duplicate_active_primary_admins_but_allows_non_primary(): void
     {
         [$college] = $this->createCollegeAndProgram();

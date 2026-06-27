@@ -164,11 +164,117 @@
         @endif
     </section>
 
+    @php
+        $assignmentOrganizations = $organizations->map(fn ($org) => [
+            'id' => $org->id,
+            'name' => $org->name,
+            'acronym' => $org->acronym,
+            'type' => $org->type,
+            'college_id' => $org->college_id,
+            'college_code' => $org->college?->code,
+        ])->values();
+
+        $assignmentColleges = $colleges->map(fn ($college) => [
+            'id' => $college->id,
+            'code' => $college->code,
+            'name' => $college->name,
+        ])->values();
+    @endphp
+
     <dialog id="assign-admin-modal"
             class="proposal-modal modal-sm"
             aria-labelledby="assign-admin-modal-title"
             onclick="if (event.target === this) this.close()">
-        <form method="POST" action="{{ route('dashboard.admin-users.create') }}" class="proposal-modal-form" onclick="event.stopPropagation()">
+        <form method="POST"
+              action="{{ route('dashboard.admin-users.create') }}"
+              class="proposal-modal-form"
+              onclick="event.stopPropagation()"
+              x-data="{
+                  role: @js(old('role', '')),
+                  collegeId: @js(old('college_id', '')),
+                  organizationId: @js(old('organization_id', '')),
+                  organizations: @js($assignmentOrganizations),
+                  colleges: @js($assignmentColleges),
+                  roleTypes: {
+                      'USG Admin': 'usg',
+                      'ARO Admin': 'aro',
+                      'LSG Admin': 'lsg',
+                      'Society Admin': 'society'
+                  },
+                  roleUsesCollege() {
+                      return ['LSG Admin', 'Society Admin'].includes(this.role);
+                  },
+                  roleUsesOrganization() {
+                      return Object.keys(this.roleTypes).includes(this.role);
+                  },
+                  filteredOrganizations() {
+                      if (!this.roleUsesOrganization()) {
+                          return [];
+                      }
+
+                      const targetType = this.roleTypes[this.role];
+
+                      return this.organizations.filter((org) => {
+                          if (org.type !== targetType) {
+                              return false;
+                          }
+
+                          if (this.roleUsesCollege() && this.collegeId) {
+                              return org.college_id === this.collegeId;
+                          }
+
+                          if (this.roleUsesCollege() && !this.collegeId) {
+                              return false;
+                          }
+
+                          return true;
+                      });
+                  },
+                  organizationPlaceholder() {
+                      if (!this.role) {
+                          return 'Select role first';
+                      }
+
+                      if (!this.roleUsesOrganization()) {
+                          return 'No organization scope';
+                      }
+
+                      if (this.roleUsesCollege() && !this.collegeId) {
+                          return 'Select college first';
+                      }
+
+                      return 'Resolve from role/college';
+                  },
+                  syncRole() {
+                      if (!this.roleUsesCollege()) {
+                          this.collegeId = '';
+                      }
+
+                      if (!this.roleUsesOrganization()) {
+                          this.organizationId = '';
+                          return;
+                      }
+
+                      this.syncOrganization();
+                  },
+                  syncCollege() {
+                      this.syncOrganization();
+                  },
+                  syncOrganization() {
+                      if (!this.filteredOrganizations().some((org) => org.id === this.organizationId)) {
+                          this.organizationId = '';
+                      }
+                  },
+                  chooseOrganization() {
+                      const org = this.organizations.find((item) => item.id === this.organizationId);
+                      if (org && org.college_id && this.roleUsesCollege()) {
+                          this.collegeId = org.college_id;
+                      }
+                  },
+                  init() {
+                      this.syncRole();
+                  }
+              }">
             @csrf
             <div class="proposal-modal-header">
                 <div class="proposal-modal-title-row">
@@ -212,7 +318,12 @@
                     <div class="proposal-grid">
                         <div class="proposal-grid-full">
                             <label for="admin-role" class="form-label">Role <span class="text-(--color-destructive)">*</span></label>
-                            <select name="role" id="admin-role" class="form-input form-select @error('role') form-input-error @enderror" required>
+                            <select name="role"
+                                    id="admin-role"
+                                    x-model="role"
+                                    @change="syncRole()"
+                                    class="form-input form-select @error('role') form-input-error @enderror"
+                                    required>
                                 <option value="">Select role</option>
                                 @foreach($adminRoles as $role)
                                     <option value="{{ $role }}" @selected(old('role') === $role)>{{ $role }}</option>
@@ -222,27 +333,35 @@
                         </div>
 
                         <div class="proposal-grid-full">
-                            <label for="admin-org" class="form-label">Organization</label>
-                            <select name="organization_id" id="admin-org" class="form-input form-select @error('organization_id') form-input-error @enderror">
-                                <option value="">Resolve from role/college</option>
-                                @foreach($organizations as $org)
-                                    <option value="{{ $org->id }}" @selected(old('organization_id') === $org->id)>
-                                        {{ $org->acronym }} - {{ $org->name }} @if($org->college) ({{ $org->college->code }}) @endif
-                                    </option>
-                                @endforeach
+                            <label for="admin-college" class="form-label">College</label>
+                            <select name="college_id"
+                                    id="admin-college"
+                                    x-model="collegeId"
+                                    @change="syncCollege()"
+                                    :disabled="!roleUsesCollege()"
+                                    class="form-input form-select @error('college_id') form-input-error @enderror">
+                                <option value="">None</option>
+                                <template x-for="college in colleges" :key="college.id">
+                                    <option :value="college.id" x-text="`${college.code} - ${college.name}`"></option>
+                                </template>
                             </select>
-                            @error('organization_id') <p class="form-error" role="alert">{{ $message }}</p> @enderror
+                            @error('college_id') <p class="form-error" role="alert">{{ $message }}</p> @enderror
                         </div>
 
                         <div class="proposal-grid-full">
-                            <label for="admin-college" class="form-label">College</label>
-                            <select name="college_id" id="admin-college" class="form-input form-select @error('college_id') form-input-error @enderror">
-                                <option value="">None</option>
-                                @foreach($colleges as $college)
-                                    <option value="{{ $college->id }}" @selected(old('college_id') === $college->id)>{{ $college->code }} - {{ $college->name }}</option>
-                                @endforeach
+                            <label for="admin-org" class="form-label">Organization</label>
+                            <select name="organization_id"
+                                    id="admin-org"
+                                    x-model="organizationId"
+                                    @change="chooseOrganization()"
+                                    :disabled="!roleUsesOrganization() || (roleUsesCollege() && !collegeId)"
+                                    class="form-input form-select @error('organization_id') form-input-error @enderror">
+                                <option value="" x-text="organizationPlaceholder()"></option>
+                                <template x-for="org in filteredOrganizations()" :key="org.id">
+                                    <option :value="org.id" x-text="`${org.acronym} - ${org.name}${org.college_code ? ' (' + org.college_code + ')' : ''}`"></option>
+                                </template>
                             </select>
-                            @error('college_id') <p class="form-error" role="alert">{{ $message }}</p> @enderror
+                            @error('organization_id') <p class="form-error" role="alert">{{ $message }}</p> @enderror
                         </div>
 
                         <div>
