@@ -1,0 +1,15 @@
+---
+description: UI/UX work must consult the ui-ux-pro-max local skill before design decisions
+globs: Web/resources/**/*,Mobile/**/*
+alwaysApply: false
+---
+
+# UI/UX Skill (EAES)
+
+For layout, visual design, components, interaction patterns, or UX review in matched files:
+
+1. Read `AGENTS.md` (UI/UX section).
+2. Consult `.agent/skills/ui-ux-pro-max-skill/README.md` or `Web/.agent/skills/ui-ux-pro-max-skill/README.md` (authoritative).
+3. Full bundle: `.agent/skills/ui-ux-pro-max-skill/` or `Web/.agent/skills/ui-ux-pro-max-skill/` — scripts at `src/ui-ux-pro-max/scripts/search.py`.
+
+The skill supports design quality only; it does not override `PRD_V1.md` or expand scope beyond the audit.

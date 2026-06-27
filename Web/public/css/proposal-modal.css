@@ -1,0 +1,482 @@
+dialog.proposal-modal {
+    position: fixed;
+    inset: 0;
+    width: min(calc(100vw - 2rem), 58rem);
+    max-width: none;
+    max-height: min(92dvh, 56rem);
+    margin: auto;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-lg);
+    color: var(--color-text-primary);
+    background: var(--color-surface);
+    box-shadow: var(--shadow-lg);
+    overflow: hidden;
+}
+
+dialog.proposal-modal::backdrop {
+    background: rgb(2 6 23 / 0.58);
+    backdrop-filter: blur(2px);
+}
+
+dialog.proposal-modal[open] {
+    animation: proposal-modal-in var(--duration-normal) var(--ease-out);
+}
+
+.proposal-modal-form {
+    display: flex;
+    flex-direction: column;
+    max-height: inherit;
+    min-height: min(82dvh, 44rem);
+}
+
+.proposal-modal-header,
+.proposal-modal-footer {
+    flex: 0 0 auto;
+}
+
+.proposal-modal-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 1.25rem 1.5rem;
+    border-bottom: 1px solid var(--color-border);
+    background: var(--color-surface);
+}
+
+.proposal-modal-title-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.875rem;
+}
+
+.proposal-modal-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.5rem;
+    height: 2.5rem;
+    border-radius: var(--radius-md);
+    color: var(--color-accent);
+    background: var(--color-accent-light);
+    flex: 0 0 auto;
+}
+
+.proposal-modal-kicker {
+    margin-bottom: 0.125rem;
+    color: var(--color-text-tertiary);
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.proposal-modal-title {
+    color: var(--color-text-primary);
+    font-size: 1.125rem;
+    font-weight: 700;
+    line-height: 1.35;
+}
+
+.proposal-modal-subtitle {
+    margin-top: 0.25rem;
+    color: var(--color-text-secondary);
+    font-size: 0.875rem;
+}
+
+.proposal-modal-body {
+    flex: 1 1 auto;
+    display: grid;
+    gap: 1rem;
+    padding: 1.25rem;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+    background: var(--color-surface-raised);
+}
+
+.proposal-error-summary {
+    padding: 0.875rem 1rem;
+    border: 1px solid var(--color-destructive);
+    border-radius: var(--radius-md);
+    color: var(--color-destructive);
+    background: var(--color-destructive-light);
+}
+
+.proposal-error-summary p {
+    font-weight: 600;
+}
+
+.proposal-error-summary ul {
+    margin-top: 0.375rem;
+    padding-left: 1rem;
+    list-style: disc;
+    font-size: 0.8125rem;
+}
+
+.proposal-modal-section {
+    min-width: 0;
+    padding: 1rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    background: var(--color-surface);
+}
+
+.proposal-detail-heading {
+    margin-bottom: 0.75rem;
+    color: var(--color-text-primary);
+    font-size: 0.875rem;
+    font-weight: 700;
+}
+
+.proposal-detail-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem;
+}
+
+.proposal-detail-item {
+    min-width: 0;
+    padding: 0.75rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-surface-raised);
+}
+
+.proposal-detail-wide {
+    grid-column: 1 / -1;
+}
+
+.proposal-detail-label,
+.proposal-detail-value {
+    display: block;
+}
+
+.proposal-detail-label {
+    margin-bottom: 0.25rem;
+    color: var(--color-text-tertiary);
+    font-size: 0.6875rem;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.proposal-detail-value {
+    color: var(--color-text-primary);
+    font-size: 0.875rem;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+}
+
+.proposal-section-title {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    width: 100%;
+    margin-bottom: 1rem;
+    color: var(--color-text-primary);
+    font-size: 0.9375rem;
+    font-weight: 700;
+}
+
+.proposal-section-step {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.625rem;
+    height: 1.625rem;
+    border-radius: var(--radius-full);
+    color: var(--color-accent);
+    background: var(--color-accent-light);
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    font-weight: 700;
+    flex: 0 0 auto;
+}
+
+.proposal-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+}
+
+.proposal-grid-full {
+    grid-column: 1 / -1;
+}
+
+.proposal-file-box {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 0.875rem;
+    align-items: start;
+    padding: 1rem;
+    border: 1px dashed var(--color-border-hover);
+    border-radius: var(--radius-md);
+    background: var(--color-accent-subtle);
+}
+
+.proposal-file-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.25rem;
+    height: 2.25rem;
+    border-radius: var(--radius-md);
+    color: var(--color-accent);
+    background: var(--color-surface);
+}
+
+.proposal-check-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.75rem;
+}
+
+.proposal-check-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.625rem;
+    min-height: 3rem;
+    padding: 0.75rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    color: var(--color-text-secondary);
+    background: var(--color-surface-raised);
+    cursor: pointer;
+}
+
+.proposal-check-item input {
+    width: 1rem;
+    height: 1rem;
+    margin-top: 0.125rem;
+    accent-color: var(--color-accent);
+    flex: 0 0 auto;
+}
+
+.proposal-check-title {
+    display: block;
+    color: var(--color-text-primary);
+    font-size: 0.875rem;
+    font-weight: 600;
+    line-height: 1.3;
+}
+
+.proposal-check-note {
+    display: block;
+    margin-top: 0.125rem;
+    font-size: 0.75rem;
+    line-height: 1.35;
+}
+
+.proposal-days-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 0.75rem;
+}
+
+.proposal-day-row {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr) auto;
+    gap: 0.75rem;
+    align-items: end;
+    padding: 0.875rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-surface-raised);
+}
+
+.proposal-day-index {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2.5rem;
+    border-radius: var(--radius-md);
+    color: var(--color-text-secondary);
+    background: var(--color-surface);
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    font-weight: 700;
+}
+
+.proposal-mini-label {
+    display: block;
+    margin-bottom: 0.25rem;
+    color: var(--color-text-tertiary);
+    font-size: 0.75rem;
+    font-weight: 500;
+}
+
+.proposal-modal-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 1rem 1.5rem;
+    border-top: 1px solid var(--color-border);
+    background: var(--color-surface);
+}
+
+.proposal-required-note {
+    color: var(--color-text-tertiary);
+    font-size: 0.8125rem;
+}
+
+.proposal-footer-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.75rem;
+}
+
+.export-option-grid {
+    display: grid;
+    gap: 1rem;
+}
+
+.export-option-section {
+    display: grid;
+    gap: 0.625rem;
+}
+
+.export-option-heading {
+    color: var(--color-text-primary);
+    font-size: 0.875rem;
+    font-weight: 700;
+    line-height: 1.3;
+}
+
+.export-option-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem;
+}
+
+.export-option-card {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 0.75rem;
+    min-height: 4.25rem;
+    padding: 0.875rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    color: var(--color-text-primary);
+    background: var(--color-surface);
+    text-decoration: none;
+    transition: border-color var(--duration-fast) var(--ease-out), background-color var(--duration-fast) var(--ease-out), transform var(--duration-fast) var(--ease-out);
+}
+
+.export-option-card:hover,
+.export-option-card:focus-visible {
+    border-color: var(--color-accent);
+    background: var(--color-accent-subtle);
+    transform: translateY(-1px);
+}
+
+.export-option-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    border-radius: var(--radius-md);
+    color: var(--color-accent);
+    background: var(--color-accent-light);
+    flex: 0 0 auto;
+}
+
+.export-option-pdf .export-option-icon {
+    color: #dc2626;
+    background: #fee2e2;
+}
+
+.export-option-xlsx .export-option-icon {
+    color: var(--color-accent);
+    background: var(--color-accent-light);
+}
+
+.export-option-type,
+.export-option-label {
+    display: block;
+    min-width: 0;
+}
+
+.export-option-type {
+    color: var(--color-text-primary);
+    font-size: 0.875rem;
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+.export-option-label {
+    margin-top: 0.125rem;
+    color: var(--color-text-secondary);
+    font-size: 0.75rem;
+    line-height: 1.25;
+}
+
+@keyframes proposal-modal-in {
+    from {
+        opacity: 0;
+        transform: scale(0.98) translateY(0.5rem);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+}
+
+@media (max-width: 640px) {
+    dialog.proposal-modal {
+        width: calc(100vw - 1rem);
+        max-height: calc(100dvh - 1rem);
+    }
+
+    .proposal-modal-form {
+        min-height: calc(100dvh - 1rem);
+    }
+
+    .proposal-modal-header,
+    .proposal-modal-body,
+    .proposal-modal-footer {
+        padding-left: 1rem;
+        padding-right: 1rem;
+    }
+
+    .proposal-grid,
+    .proposal-check-grid,
+    .proposal-detail-grid,
+    .proposal-file-box,
+    .proposal-day-row,
+    .export-option-actions {
+        grid-template-columns: 1fr;
+    }
+
+    .proposal-day-index {
+        width: 100%;
+        height: 2rem;
+    }
+
+    .proposal-modal-footer {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .proposal-footer-actions {
+        width: 100%;
+    }
+
+    .proposal-footer-actions .btn {
+        flex: 1 1 0;
+    }
+}
+
+/* Small modal size modifier */
+dialog.proposal-modal.modal-sm {
+    width: min(calc(100vw - 2rem), 32rem);
+}
+
+dialog.proposal-modal.modal-sm .proposal-modal-form {
+    min-height: auto;
+}

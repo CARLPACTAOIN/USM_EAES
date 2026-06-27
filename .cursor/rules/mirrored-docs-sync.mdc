@@ -1,0 +1,24 @@
+---
+description: Keep AGENTS.md, PRD_V1.md, and PRD_PROGRESS_AUDIT.md in sync at repo root and Web/
+alwaysApply: true
+---
+
+# Mirrored documentation sync
+
+These files are **paired mirrors** (content must match):
+
+- `AGENTS.md` ↔ `Web/AGENTS.md`
+- `PRD_V1.md` ↔ `Web/PRD_V1.md`
+- `PRD_PROGRESS_AUDIT.md` ↔ `Web/PRD_PROGRESS_AUDIT.md`
+
+## When editing
+
+1. Apply the same change to **both** paths in the same task, **or**
+2. Edit one copy, then run from repo root: `.\scripts\sync-mirrored-docs.ps1`
+
+Do not finish a task that only updated one mirror.
+
+## Reading
+
+- Repo-wide work: use root paths.
+- Work scoped to `Web/`: either path is valid if mirrors are in sync; prefer `Web/*.md` when the cwd is `Web/`.

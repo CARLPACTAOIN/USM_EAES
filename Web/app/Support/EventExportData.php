@@ -1,0 +1,274 @@
+<?php
+
+namespace App\Support;
+
+use App\Models\AttendanceRecord;
+use App\Models\Event;
+use App\Models\Evaluation;
+use App\Models\User;
+use Carbon\CarbonInterface;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Number;
+use Illuminate\Support\Str;
+
+class EventExportData
+{
+    /**
+     * Build the shared export payload used by PDF and spreadsheet exports.
+     *
+     * @return array<string, mixed>
+     */
+    public static function build(Event $event, User $generatedBy): array
+    {
+        $event->load([
+            'organization.college',
+            'parentEvent.organization',
+            'eventDays' => fn ($query) => $query->orderBy('day_number'),
+            'attendanceRecords' => fn ($query) => $query
+                ->with(['student.organization', 'eventDay', 'validatedBy'])
+                ->orderBy('created_at'),
+            'evaluations' => fn ($query) => $query
+                ->with('student.organization')
+                ->orderBy('submitted_at'),
+        ]);
+
+        $generatedAt = now()->timezone(config('app.timezone'));
+        $questions = EvaluationQuestions::all();
+        $evaluationsByStudent = $event->evaluations->keyBy('student_id');
+        $attendanceByStudent = $event->attendanceRecords->groupBy('student_id');
+
+        $summaryRows = self::summaryRows($event, $generatedBy, $generatedAt);
+        $attendanceRows = self::attendanceRows($event->attendanceRecords, $evaluationsByStudent);
+        $evaluationRows = self::evaluationRows($event->evaluations, $attendanceByStudent, $questions);
+
+        return [
+            'event' => $event,
+            'generated_by' => $generatedBy,
+            'generated_at' => $generatedAt,
+            'questions' => $questions,
+            'summary_rows' => $summaryRows,
+            'attendance_rows' => $attendanceRows,
+            'evaluation_rows' => $evaluationRows,
+            'attendance_records' => $event->attendanceRecords,
+            'evaluations' => $event->evaluations,
+            'evaluation_averages' => self::evaluationAverages($event->evaluations, $questions),
+            'sentiment_counts' => $event->evaluations
+                ->map(fn (Evaluation $evaluation) => $evaluation->sentiment ?: 'unprocessed')
+                ->countBy()
+                ->sortKeys()
+                ->all(),
+        ];
+    }
+
+    public static function filename(Event $event, string $suffix, string $extension): string
+    {
+        $slug = Str::slug($event->title) ?: 'event';
+
+        return "{$slug}-{$suffix}-" . now()->format('Ymd-His') . ".{$extension}";
+    }
+
+    /**
+     * @return list<list<string>>
+     */
+    private static function summaryRows(Event $event, User $generatedBy, CarbonInterface $generatedAt): array
+    {
+        $target = $event->target_demographics ?? [];
+        $budget = $event->budget_allocations ?? [];
+
+        return [
+            ['Field', 'Value'],
+            ['Event', $event->title],
+            ['Organizer', trim(($event->organization?->acronym ? "{$event->organization->acronym} - " : '') . ($event->organization?->name ?? 'N/A'))],
+            ['College', $event->organization?->college?->name ?? 'N/A'],
+            ['Parent permit', $event->parentEvent ? "{$event->parentEvent->organization?->acronym} - {$event->parentEvent->title}" : 'None'],
+            ['Status', self::label($event->status)],
+            ['PPA category', self::label($event->proposal_category ?? 'activity')],
+            ['Start date', self::formatDate($event->start_date)],
+            ['End date', self::formatDate($event->end_date)],
+            ['Location type', self::label($event->location_type)],
+            ['Location details', $event->location_details ?: 'N/A'],
+            ['Implementing office', $target['implementing_office'] ?? 'N/A'],
+            ['Collaborating office', $target['collaborating_office'] ?? 'N/A'],
+            ['Target participants', $target['target_participants'] ?? 'N/A'],
+            ['Source of fund', $budget['source_of_fund'] ?? 'N/A'],
+            ['Budget / cost', isset($budget['budget_cost']) ? Number::currency((float) $budget['budget_cost'], 'PHP') : 'N/A'],
+            ['Resolution number', $event->resolution_number ?: 'N/A'],
+            ['Proposal softcopy', $event->proposal_document_original_name ?: 'Not attached'],
+            ['Hardcopy submitted', self::yesNo($event->hardcopy_submitted) . ($event->hardcopy_submitted_at ? ' at ' . self::formatDateTime($event->hardcopy_submitted_at) : '')],
+            ['Organization head signed', self::yesNo($event->head_organization_signed)],
+            ['Adviser signed', self::yesNo($event->adviser_signed)],
+            ['Attendance records', (string) $event->attendanceRecords->count()],
+            ['Valid attendance records', (string) $event->attendanceRecords->where('valid', true)->count()],
+            ['Evaluation submissions', (string) $event->evaluations->count()],
+            ['Generated by', "{$generatedBy->name} <{$generatedBy->email}>"],
+            ['Generated at', self::formatDateTime($generatedAt)],
+        ];
+    }
+
+    /**
+     * @param Collection<int, AttendanceRecord> $records
+     * @param Collection<string, Evaluation> $evaluationsByStudent
+     * @return list<list<string>>
+     */
+    private static function attendanceRows(Collection $records, Collection $evaluationsByStudent): array
+    {
+        $rows = [[
+            'Day',
+            'Student name',
+            'Student ID',
+            'Program',
+            'Organization',
+            'Time in',
+            'Time out',
+            'Society status',
+            'General status',
+            'Left early',
+            'Attendance valid',
+            'Evaluation submitted',
+            'Force validated',
+            'Validated by',
+        ]];
+
+        $records
+            ->sortBy(fn (AttendanceRecord $record) => sprintf(
+                '%03d-%s',
+                $record->eventDay?->day_number ?? 999,
+                Str::lower($record->student?->name ?? '')
+            ))
+            ->each(function (AttendanceRecord $record) use (&$rows, $evaluationsByStudent): void {
+                $student = $record->student;
+
+                $rows[] = [
+                    $record->eventDay ? 'Day ' . $record->eventDay->day_number : 'N/A',
+                    $student?->name ?? 'N/A',
+                    $student?->student_id_number ?? 'N/A',
+                    $student?->program_code ?? 'N/A',
+                    $student?->organization?->acronym ?? 'N/A',
+                    self::formatDateTime($record->time_in),
+                    self::formatDateTime($record->time_out),
+                    self::label($record->society_status),
+                    self::label($record->competition_status),
+                    self::yesNo($record->left_early),
+                    self::yesNo($record->valid),
+                    self::yesNo($student && $evaluationsByStudent->has($student->id)),
+                    self::yesNo($record->force_validated),
+                    $record->validatedBy?->name ?? 'N/A',
+                ];
+            });
+
+        if ($records->isEmpty()) {
+            $rows[] = ['No attendance records found for this event.', '', '', '', '', '', '', '', '', '', '', '', '', ''];
+        }
+
+        return $rows;
+    }
+
+    /**
+     * @param Collection<int, Evaluation> $evaluations
+     * @param Collection<string, Collection<int, AttendanceRecord>> $attendanceByStudent
+     * @param array<string, array{label: string, description: string}> $questions
+     * @return list<list<string>>
+     */
+    private static function evaluationRows(Collection $evaluations, Collection $attendanceByStudent, array $questions): array
+    {
+        $rows = [[
+            'Student name',
+            'Student ID',
+            'Program',
+            'Organization',
+            'Attendance valid',
+            'Submitted at',
+            ...array_map(fn (array $question) => $question['label'], $questions),
+            'Average rating',
+            'Sentiment',
+            'Sentiment score',
+            'Comment',
+        ]];
+
+        $evaluations->each(function (Evaluation $evaluation) use (&$rows, $attendanceByStudent, $questions): void {
+            $student = $evaluation->student;
+            $scores = $evaluation->section_scores ?? [];
+            $studentAttendance = $student ? $attendanceByStudent->get($student->id, collect()) : collect();
+
+            $questionScores = [];
+            foreach (array_keys($questions) as $key) {
+                $questionScores[] = array_key_exists($key, $scores) ? (string) $scores[$key] : 'N/A';
+            }
+
+            $rows[] = [
+                $student?->name ?? 'N/A',
+                $student?->student_id_number ?? 'N/A',
+                $student?->program_code ?? 'N/A',
+                $student?->organization?->acronym ?? 'N/A',
+                self::yesNo($studentAttendance->contains('valid', true)),
+                self::formatDateTime($evaluation->submitted_at),
+                ...$questionScores,
+                self::scoreAverage($scores, array_keys($questions)),
+                $evaluation->sentiment ?: 'unprocessed',
+                $evaluation->sentiment_score !== null ? (string) round($evaluation->sentiment_score, 3) : 'N/A',
+                $evaluation->open_comment ?: '',
+            ];
+        });
+
+        if ($evaluations->isEmpty()) {
+            $rows[] = ['No evaluation submissions found for this event.', '', '', '', '', '', ...array_fill(0, count($questions), ''), '', '', '', ''];
+        }
+
+        return $rows;
+    }
+
+    /**
+     * @param Collection<int, Evaluation> $evaluations
+     * @param array<string, array{label: string, description: string}> $questions
+     * @return array<string, string>
+     */
+    private static function evaluationAverages(Collection $evaluations, array $questions): array
+    {
+        $averages = [];
+
+        foreach ($questions as $key => $question) {
+            $scores = $evaluations
+                ->map(fn (Evaluation $evaluation) => $evaluation->section_scores[$key] ?? null)
+                ->filter(fn ($score) => is_numeric($score));
+
+            $averages[$question['label']] = $scores->isNotEmpty()
+                ? (string) round($scores->avg(), 2)
+                : 'N/A';
+        }
+
+        return $averages;
+    }
+
+    /**
+     * @param array<string, mixed> $scores
+     * @param list<string> $keys
+     */
+    private static function scoreAverage(array $scores, array $keys): string
+    {
+        $values = collect($keys)
+            ->map(fn (string $key) => $scores[$key] ?? null)
+            ->filter(fn ($score) => is_numeric($score));
+
+        return $values->isNotEmpty() ? (string) round($values->avg(), 2) : 'N/A';
+    }
+
+    private static function label(?string $value): string
+    {
+        return $value ? Str::of($value)->replace(['_', '-'], ' ')->title()->toString() : 'N/A';
+    }
+
+    private static function yesNo(bool $value): string
+    {
+        return $value ? 'Yes' : 'No';
+    }
+
+    private static function formatDate($value): string
+    {
+        return $value instanceof CarbonInterface ? $value->format('M d, Y') : 'N/A';
+    }
+
+    private static function formatDateTime($value): string
+    {
+        return $value instanceof CarbonInterface ? $value->format('M d, Y h:i A') : 'N/A';
+    }
+}

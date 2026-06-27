@@ -1,0 +1,31 @@
+---
+description: EAES agent workflow — read AGENTS.md, PRD_V1, and progress audit first
+alwaysApply: true
+---
+
+# EAES Agent Instructions
+
+Follow `AGENTS.md` for all work (mirrored at repo root and `Web/AGENTS.md`).
+
+## Required references
+
+1. **`AGENTS.md`** / **`Web/AGENTS.md`** — workflow, conflict handling, audit rules, UI skill paths, technical defaults (keep mirrors identical).
+2. **`PRD_V1.md`** / **`Web/PRD_V1.md`** — authoritative scope and requirements when it conflicts with existing code.
+3. **`PRD_PROGRESS_AUDIT.md`** / **`Web/PRD_PROGRESS_AUDIT.md`** — implementation status; update when progress materially changes.
+
+After editing any of the above, update the paired copy or run `.\scripts\sync-mirrored-docs.ps1` (see `mirrored-docs-sync` rule).
+
+## Before implementing
+
+- Read the relevant `PRD_V1.md` sections for the task.
+- Check `PRD_PROGRESS_AUDIT.md` for current status and gaps.
+- Do not mark PRD items **Done** without evidence (migrations, routes, tests, or verifiable behavior).
+
+## After implementing
+
+- If status changed, update only the affected rows in `PRD_PROGRESS_AUDIT.md` in the same task.
+- If the user request conflicted with the PRD and was explicitly overridden, log it under **Off-PRD / Deviations**.
+
+## Laravel
+
+- Application code lives in `Web/`. Run `composer` and `artisan` from that directory.
