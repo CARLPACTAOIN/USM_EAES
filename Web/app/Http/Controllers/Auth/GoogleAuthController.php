@@ -4,47 +4,61 @@ namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use Laravel\Socialite\Facades\Socialite;
 use Illuminate\Support\Str;
+use Laravel\Socialite\Facades\Socialite;
+use Symfony\Component\HttpFoundation\Response;
 
 class GoogleAuthController extends Controller
 {
     /**
      * Redirect the user to the Google authentication page.
      *
-     * @return \Symfony\Component\HttpFoundation\Response
+     * @return Response
      */
     public function redirectToGoogle()
     {
-        return Socialite::driver('google')->redirect();
+        $allowedDomain = $this->allowedEmailDomain();
+
+        return Socialite::driver('google')
+            ->with([
+                'prompt' => 'select_account',
+                'hd' => $allowedDomain,
+            ])
+            ->redirect();
     }
 
     /**
      * Obtain the user information from Google.
      *
-     * @return \Illuminate\Http\RedirectResponse
+     * @return RedirectResponse
      */
-    public function handleGoogleCallback()
+    public function handleGoogleCallback(Request $request)
     {
         try {
             $googleUser = Socialite::driver('google')->user();
         } catch (\Exception $e) {
-            return redirect('/login')->with('error', 'Google authentication failed.');
+            return redirect()->route('login')->with('error', 'Google authentication failed.');
         }
 
-        $email = $googleUser->getEmail();
-        $allowedDomain = env('EAES_ALLOWED_EMAIL_DOMAIN', 'usm.edu.ph');
+        $email = Str::lower((string) $googleUser->getEmail());
+        $allowedDomain = $this->allowedEmailDomain();
 
         // Enforce institutional domain constraint
-        if (!Str::endsWith($email, '@' . $allowedDomain)) {
-            return redirect('/login')->with('error', "Access restricted to institutional @{$allowedDomain} accounts.");
+        if (! Str::endsWith($email, '@'.$allowedDomain)) {
+            Auth::logout();
+            $request->session()->invalidate();
+            $request->session()->regenerateToken();
+
+            return redirect()->route('login')->with('error', "Access restricted to institutional @{$allowedDomain} accounts.");
         }
 
         // Find or create user
         $user = User::where('email', $email)->first();
 
-        if (!$user) {
+        if (! $user) {
             $user = User::create([
                 'name' => $googleUser->getName(),
                 'email' => $email,
@@ -70,5 +84,10 @@ class GoogleAuthController extends Controller
         }
 
         return redirect('/portal');
+    }
+
+    private function allowedEmailDomain(): string
+    {
+        return Str::lower(ltrim((string) config('services.eaes.allowed_email_domain', 'usm.edu.ph'), '@'));
     }
 }

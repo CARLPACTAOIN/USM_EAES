@@ -2,7 +2,7 @@
 
 **Branch / snapshot:** `main` (local)  
 **PRD source:** `PRD_V1.md` (v2.0 content, filename `PRD_V1.md`)  
-**Last reviewed:** 2026-06-27  
+**Last reviewed:** 2026-06-29  
 **Backend path:** `Web/` (Laravel 12 backend with UUID schemas)
 
 > This file tracks implementation status only. It does not override `PRD_V1.md`.
@@ -30,7 +30,7 @@
 | Web Node dependencies (`node_modules`) | Done | Dependencies installed and locked (alpinejs, html5-qrcode), Tailwind v4 configured, Vite production assets built on 2026-06-26 using local Node 20.19.4 |
 | `APP_KEY` / env setup | Done | Key generated, environment configured in `Web/.env` |
 | PostgreSQL 16 (PRD §7) | Done | Laragon PHP 8.4.5 now runs with `pdo_pgsql`; `artisan migrate:fresh` and `artisan test` pass against local PostgreSQL 16 |
-| API layer + Sanctum (Epic 1) | Done | Sanctum API setup, token login, logout, and session validate routes created |
+| API layer + Sanctum (Epic 1) | Done | Sanctum API setup, token login, logout, session validate routes, and UUID-compatible token ownership created |
 | Redis queues (PRD §3.3) | Off-PRD | Job processing active; database queue driver used locally as Redis fallback |
 | Project `AGENTS.md` + Cursor rules | Done | Root `AGENTS.md`, `.cursor/rules/` |
 
@@ -77,7 +77,7 @@
 
 | Feature | Status | Evidence / Notes |
 |---------|--------|------------------|
-| 1.1 Google OAuth + `@usm.edu.ph` + Sanctum tokens | Done | `GoogleAuthController` redirects, checks domain, and issues web auth |
+| 1.1 Google OAuth + `@usm.edu.ph` + Sanctum tokens | Done | `GoogleAuthController` redirects with account selection + USM domain hint, checks domain, clears rejected sessions, and issues web auth |
 | 1.2 Student profile + QR registration | Done | Student profile page with dependent college-to-organization select dropdowns and html5-qrcode webcam capture/manual entry fallback |
 | 1.3 Admin applications + assignment governance | Done | Student portal application flow, OSA review console, term-bound `admin_assignments`, new Society approval, and `AdminAssignmentService` as the only admin-role/scope projection writer |
 
@@ -262,3 +262,10 @@
   - Added constraints for duplicate pending admin applications, active primary admin assignments, program college+code identity, and organization type+college+acronym identity.
   - Added an OSA proposal-detail modal showing schedule, event days, venue, offices, target participants, funding, budget, resolution, softcopy, hardcopy, and signature metadata before review actions.
   - Improved proposal form defaults so start date pre-fills end date and D1 date without overwriting deliberate multi-day edits, and added a shared sign-out confirmation modal.
+- **2026-06-28 (Google auth guardrail):**
+  - Hardened Google OAuth redirect with forced account selection and an `hd=usm.edu.ph` hint so a rejected personal Gmail session does not trap the next login attempt.
+  - Rejected non-institutional callbacks now clear local auth session state before returning to login; verified with `php artisan test --filter=GoogleAuthControllerTest`.
+- **2026-06-29 (scanner-link token schema):**
+  - Corrected Sanctum `personal_access_tokens.tokenable_id` from bigint to UUID for PostgreSQL so dashboard-generated scanner links can create event-scoped tokens for UUID users.
+  - Updated the fresh-install migration to use `uuidMorphs('tokenable')`, added a one-time PostgreSQL conversion migration, and verified the local database column reports `uuid`.
+  - Verified with `php artisan test --filter=test_scanner_link_generation` and `php artisan test --filter=test_dashboard_generated_scanner_link_drives_hydrate_sync_and_eilo_resolution`.

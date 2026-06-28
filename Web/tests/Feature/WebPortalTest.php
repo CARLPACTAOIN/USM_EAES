@@ -713,10 +713,21 @@ class WebPortalTest extends TestCase
             'end_date' => today(),
         ]);
 
-        $this->actingAs($admin)
+        $response = $this->actingAs($admin)
             ->post(route('dashboard.events.scanner-link', $event->id))
             ->assertSessionHas('success')
             ->assertSessionHas('scanner_link');
+
+        $this->assertStringStartsWith(
+            'eaes://scanner?token=',
+            $response->getSession()->get('scanner_link')
+        );
+
+        $this->assertDatabaseHas('personal_access_tokens', [
+            'name' => 'scanner-' . $event->id,
+            'tokenable_id' => $admin->id,
+            'tokenable_type' => User::class,
+        ]);
     }
 
     public function test_scanner_link_rejected_for_draft(): void

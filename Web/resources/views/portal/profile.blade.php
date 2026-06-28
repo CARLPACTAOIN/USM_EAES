@@ -77,7 +77,7 @@
                     <label for="student_id_number" class="form-label">Student ID Number <span class="text-(--color-destructive)">*</span></label>
                     <input type="text" name="student_id_number" id="student_id_number"
                            value="{{ old('student_id_number', $user->student_id_number) }}"
-                           placeholder="e.g. 2023-00123"
+                           placeholder="e.g. 26-72659"
                            class="form-input font-data @error('student_id_number') form-input-error @enderror"
                            maxlength="20" required>
                     @error('student_id_number') <p class="form-error" role="alert">{{ $message }}</p> @enderror
