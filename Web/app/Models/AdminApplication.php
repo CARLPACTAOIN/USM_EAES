@@ -8,6 +8,10 @@ use Illuminate\Database\Eloquent\Model;
 
 class AdminApplication extends Model
 {
+    /**
+     * @deprecated Student-initiated admin applications were retired in favor of OSA-direct
+     *             assignment governance. The table remains for historical data only.
+     */
     use HasFactory, HasUuids;
 
     public const STATUS_PENDING = 'pending';

@@ -12,6 +12,7 @@ class PendingStudentLink extends Model
 
     protected $fillable = [
         'event_id',
+        'event_participation_scope_id',
         'organization_id',
         'raw_scan_id',
         'qr_code_value',
@@ -32,6 +33,11 @@ class PendingStudentLink extends Model
     public function event()
     {
         return $this->belongsTo(Event::class);
+    }
+
+    public function participationScope()
+    {
+        return $this->belongsTo(EventParticipationScope::class, 'event_participation_scope_id');
     }
 
     public function organization()

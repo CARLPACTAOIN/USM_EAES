@@ -34,6 +34,12 @@ class RolePermissionSeeder extends Seeder
             'view-college-analytics',
             'view-constituent-data',
             'force-validate-own',
+            'invite-participant-scopes',
+            'create-hr-events',
+            'manage-faculty-roster',
+            'assign-hr-scanners',
+            'view-hr-analytics',
+            'export-hr-attendance',
 
             // Scanners
             'scan-qr-codes',
@@ -60,6 +66,12 @@ class RolePermissionSeeder extends Seeder
             'view-all-analytics',
             'force-validate-any',
             'manage-global-settings',
+            'invite-participant-scopes',
+            'create-hr-events',
+            'manage-faculty-roster',
+            'assign-hr-scanners',
+            'view-hr-analytics',
+            'export-hr-attendance',
         ]);
         $superAdminApi = Role::firstOrCreate(['name' => 'Super Admin (OSA)', 'guard_name' => 'api']);
         $superAdminApi->syncPermissions([
@@ -68,6 +80,12 @@ class RolePermissionSeeder extends Seeder
             'view-all-analytics',
             'force-validate-any',
             'manage-global-settings',
+            'invite-participant-scopes',
+            'create-hr-events',
+            'manage-faculty-roster',
+            'assign-hr-scanners',
+            'view-hr-analytics',
+            'export-hr-attendance',
         ]);
 
         // USG Admin
@@ -88,12 +106,14 @@ class RolePermissionSeeder extends Seeder
         $lsgAdmin = Role::firstOrCreate(['name' => 'LSG Admin', 'guard_name' => 'web']);
         $lsgAdmin->syncPermissions([
             'create-proposals',
+            'assign-scanners-own',
             'view-college-analytics',
             'view-constituent-data',
         ]);
         $lsgAdminApi = Role::firstOrCreate(['name' => 'LSG Admin', 'guard_name' => 'api']);
         $lsgAdminApi->syncPermissions([
             'create-proposals',
+            'assign-scanners-own',
             'view-college-analytics',
             'view-constituent-data',
         ]);
@@ -116,18 +136,68 @@ class RolePermissionSeeder extends Seeder
             'force-validate-own',
         ]);
 
-        // ARO Admin
-        $aroAdmin = Role::firstOrCreate(['name' => 'ARO Admin', 'guard_name' => 'web']);
-        $aroAdmin->syncPermissions([
+        // Academic Unit Admin
+        $academicUnitAdmin = Role::firstOrCreate(['name' => 'Academic Unit Admin', 'guard_name' => 'web']);
+        $academicUnitAdmin->syncPermissions([
             'create-proposals',
             'assign-scanners-own',
-            'view-own-analytics',
+            'invite-participant-scopes',
+            'view-college-analytics',
+            'view-constituent-data',
+            'force-validate-own',
         ]);
-        $aroAdminApi = Role::firstOrCreate(['name' => 'ARO Admin', 'guard_name' => 'api']);
-        $aroAdminApi->syncPermissions([
+        $academicUnitAdminApi = Role::firstOrCreate(['name' => 'Academic Unit Admin', 'guard_name' => 'api']);
+        $academicUnitAdminApi->syncPermissions([
             'create-proposals',
             'assign-scanners-own',
+            'invite-participant-scopes',
+            'view-college-analytics',
+            'view-constituent-data',
+            'force-validate-own',
+        ]);
+
+        // Office Event Admin
+        $officeEventAdmin = Role::firstOrCreate(['name' => 'Office Event Admin', 'guard_name' => 'web']);
+        $officeEventAdmin->syncPermissions([
+            'create-proposals',
+            'assign-scanners-own',
+            'invite-participant-scopes',
             'view-own-analytics',
+            'force-validate-own',
+        ]);
+        $officeEventAdminApi = Role::firstOrCreate(['name' => 'Office Event Admin', 'guard_name' => 'api']);
+        $officeEventAdminApi->syncPermissions([
+            'create-proposals',
+            'assign-scanners-own',
+            'invite-participant-scopes',
+            'view-own-analytics',
+            'force-validate-own',
+        ]);
+
+        // HR Admin
+        $hrAdmin = Role::firstOrCreate(['name' => 'HR Admin', 'guard_name' => 'web']);
+        $hrAdmin->syncPermissions([
+            'create-proposals',
+            'assign-scanners-own',
+            'create-hr-events',
+            'manage-faculty-roster',
+            'assign-hr-scanners',
+            'view-hr-analytics',
+            'export-hr-attendance',
+            'view-own-analytics',
+            'force-validate-own',
+        ]);
+        $hrAdminApi = Role::firstOrCreate(['name' => 'HR Admin', 'guard_name' => 'api']);
+        $hrAdminApi->syncPermissions([
+            'create-proposals',
+            'assign-scanners-own',
+            'create-hr-events',
+            'manage-faculty-roster',
+            'assign-hr-scanners',
+            'view-hr-analytics',
+            'export-hr-attendance',
+            'view-own-analytics',
+            'force-validate-own',
         ]);
 
         // Scanner

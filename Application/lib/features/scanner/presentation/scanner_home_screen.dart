@@ -1,13 +1,14 @@
 import 'dart:async';
 
-import 'package:app_links/app_links.dart';
 import 'package:flutter/material.dart';
 
 import '../../../config/app_config.dart';
+import '../domain/scan_sync_status.dart';
 import 'scanner_controller.dart';
 import 'screens/offline_tools_screen.dart';
 import 'screens/scan_logs_screen.dart';
 import 'screens/session_setup_screen.dart';
+import 'widgets/global_feedback_banner.dart';
 
 /// Root shell for the EAES scanner app.
 ///
@@ -20,7 +21,9 @@ import 'screens/session_setup_screen.dart';
 /// [Navigator.push] inside [SessionSetupScreen], preserving back-button
 /// behaviour and keeping the bottom nav hidden during active scanning.
 class ScannerHomeScreen extends StatefulWidget {
-  const ScannerHomeScreen({super.key});
+  const ScannerHomeScreen({super.key, this.controller});
+
+  final ScannerController? controller;
 
   @override
   State<ScannerHomeScreen> createState() => _ScannerHomeScreenState();
@@ -28,54 +31,58 @@ class ScannerHomeScreen extends StatefulWidget {
 
 class _ScannerHomeScreenState extends State<ScannerHomeScreen> {
   late final ScannerController _controller;
-  final AppLinks _appLinks = AppLinks();
-  final TextEditingController _sessionLinkController = TextEditingController();
-  StreamSubscription<Uri>? _linkSubscription;
+  Timer? _feedbackDismissTimer;
   int _selectedTab = 0;
+  int _lastSessionActivatedSignal = 0;
+  bool _ownsController = false;
 
   @override
   void initState() {
     super.initState();
-    _controller = ScannerController.defaultInstance();
-    _listenForSessionLinks();
+    _controller = widget.controller ?? ScannerController.defaultInstance();
+    _ownsController = widget.controller == null;
+    _controller.addListener(_handleControllerUpdates);
+    _controller.checkConnectivity();
   }
 
-  Future<void> _listenForSessionLinks() async {
-    try {
-      final initialLink = await _appLinks.getInitialLink();
-      if (!mounted) return;
-
-      if (initialLink != null) {
-        await _controller.applySessionUri(initialLink);
+  void _handleControllerUpdates() {
+    if (_controller.sessionActivatedSignal != _lastSessionActivatedSignal) {
+      _lastSessionActivatedSignal = _controller.sessionActivatedSignal;
+      if (mounted) {
+        setState(() => _selectedTab = 0);
       }
-
-      _linkSubscription = _appLinks.uriLinkStream.listen(
-        (uri) => _controller.applySessionUri(uri),
-        onError: (_) {},
-      );
-    } catch (_) {
-      // Deep links are optional during local widget tests and desktop runs.
     }
+    _scheduleFeedbackAutoDismiss();
+  }
+
+  /// Toast-style auto-dismiss: success/warning banners clear themselves after a
+  /// few seconds so they don't linger and re-clutter the top of the screen.
+  /// Loading and error states stay until explicitly resolved or dismissed.
+  void _scheduleFeedbackAutoDismiss() {
+    final kind = _controller.globalFeedback.kind;
+    final shouldAutoDismiss =
+        kind == FeedbackKind.success || kind == FeedbackKind.warning;
+    if (!shouldAutoDismiss) {
+      _feedbackDismissTimer?.cancel();
+      return;
+    }
+    if (_feedbackDismissTimer?.isActive ?? false) return;
+    _feedbackDismissTimer = Timer(const Duration(seconds: 4), () {
+      final current = _controller.globalFeedback.kind;
+      if (current == FeedbackKind.success || current == FeedbackKind.warning) {
+        _controller.clearGlobalFeedback();
+      }
+    });
   }
 
   @override
   void dispose() {
-    _linkSubscription?.cancel();
-    _sessionLinkController.dispose();
-    _controller.dispose();
-    super.dispose();
-  }
-
-  Future<void> _applyManualSession() async {
-    final raw = _sessionLinkController.text.trim();
-    if (raw.isEmpty) return;
-    final uri = Uri.tryParse(raw);
-    if (uri == null) {
-      // applySessionUri will set errorMessage via the controller
-      await _controller.applySessionUri(Uri.parse('invalid:'));
-      return;
+    _controller.removeListener(_handleControllerUpdates);
+    _feedbackDismissTimer?.cancel();
+    if (_ownsController) {
+      _controller.dispose();
     }
-    await _controller.applySessionUri(uri);
+    super.dispose();
   }
 
   @override
@@ -84,39 +91,41 @@ class _ScannerHomeScreenState extends State<ScannerHomeScreen> {
       animation: _controller,
       builder: (context, _) {
         return Scaffold(
-          // ---- Body (IndexedStack keeps state alive across tab switches) ----
-          body: IndexedStack(
-            index: _selectedTab,
+          body: Column(
             children: [
-              // Tab 0 — Session Setup
-              _TabScaffold(
-                title: AppConfig.appName,
-                child: SessionSetupScreen(
-                  controller: _controller,
-                  linkController: _sessionLinkController,
-                  onOpenSession: _applyManualSession,
-                  onHydrate: _controller.hydrateRoster,
+              GlobalFeedbackBanner(
+                feedback: _controller.globalFeedback,
+                onDismiss: _controller.clearGlobalFeedback,
+              ),
+              Expanded(
+                child: IndexedStack(
+                  index: _selectedTab,
+                  children: [
+                    _TabScaffold(
+                      title: AppConfig.appName,
+                      child: SessionSetupScreen(
+                        controller: _controller,
+                        onReturnToAssignments: () =>
+                            Navigator.of(context).maybePop(),
+                        onHydrate: _controller.hydrateRoster,
+                      ),
+                    ),
+                    _TabScaffold(
+                      title: 'Offline Tools',
+                      child: OfflineToolsScreen(controller: _controller),
+                    ),
+                    _TabScaffold(
+                      title: 'Scan Logs',
+                      child: ScanLogsScreen(controller: _controller),
+                    ),
+                  ],
                 ),
-              ),
-
-              // Tab 1 — Offline Tools
-              _TabScaffold(
-                title: 'Offline Tools',
-                child: OfflineToolsScreen(controller: _controller),
-              ),
-
-              // Tab 2 — Scan Logs
-              _TabScaffold(
-                title: 'Scan Logs',
-                child: ScanLogsScreen(controller: _controller),
               ),
             ],
           ),
-
-          // ---- Bottom Navigation Bar ----
           bottomNavigationBar: _BottomNav(
             selectedIndex: _selectedTab,
-            pendingCount: _controller.pendingCount,
+            pendingCount: _controller.pendingCount + _controller.failedCount,
             onTabSelected: (index) => setState(() => _selectedTab = index),
           ),
         );
@@ -124,10 +133,6 @@ class _ScannerHomeScreenState extends State<ScannerHomeScreen> {
     );
   }
 }
-
-// ---------------------------------------------------------------------------
-// Tab scaffold wrapper (AppBar per tab)
-// ---------------------------------------------------------------------------
 
 class _TabScaffold extends StatelessWidget {
   const _TabScaffold({required this.title, required this.child});
@@ -143,10 +148,6 @@ class _TabScaffold extends StatelessWidget {
     );
   }
 }
-
-// ---------------------------------------------------------------------------
-// Bottom navigation bar
-// ---------------------------------------------------------------------------
 
 class _BottomNav extends StatelessWidget {
   const _BottomNav({
@@ -166,8 +167,7 @@ class _BottomNav extends StatelessWidget {
     return NavigationBar(
       selectedIndex: selectedIndex,
       onDestinationSelected: onTabSelected,
-      backgroundColor:
-          theme.bottomNavigationBarTheme.backgroundColor,
+      backgroundColor: theme.bottomNavigationBarTheme.backgroundColor,
       indicatorColor: const Color(0xFF1B4D3E).withValues(alpha: 0.12),
       labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
       destinations: [
@@ -188,10 +188,7 @@ class _BottomNav extends StatelessWidget {
           selectedIcon: Badge(
             isLabelVisible: pendingCount > 0,
             label: Text('$pendingCount'),
-            child: const Icon(
-              Icons.wifi_off_rounded,
-              color: Color(0xFF1B4D3E),
-            ),
+            child: const Icon(Icons.wifi_off_rounded, color: Color(0xFF1B4D3E)),
           ),
           label: 'Offline',
         ),

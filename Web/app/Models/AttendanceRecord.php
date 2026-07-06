@@ -12,6 +12,7 @@ class AttendanceRecord extends Model
 
     protected $fillable = [
         'event_id',
+        'event_participation_scope_id',
         'event_day_id',
         'student_id',
         'time_in',
@@ -35,6 +36,11 @@ class AttendanceRecord extends Model
     public function event()
     {
         return $this->belongsTo(Event::class);
+    }
+
+    public function participationScope()
+    {
+        return $this->belongsTo(EventParticipationScope::class, 'event_participation_scope_id');
     }
 
     public function eventDay()

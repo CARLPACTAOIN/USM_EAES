@@ -1,9 +1,11 @@
+import 'scan_sync_status.dart';
 import 'scan_type.dart';
 
 class OfflineScan {
   const OfflineScan({
     this.localId,
     required this.eventId,
+    this.eventParticipationScopeId,
     this.eventDayId,
     this.studentId,
     required this.qrCodeValue,
@@ -14,10 +16,14 @@ class OfflineScan {
     required this.dedupKey,
     required this.resolutionStatus,
     this.syncedAt,
+    this.syncStatus = ScanSyncStatus.pending,
+    this.failureReason,
+    this.retryCount = 0,
   });
 
   final int? localId;
   final String eventId;
+  final String? eventParticipationScopeId;
   final String? eventDayId;
   final String? studentId;
   final String qrCodeValue;
@@ -28,11 +34,15 @@ class OfflineScan {
   final String dedupKey;
   final String resolutionStatus;
   final DateTime? syncedAt;
+  final ScanSyncStatus syncStatus;
+  final String? failureReason;
+  final int retryCount;
 
   factory OfflineScan.fromDb(Map<String, Object?> row) {
     return OfflineScan(
       localId: row['id'] as int?,
       eventId: row['event_id'] as String,
+      eventParticipationScopeId: row['event_participation_scope_id'] as String?,
       eventDayId: row['event_day_id'] as String?,
       studentId: row['student_id'] as String?,
       qrCodeValue: row['qr_code_value'] as String,
@@ -47,12 +57,16 @@ class OfflineScan {
       syncedAt: row['synced_at'] == null
           ? null
           : DateTime.parse(row['synced_at'] as String),
+      syncStatus: ScanSyncStatus.fromDb(row['sync_status'] as String?),
+      failureReason: row['failure_reason'] as String?,
+      retryCount: row['retry_count'] as int? ?? 0,
     );
   }
 
   Map<String, Object?> toDb() {
     return {
       'event_id': eventId,
+      'event_participation_scope_id': eventParticipationScopeId,
       'event_day_id': eventDayId,
       'student_id': studentId,
       'qr_code_value': qrCodeValue,
@@ -63,12 +77,16 @@ class OfflineScan {
       'dedup_key': dedupKey,
       'resolution_status': resolutionStatus,
       'synced_at': syncedAt?.toUtc().toIso8601String(),
+      'sync_status': syncStatus.dbValue,
+      'failure_reason': failureReason,
+      'retry_count': retryCount,
     };
   }
 
   Map<String, Object?> toSyncJson() {
     return {
       'event_day_id': eventDayId,
+      'event_participation_scope_id': eventParticipationScopeId,
       'qr_code_value': qrCodeValue,
       'scan_type': scanType.apiValue,
       'scanned_at': scannedAt.toUtc().toIso8601String(),
@@ -76,5 +94,31 @@ class OfflineScan {
       'manual_entry': manualEntry,
       'dedup_key': dedupKey,
     };
+  }
+
+  OfflineScan copyWith({
+    ScanSyncStatus? syncStatus,
+    DateTime? syncedAt,
+    String? failureReason,
+    int? retryCount,
+  }) {
+    return OfflineScan(
+      localId: localId,
+      eventId: eventId,
+      eventParticipationScopeId: eventParticipationScopeId,
+      eventDayId: eventDayId,
+      studentId: studentId,
+      qrCodeValue: qrCodeValue,
+      scanType: scanType,
+      scannedAt: scannedAt,
+      deviceId: deviceId,
+      manualEntry: manualEntry,
+      dedupKey: dedupKey,
+      resolutionStatus: resolutionStatus,
+      syncedAt: syncedAt ?? this.syncedAt,
+      syncStatus: syncStatus ?? this.syncStatus,
+      failureReason: failureReason ?? this.failureReason,
+      retryCount: retryCount ?? this.retryCount,
+    );
   }
 }

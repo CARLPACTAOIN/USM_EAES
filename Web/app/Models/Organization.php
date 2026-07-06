@@ -14,7 +14,7 @@ class Organization extends Model
         'college_id',
         'name',
         'acronym',
-        'type', // "society", "usg", "lsg", "aro"
+        'type', // "society", "usg", "lsg", "academic_unit", "administrative_office", "non_academic_org", "hr_unit"
         'logo_path',
         'status',
     ];
@@ -32,6 +32,16 @@ class Organization extends Model
     public function users()
     {
         return $this->hasMany(User::class);
+    }
+
+    public function memberships()
+    {
+        return $this->hasMany(OrganizationMembership::class);
+    }
+
+    public function participationScopes()
+    {
+        return $this->hasMany(EventParticipationScope::class);
     }
 
     public function adminApplications()

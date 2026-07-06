@@ -3,17 +3,25 @@
 namespace Tests\Feature;
 
 use App\Models\AttendanceRecord;
+use App\Models\AdminAssignment;
 use App\Models\College;
 use App\Models\Evaluation;
 use App\Models\Event;
 use App\Models\EventDay;
+use App\Models\EventParticipationScope;
+use App\Models\EventScannerAssignment;
 use App\Models\Organization;
 use App\Models\PendingStudentLink;
 use App\Models\Program;
+use App\Models\ScannerSession;
 use App\Models\University;
 use App\Models\User;
 use App\Jobs\AnalyzeEventSentimentsJob;
+use App\Services\AdminAssignmentService;
+use App\Services\ScannerAssignmentService;
+use App\Services\ScannerSessionService;
 use App\Services\GeminiService;
+use App\Services\ParticipationScopeService;
 use App\Services\Contracts\AiServiceInterface;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -62,8 +70,6 @@ class WebPortalTest extends TestCase
             ->syncPermissions(['create-proposals', 'assign-scanners-own', 'view-own-analytics']);
         Role::firstOrCreate(['name' => 'LSG Admin', 'guard_name' => 'web'])
             ->syncPermissions(['create-proposals', 'view-college-analytics', 'view-constituent-data']);
-        Role::firstOrCreate(['name' => 'ARO Admin', 'guard_name' => 'web'])
-            ->syncPermissions(['create-proposals', 'assign-scanners-own', 'view-own-analytics']);
     }
 
     private function createHierarchy(): array
@@ -107,10 +113,59 @@ class WebPortalTest extends TestCase
             'name' => 'Test Admin',
             'email' => 'admin' . uniqid() . '@usm.edu.ph',
             'password' => bcrypt('password123'),
-            'organization_id' => $org?->id,
         ]);
-        $user->assignRole($role);
+
+        if ($role === 'Student') {
+            $user->assignRole('Student');
+            return $user;
+        }
+
+        $assignmentOrganization = $role === 'Super Admin (OSA)' ? null : $org;
+        $assignmentCollege = $assignmentOrganization?->college;
+
+        $existingPrimary = AdminAssignment::query()
+            ->where('role_name', $role)
+            ->where('status', AdminAssignment::STATUS_ACTIVE)
+            ->where('organization_id', $assignmentOrganization?->id)
+            ->where('college_id', $assignmentCollege?->id ?: $assignmentOrganization?->college_id)
+            ->exists();
+
+        app(AdminAssignmentService::class)->createAssignment(
+            user: $user,
+            roleName: $role,
+            organization: $assignmentOrganization,
+            college: $assignmentCollege,
+            academicYear: '2026-2027',
+            termStart: '2026-07-01',
+            termEnd: '2027-06-30',
+            positionTitle: 'Test assignment',
+            approvedBy: $user,
+            isPrimaryAdmin: !$existingPrimary
+        );
+
         return $user;
+    }
+
+    private function createParticipantScope(Event $event, Organization $participantOrg, string $ppaStatus = EventParticipationScope::PPA_DRAFT): EventParticipationScope
+    {
+        $parentScope = app(ParticipationScopeService::class)->ensureOrganizerScope($event->fresh(['organization']));
+
+        return EventParticipationScope::create([
+            'event_id' => $event->id,
+            'parent_scope_id' => $parentScope->id,
+            'participation_role' => EventParticipationScope::ROLE_PARTICIPANT,
+            'participant_type' => 'society',
+            'organization_id' => $participantOrg->id,
+            'college_id' => $participantOrg->college_id,
+            'participant_name_snapshot' => $participantOrg->name,
+            'ppa_required' => true,
+            'ppa_status' => $ppaStatus,
+            'hardcopy_submitted' => in_array($ppaStatus, [EventParticipationScope::PPA_SUBMITTED, EventParticipationScope::PPA_UNDER_REVIEW, EventParticipationScope::PPA_APPROVED], true),
+            'capture_mode' => 'self_scanning',
+            'analytics_rollup_enabled' => true,
+            'status' => EventParticipationScope::STATUS_ACTIVE,
+            'approved_at' => $ppaStatus === EventParticipationScope::PPA_APPROVED ? now() : null,
+        ]);
     }
 
     private function createExportableEvent(Organization $org, User $student): Event
@@ -188,7 +243,8 @@ class WebPortalTest extends TestCase
     {
         $this->get('/login')
             ->assertStatus(200)
-            ->assertSee('Sign in with Google')
+            ->assertSee('Continue with USM Google Account')
+            ->assertSee('Event Attendance & Evaluation System', false)
             ->assertSee('usm.edu.ph');
     }
 
@@ -210,6 +266,20 @@ class WebPortalTest extends TestCase
         $this->actingAs($admin)
             ->get('/dashboard')
             ->assertStatus(200);
+    }
+
+    public function test_osa_admin_is_not_given_student_portal_access(): void
+    {
+        $admin = $this->createAdmin('Super Admin (OSA)');
+
+        $this->actingAs($admin)
+            ->get('/dashboard')
+            ->assertOk()
+            ->assertDontSee('Student Portal');
+
+        $this->actingAs($admin)
+            ->get(route('portal'))
+            ->assertStatus(403);
     }
 
     // ─── Profile Tests ─────────────────────────────────────
@@ -699,54 +769,310 @@ class WebPortalTest extends TestCase
         $this->assertSame('draft', $event->status);
     }
 
-    public function test_scanner_link_generation(): void
+    public function test_participating_events_tab_shows_invited_org_after_parent_submission(): void
     {
         $h = $this->createHierarchy();
-        $admin = $this->createAdmin('Society Admin', $h['org']);
-        $student = $this->createStudent($h['org']);
+        $this->createAdmin('Society Admin', $h['org']);
+
+        $partnerOrg = Organization::create([
+            'college_id' => $h['college']->id,
+            'name' => 'Partner Society',
+            'acronym' => 'PARTNER',
+            'type' => 'society',
+        ]);
+        $partnerOrg->programs()->attach($h['program']->id);
+        $partnerAdmin = $this->createAdmin('Society Admin', $partnerOrg);
 
         $event = Event::create([
             'organization_id' => $h['org']->id,
-            'title' => 'Link Test Event',
+            'title' => 'PSITS Shared Event',
+            'proposal_category' => 'activity',
+            'status' => 'draft',
+            'start_date' => today()->addDays(8),
+            'end_date' => today()->addDays(8),
+        ]);
+        $this->createParticipantScope($event, $partnerOrg);
+
+        $this->actingAs($partnerAdmin)
+            ->get(route('dashboard.events', ['workspace' => 'participating']))
+            ->assertOk()
+            ->assertDontSee('PSITS Shared Event');
+
+        $event->update(['status' => 'submitted']);
+
+        $this->actingAs($partnerAdmin)
+            ->get(route('dashboard.events', ['workspace' => 'participating']))
+            ->assertOk()
+            ->assertSee('Participating Events')
+            ->assertSee('PSITS Shared Event')
+            ->assertSee('Partner Society')
+            ->assertSee('Your participant PPA')
+            ->assertSee('Submit PPA')
+            ->assertDontSee('Add Participant Scope');
+
+        $this->actingAs($partnerAdmin)
+            ->get(route('dashboard.events'))
+            ->assertOk()
+            ->assertDontSee('PSITS Shared Event');
+    }
+
+    public function test_invited_org_can_submit_only_own_participant_ppa(): void
+    {
+        Storage::fake('local');
+
+        $h = $this->createHierarchy();
+        $partnerOrg = Organization::create([
+            'college_id' => $h['college']->id,
+            'name' => 'Partner Society',
+            'acronym' => 'PARTNER',
+            'type' => 'society',
+        ]);
+        $partnerOrg->programs()->attach($h['program']->id);
+        $partnerAdmin = $this->createAdmin('Society Admin', $partnerOrg);
+
+        $otherOrg = Organization::create([
+            'college_id' => $h['college']->id,
+            'name' => 'Other Participant',
+            'acronym' => 'OTHERP',
+            'type' => 'society',
+        ]);
+        $otherOrg->programs()->attach($h['program']->id);
+
+        $event = Event::create([
+            'organization_id' => $h['org']->id,
+            'title' => 'PSITS Multi-Org Event',
+            'proposal_category' => 'activity',
+            'status' => 'submitted',
+            'start_date' => today()->addDays(8),
+            'end_date' => today()->addDays(8),
+        ]);
+        $ownScope = $this->createParticipantScope($event, $partnerOrg);
+        $otherScope = $this->createParticipantScope($event, $otherOrg);
+
+        $this->actingAs($partnerAdmin)
+            ->post(route('dashboard.events.participant-scopes.submit', [$event->id, $ownScope->id]), [
+                'ppa_softcopy' => UploadedFile::fake()->create('partner-ppa.pdf', 128, 'application/pdf'),
+                'hardcopy_submitted' => '1',
+                'org_head_signed' => '1',
+                'adviser_signed' => '1',
+            ])
+            ->assertSessionHas('success');
+
+        $this->assertDatabaseHas('event_participation_scopes', [
+            'id' => $ownScope->id,
+            'ppa_status' => EventParticipationScope::PPA_SUBMITTED,
+            'submitted_by' => $partnerAdmin->id,
+        ]);
+
+        $this->actingAs($partnerAdmin)
+            ->post(route('dashboard.events.participant-scopes.submit', [$event->id, $otherScope->id]), [
+                'ppa_softcopy' => UploadedFile::fake()->create('other-ppa.pdf', 128, 'application/pdf'),
+                'hardcopy_submitted' => '1',
+                'org_head_signed' => '1',
+                'adviser_signed' => '1',
+            ])
+            ->assertForbidden();
+    }
+
+    public function test_invited_org_can_manage_scanners_for_approved_participant_scope(): void
+    {
+        $h = $this->createHierarchy();
+        $partnerOrg = Organization::create([
+            'college_id' => $h['college']->id,
+            'name' => 'Partner Society',
+            'acronym' => 'PARTNER',
+            'type' => 'society',
+        ]);
+        $partnerOrg->programs()->attach($h['program']->id);
+        $partnerAdmin = $this->createAdmin('Society Admin', $partnerOrg);
+        $scanner = $this->createStudent($partnerOrg);
+        $scanner->update([
+            'student_id_number' => '2024-02001',
+            'qr_code_value' => 'QR-PARTNER-SCANNER',
+        ]);
+
+        $event = Event::create([
+            'organization_id' => $h['org']->id,
+            'title' => 'PSITS Approved Shared Event',
+            'proposal_category' => 'activity',
             'status' => 'approved',
             'start_date' => today(),
             'end_date' => today(),
         ]);
+        $scope = $this->createParticipantScope($event, $partnerOrg, EventParticipationScope::PPA_APPROVED);
 
-        $response = $this->actingAs($admin)
-            ->post(route('dashboard.events.scanner-link', $event->id))
-            ->assertSessionHas('success')
-            ->assertSessionHas('scanner_link');
+        $this->actingAs($partnerAdmin)
+            ->get(route('dashboard.events', ['workspace' => 'participating']))
+            ->assertOk()
+            ->assertSee('PSITS Approved Shared Event')
+            ->assertSee('Scanners');
 
-        $this->assertStringStartsWith(
-            'eaes://scanner?token=',
-            $response->getSession()->get('scanner_link')
-        );
+        $this->actingAs($partnerAdmin)
+            ->post(route('dashboard.events.scanner-assignments.store', $event->id), [
+                'event_participation_scope_id' => $scope->id,
+                'scanner_user_id' => $scanner->id,
+                'label' => 'Partner Gate',
+            ])
+            ->assertSessionHas('success');
 
-        $this->assertDatabaseHas('personal_access_tokens', [
-            'name' => 'scanner-' . $event->id,
-            'tokenable_id' => $admin->id,
-            'tokenable_type' => User::class,
+        $assignment = EventScannerAssignment::where('event_id', $event->id)
+            ->where('event_participation_scope_id', $scope->id)
+            ->where('scanner_user_id', $scanner->id)
+            ->first();
+
+        $this->assertNotNull($assignment);
+
+        $this->actingAs($partnerAdmin)
+            ->post(route('dashboard.events.scanner-assignments.revoke', [$event->id, $assignment->id]), [
+                'reason' => 'Shift changed.',
+            ])
+            ->assertSessionHas('success');
+
+        $this->assertDatabaseHas('event_scanner_assignments', [
+            'id' => $assignment->id,
+            'status' => EventScannerAssignment::STATUS_REVOKED,
+            'revoked_by_user_id' => $partnerAdmin->id,
         ]);
     }
 
-    public function test_scanner_link_rejected_for_draft(): void
+    public function test_admin_assigns_scanner_only_within_scope_for_approved_events(): void
     {
         $h = $this->createHierarchy();
         $admin = $this->createAdmin('Society Admin', $h['org']);
         $student = $this->createStudent($h['org']);
+        $student->update([
+            'student_id_number' => '2024-01001',
+            'qr_code_value' => 'QR-SCANNER-01001',
+        ]);
 
         $event = Event::create([
             'organization_id' => $h['org']->id,
-            'title' => 'Draft Event',
+            'title' => 'Scanner Assignment Event',
+            'status' => 'approved',
+            'start_date' => today(),
+            'end_date' => today(),
+        ]);
+        $scope = app(ParticipationScopeService::class)->ensureOrganizerScope($event->fresh(['organization']));
+
+        $this->actingAs($admin)
+            ->post(route('dashboard.events.scanner-assignments.store', $event->id), [
+                'event_participation_scope_id' => $scope->id,
+                'scanner_user_id' => $student->id,
+                'label' => 'Main Gate',
+            ])
+            ->assertSessionHas('success');
+
+        $this->assertDatabaseHas('event_scanner_assignments', [
+            'event_id' => $event->id,
+            'event_participation_scope_id' => $scope->id,
+            'scanner_user_id' => $student->id,
+            'status' => 'active',
+        ]);
+
+        $draft = Event::create([
+            'organization_id' => $h['org']->id,
+            'title' => 'Draft Scanner Assignment Event',
             'status' => 'draft',
             'start_date' => today(),
             'end_date' => today(),
         ]);
 
+        $draftStudent = $this->createStudent($h['org']);
+        $draftStudent->update([
+            'student_id_number' => '2024-01002',
+            'qr_code_value' => 'QR-SCANNER-01002',
+        ]);
+
         $this->actingAs($admin)
-            ->post(route('dashboard.events.scanner-link', $event->id))
+            ->post(route('dashboard.events.scanner-assignments.store', $draft->id), [
+                'scanner_user_id' => $draftStudent->id,
+            ])
             ->assertSessionHas('error');
+
+        $this->assertDatabaseMissing('event_scanner_assignments', [
+            'event_id' => $draft->id,
+            'scanner_user_id' => $draftStudent->id,
+        ]);
+
+        $otherOrg = Organization::create([
+            'college_id' => $h['college']->id,
+            'name' => 'Other Society',
+            'acronym' => 'OTHER',
+            'type' => 'society',
+        ]);
+        $otherOrg->programs()->attach($h['program']->id);
+        $otherStudent = $this->createStudent($otherOrg);
+        $otherStudent->update([
+            'student_id_number' => '2024-01003',
+            'qr_code_value' => 'QR-SCANNER-01003',
+        ]);
+
+        $this->actingAs($admin)
+            ->post(route('dashboard.events.scanner-assignments.store', $event->id), [
+                'event_participation_scope_id' => $scope->id,
+                'scanner_user_id' => $otherStudent->id,
+            ])
+            ->assertSessionHas('error');
+
+        $this->assertDatabaseMissing('event_scanner_assignments', [
+            'event_id' => $event->id,
+            'scanner_user_id' => $otherStudent->id,
+        ]);
+    }
+
+    public function test_scanner_assignment_session_history_renders_for_dashboard(): void
+    {
+        $h = $this->createHierarchy();
+        $admin = $this->createAdmin('Society Admin', $h['org']);
+        $student = $this->createStudent($h['org']);
+        $student->update([
+            'student_id_number' => '2024-01004',
+            'qr_code_value' => 'QR-SCANNER-01004',
+        ]);
+
+        $event = Event::create([
+            'organization_id' => $h['org']->id,
+            'title' => 'Session History Event',
+            'status' => 'approved',
+            'start_date' => today(),
+            'end_date' => today(),
+        ]);
+
+        $assignment = app(ScannerAssignmentService::class)->assign(
+            event: $event,
+            scannerUser: $student,
+            assignedBy: $admin,
+            label: 'Gym Entrance'
+        );
+
+        [$session] = app(ScannerSessionService::class)->createSession(
+            event: $event,
+            scannerUser: $student,
+            issuedBy: $admin,
+            label: 'Gym Entrance',
+            assignment: $assignment
+        );
+        $session->update([
+            'device_id' => 'dashboard-history-device',
+            'device_fingerprint_hash' => hash('sha256', 'dashboard-history-device'),
+            'activated_at' => now(),
+            'last_seen_at' => now(),
+        ]);
+
+        $this->actingAs($admin)
+            ->get(route('dashboard.events'))
+            ->assertSee('Scanner Assignments')
+            ->assertSee('Active Devices / Session History')
+            ->assertSee('Gym Entrance')
+            ->assertSee($student->name);
+
+        $this->assertDatabaseHas('scanner_sessions', [
+            'id' => $session->id,
+            'event_id' => $event->id,
+            'assignment_id' => $assignment->id,
+            'scanner_user_id' => $student->id,
+            'status' => ScannerSession::STATUS_ACTIVE,
+        ]);
     }
 
     public function test_event_attendance_pdf_export_downloads_for_scoped_admin(): void
@@ -1041,7 +1367,7 @@ class WebPortalTest extends TestCase
                 'role' => 'Society Admin',
                 'organization_id' => $h['org']->id,
             ])
-            ->assertRedirect(route('dashboard.admin-users'))
+            ->assertRedirect(route('dashboard.admin-users') . '?tab=assignments')
             ->assertSessionHas('success');
 
         $newUser = User::where('email', 'newadmin@usm.edu.ph')->first();
@@ -1161,5 +1487,58 @@ class WebPortalTest extends TestCase
         $response->assertStatus(200);
         $response->assertSee('Own Event');
         $response->assertDontSee('Other Event');
+    }
+
+    public function test_student_admin_dashboard_scope_comes_from_assignment_not_student_profile(): void
+    {
+        $h = $this->createHierarchy();
+        $studentAdmin = $this->createStudent($h['org']);
+
+        $adminOrg = Organization::create([
+            'college_id' => $h['college']->id,
+            'name' => 'Admin Scope Society',
+            'acronym' => 'ADMIN',
+            'type' => 'society',
+        ]);
+        $adminOrg->programs()->attach($h['program']->id);
+
+        app(AdminAssignmentService::class)->createAssignment(
+            user: $studentAdmin,
+            roleName: 'Society Admin',
+            organization: $adminOrg,
+            college: $h['college'],
+            academicYear: '2026-2027',
+            termStart: '2026-07-01',
+            termEnd: '2027-06-30',
+            positionTitle: 'President',
+            approvedBy: $studentAdmin,
+            isPrimaryAdmin: true
+        );
+
+        Event::create([
+            'organization_id' => $h['org']->id,
+            'title' => 'Student Home Event',
+            'status' => 'draft',
+            'start_date' => today(),
+            'end_date' => today(),
+        ]);
+        Event::create([
+            'organization_id' => $adminOrg->id,
+            'title' => 'Assigned Admin Event',
+            'status' => 'draft',
+            'start_date' => today(),
+            'end_date' => today(),
+        ]);
+
+        $this->actingAs($studentAdmin)
+            ->get(route('dashboard.events'))
+            ->assertOk()
+            ->assertSee('Assigned Admin Event')
+            ->assertDontSee('Student Home Event');
+
+        $this->actingAs($studentAdmin)
+            ->get(route('portal.profile'))
+            ->assertOk()
+            ->assertSee('PSITS');
     }
 }

@@ -23,9 +23,11 @@ class EventExportData
         $event->load([
             'organization.college',
             'parentEvent.organization',
+            'participationScopes.organization',
+            'participationScopes.college',
             'eventDays' => fn ($query) => $query->orderBy('day_number'),
             'attendanceRecords' => fn ($query) => $query
-                ->with(['student.organization', 'eventDay', 'validatedBy'])
+                ->with(['student.organization', 'eventDay', 'participationScope.organization', 'validatedBy'])
                 ->orderBy('created_at'),
             'evaluations' => fn ($query) => $query
                 ->with('student.organization')
@@ -97,6 +99,8 @@ class EventExportData
             ['Hardcopy submitted', self::yesNo($event->hardcopy_submitted) . ($event->hardcopy_submitted_at ? ' at ' . self::formatDateTime($event->hardcopy_submitted_at) : '')],
             ['Organization head signed', self::yesNo($event->head_organization_signed)],
             ['Adviser signed', self::yesNo($event->adviser_signed)],
+            ['Participant scopes', (string) $event->participationScopes->count()],
+            ['Approved runtime scopes', (string) $event->participationScopes->filter(fn ($scope) => $scope->status === 'active' && (!$scope->ppa_required || $scope->ppa_status === 'approved'))->count()],
             ['Attendance records', (string) $event->attendanceRecords->count()],
             ['Valid attendance records', (string) $event->attendanceRecords->where('valid', true)->count()],
             ['Evaluation submissions', (string) $event->evaluations->count()],
@@ -114,6 +118,7 @@ class EventExportData
     {
         $rows = [[
             'Day',
+            'Participant scope',
             'Student name',
             'Student ID',
             'Program',
@@ -140,6 +145,7 @@ class EventExportData
 
                 $rows[] = [
                     $record->eventDay ? 'Day ' . $record->eventDay->day_number : 'N/A',
+                    $record->participationScope?->displayName() ?? 'N/A',
                     $student?->name ?? 'N/A',
                     $student?->student_id_number ?? 'N/A',
                     $student?->program_code ?? 'N/A',
@@ -157,7 +163,7 @@ class EventExportData
             });
 
         if ($records->isEmpty()) {
-            $rows[] = ['No attendance records found for this event.', '', '', '', '', '', '', '', '', '', '', '', '', ''];
+            $rows[] = ['No attendance records found for this event.', '', '', '', '', '', '', '', '', '', '', '', '', '', ''];
         }
 
         return $rows;

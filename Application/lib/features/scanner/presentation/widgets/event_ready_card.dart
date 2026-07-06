@@ -3,15 +3,8 @@ import 'package:flutter/material.dart';
 import '../scanner_controller.dart';
 import '../../domain/scan_type.dart';
 
-/// Shows active event details after a session has been validated successfully.
-///
-/// Displays event title, scanner info, and offline-ready status in a prominent
-/// card. Used as the second state of Session Setup screen.
 class EventReadyCard extends StatelessWidget {
-  const EventReadyCard({
-    super.key,
-    required this.controller,
-  });
+  const EventReadyCard({super.key, required this.controller});
 
   final ScannerController controller;
 
@@ -21,8 +14,7 @@ class EventReadyCard extends StatelessWidget {
     final isDark = theme.brightness == Brightness.dark;
     const brandGreen = Color(0xFF1B4D3E);
 
-    final title =
-        controller.eventTitle ?? 'Event ${controller.session!.eventId}';
+    final title = controller.eventTitle ?? 'Active Event';
 
     return Container(
       width: double.infinity,
@@ -48,7 +40,6 @@ class EventReadyCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Header row
             Row(
               children: [
                 Container(
@@ -90,32 +81,43 @@ class EventReadyCard extends StatelessWidget {
                     ],
                   ),
                 ),
+                _StatusBadge(
+                  status:
+                      controller.eventLifecyclePhase ??
+                      controller.eventStatus ??
+                      'scheduled',
+                ),
               ],
             ),
-
             const SizedBox(height: 16),
             Divider(color: Colors.white.withValues(alpha: 0.15), height: 1),
             const SizedBox(height: 16),
-
-            // Status chips row
             Wrap(
-              spacing: 8,
+              spacing: 20,
               runSpacing: 8,
               children: [
-                _WhiteChip(
-                  icon: Icons.wifi_off_rounded,
-                  label: 'Offline-ready',
+                _MetaItem(
+                  icon: controller.isOnline
+                      ? Icons.wifi_rounded
+                      : Icons.wifi_off_rounded,
+                  label: controller.isOnline ? 'Online' : 'Offline',
+                  warning: !controller.isOnline,
                 ),
-                _WhiteChip(
-                  icon: Icons.badge_rounded,
+                _MetaItem(
+                  icon: Icons.groups_rounded,
                   label: controller.rosterCount > 0
-                      ? 'Roster: ${controller.rosterCount} students'
-                      : 'Roster not hydrated',
+                      ? '${controller.rosterCount} students'
+                      : 'No roster yet',
                   warning: controller.rosterCount == 0,
                 ),
-                _WhiteChip(
-                  icon: Icons.pending_actions_rounded,
-                  label: '${controller.pendingCount} pending',
+                _MetaItem(
+                  icon: controller.scannerSessionStatus == 'active'
+                      ? Icons.verified_user_rounded
+                      : Icons.link_off_rounded,
+                  label: controller.scannerSessionStatus == null
+                      ? 'Session'
+                      : 'Session ${controller.scannerSessionStatus}',
+                  warning: controller.scannerSessionStatus != 'active',
                 ),
               ],
             ),
@@ -126,8 +128,35 @@ class EventReadyCard extends StatelessWidget {
   }
 }
 
-class _WhiteChip extends StatelessWidget {
-  const _WhiteChip({
+class _StatusBadge extends StatelessWidget {
+  const _StatusBadge({required this.status});
+
+  final String status;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Text(
+        status[0].toUpperCase() + status.substring(1),
+        style: const TextStyle(
+          fontFamily: 'Inter',
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          color: Colors.white,
+          letterSpacing: 0.3,
+        ),
+      ),
+    );
+  }
+}
+
+class _MetaItem extends StatelessWidget {
+  const _MetaItem({
     required this.icon,
     required this.label,
     this.warning = false,
@@ -139,42 +168,28 @@ class _WhiteChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final chipColor = warning
-        ? Colors.orange.shade300
+    final color = warning
+        ? Colors.orange.shade200
         : Colors.white.withValues(alpha: 0.9);
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: warning ? 0.1 : 0.15),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: warning
-              ? Colors.orange.withValues(alpha: 0.5)
-              : Colors.white.withValues(alpha: 0.2),
-        ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 13, color: chipColor),
-          const SizedBox(width: 5),
-          Text(
-            label,
-            style: TextStyle(
-              fontFamily: 'Inter',
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
-              color: chipColor,
-            ),
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 16, color: color),
+        const SizedBox(width: 6),
+        Text(
+          label,
+          style: TextStyle(
+            fontFamily: 'Inter',
+            fontSize: 13,
+            fontWeight: FontWeight.w500,
+            color: color,
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
 
-/// The two big scan-mode selection buttons shown on the Event Ready screen.
 class ScanModeButtons extends StatelessWidget {
   const ScanModeButtons({
     super.key,

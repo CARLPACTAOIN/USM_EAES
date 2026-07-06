@@ -37,7 +37,7 @@ class AuthController extends Controller
      */
     private function redirectByRole($user)
     {
-        if ($user->hasAnyRole(['Super Admin (OSA)', 'USG Admin', 'LSG Admin', 'Society Admin', 'ARO Admin'])) {
+        if ($user->hasAnyRole(['Super Admin (OSA)', 'USG Admin', 'LSG Admin', 'Society Admin', 'Academic Unit Admin', 'Office Event Admin', 'HR Admin'])) {
             return redirect()->route('dashboard');
         }
 

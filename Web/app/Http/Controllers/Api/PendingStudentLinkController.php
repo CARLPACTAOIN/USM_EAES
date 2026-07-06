@@ -9,18 +9,26 @@ use App\Models\Organization;
 use App\Models\PendingStudentLink;
 use App\Models\RawScan;
 use App\Models\User;
+use App\Services\AdminScopeService;
+use App\Services\ParticipationScopeService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 
 class PendingStudentLinkController extends Controller
 {
+    public function __construct(
+        private readonly AdminScopeService $adminScopes,
+        private readonly ParticipationScopeService $participationScopes
+    ) {
+    }
+
     /**
      * List unresolved QR records visible to the authenticated admin.
      */
     public function index(Request $request)
     {
-        $query = PendingStudentLink::with(['event', 'organization', 'rawScan'])
+        $query = PendingStudentLink::with(['event', 'participationScope.organization', 'organization', 'rawScan'])
             ->where('status', 'pending')
             ->latest();
 
@@ -60,12 +68,13 @@ class PendingStudentLinkController extends Controller
         }
 
         $student = User::findOrFail($request->input('student_id'));
-        if ($student->organization_id !== $pendingStudentLink->organization_id && !$this->canResolveStudentForPendingLink($pendingStudentLink, $user)) {
+        if (!$this->canResolveStudentForPendingLink($pendingStudentLink, $student, $user)) {
             abort(403, 'Student is outside the pending link organization boundary.');
         }
 
         DB::transaction(function () use ($pendingStudentLink, $student, $user, $request): void {
             RawScan::where('event_id', $pendingStudentLink->event_id)
+                ->when($pendingStudentLink->event_participation_scope_id, fn ($query, $scopeId) => $query->where('event_participation_scope_id', $scopeId))
                 ->where('qr_code_value', $pendingStudentLink->qr_code_value)
                 ->whereNull('student_id')
                 ->update(['student_id' => $student->id]);
@@ -90,7 +99,7 @@ class PendingStudentLinkController extends Controller
             ]);
         });
 
-        ResolveAttendanceJob::dispatch($pendingStudentLink->event_id, [$student->id]);
+        ResolveAttendanceJob::dispatch($pendingStudentLink->event_id, [$student->id], $pendingStudentLink->event_participation_scope_id);
 
         return response()->json([
             'success' => true,
@@ -151,54 +160,69 @@ class PendingStudentLinkController extends Controller
 
     private function applyTenantScope($query, User $user): void
     {
-        if ($user->hasRole('Super Admin (OSA)')) {
+        $scope = $this->adminScopes->forUser($user);
+
+        if (!$scope) {
+            $query->whereRaw('1 = 0');
             return;
         }
 
-        if ($user->hasRole('LSG Admin')) {
-            $userOrg = $user->organization;
-            $query->whereHas('organization', function ($orgQuery) use ($userOrg): void {
-                $orgQuery->where('college_id', $userOrg?->college_id);
+        if ($scope->isSuperAdmin()) {
+            return;
+        }
+
+        if ($scope->isUsgAdmin()) {
+            $query->whereHas('organization', function ($orgQuery) use ($scope): void {
+                $orgQuery->where('type', 'usg')->orWhere('id', $scope->organizationId);
             });
             return;
         }
 
-        $query->where('organization_id', $user->organization_id);
+        if ($scope->isLsgAdmin()) {
+            $query->whereHas('organization', function ($orgQuery) use ($scope): void {
+                $orgQuery->where('college_id', $scope->collegeId);
+            });
+            return;
+        }
+
+        $query->where('organization_id', $scope->organizationId);
     }
 
     private function authorizeTenantAccess(PendingStudentLink $pendingStudentLink, User $user): void
     {
-        if ($user->hasRole('Super Admin (OSA)')) {
+        $scope = $this->adminScopes->forUser($user);
+
+        if ($pendingStudentLink->participationScope && $this->participationScopes->canViewScope($user, $pendingStudentLink->participationScope)) {
             return;
         }
 
         $targetOrg = Organization::findOrFail($pendingStudentLink->organization_id);
-        $userOrg = $user->organization;
 
-        if ($user->hasRole('LSG Admin')) {
-            if (!$userOrg || $userOrg->college_id !== $targetOrg->college_id) {
-                abort(403, 'Access denied. LSG Admin is restricted to their college boundary.');
-            }
+        if ($scope?->canAccessOrganization($targetOrg)) {
             return;
         }
 
-        if ($pendingStudentLink->organization_id !== $user->organization_id) {
-            abort(403, 'Access denied. Restricted to your assigned organization boundary.');
-        }
+        abort(403, $scope?->isLsgAdmin()
+            ? 'Access denied. LSG Admin is restricted to their college boundary.'
+            : 'Access denied. Restricted to your assigned organization boundary.');
     }
 
-    private function canResolveStudentForPendingLink(PendingStudentLink $pendingStudentLink, User $user): bool
+    private function canResolveStudentForPendingLink(PendingStudentLink $pendingStudentLink, User $student, User $user): bool
     {
-        if ($user->hasRole('Super Admin (OSA)')) {
+        if ($pendingStudentLink->participationScope && $this->participationScopes->userBelongsToScope($student, $pendingStudentLink->participationScope)) {
             return true;
         }
 
-        if (!$user->hasRole('ARO Admin')) {
-            return false;
+        if (!$pendingStudentLink->event_participation_scope_id && $student->organization_id === $pendingStudentLink->organization_id) {
+            return true;
         }
 
-        $pendingOrg = $pendingStudentLink->organization ?: Organization::find($pendingStudentLink->organization_id);
+        $scope = $this->adminScopes->forUser($user);
 
-        return $pendingOrg?->type === 'aro' && $pendingOrg->id === $user->organization_id;
+        if ($scope?->isSuperAdmin()) {
+            return true;
+        }
+
+        return false;
     }
 }

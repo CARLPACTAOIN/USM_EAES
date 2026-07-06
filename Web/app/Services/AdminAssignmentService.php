@@ -18,7 +18,9 @@ class AdminAssignmentService
         'USG Admin',
         'LSG Admin',
         'Society Admin',
-        'ARO Admin',
+        'Academic Unit Admin',
+        'Office Event Admin',
+        'HR Admin',
     ];
 
     public function approveApplication(AdminApplication $application, User $approver, ?string $remarks = null): AdminAssignment
@@ -229,12 +231,7 @@ class AdminAssignmentService
             }
         }
 
-        $primary = $activeAssignments->firstWhere('is_primary_admin', true) ?: $activeAssignments->first();
-
-        $user->forceFill([
-            'organization_id' => $primary?->organization_id,
-            'college_id' => $primary?->college_id,
-        ])->save();
+        $user->unsetRelation('roles');
     }
 
     private function resolveOrganizationForApplication(AdminApplication $application): ?Organization
@@ -266,7 +263,6 @@ class AdminAssignmentService
 
         return match ($application->request_type) {
             'existing_usg' => Organization::where('type', 'usg')->first(),
-            'existing_aro' => Organization::where('type', 'aro')->first(),
             'existing_lsg' => Organization::where('type', 'lsg')->where('college_id', $application->college_id)->first(),
             default => null,
         };

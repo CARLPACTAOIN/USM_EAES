@@ -32,6 +32,7 @@ class User extends Authenticatable
         'student_id_number',
         'qr_code_value',
         'program_code',
+        'user_type',
     ];
 
     /**
@@ -78,6 +79,36 @@ class User extends Authenticatable
     public function activeAdminAssignments()
     {
         return $this->adminAssignments()->where('status', AdminAssignment::STATUS_ACTIVE);
+    }
+
+    public function scannerAssignments()
+    {
+        return $this->hasMany(EventScannerAssignment::class, 'scanner_user_id');
+    }
+
+    public function organizationMemberships()
+    {
+        return $this->hasMany(OrganizationMembership::class);
+    }
+
+    public function activeOrganizationMemberships()
+    {
+        return $this->organizationMemberships()->where('status', OrganizationMembership::STATUS_ACTIVE);
+    }
+
+    public function employeeProfile()
+    {
+        return $this->hasOne(EmployeeProfile::class);
+    }
+
+    public function employeeRosterEntry()
+    {
+        return $this->hasOne(EmployeeRosterEntry::class);
+    }
+
+    public function issuedScannerAssignments()
+    {
+        return $this->hasMany(EventScannerAssignment::class, 'assigned_by_user_id');
     }
 
     public function college()

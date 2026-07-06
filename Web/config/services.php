@@ -39,6 +39,10 @@ return [
         'client_id' => env('GOOGLE_CLIENT_ID'),
         'client_secret' => env('GOOGLE_CLIENT_SECRET'),
         'redirect' => env('GOOGLE_REDIRECT_URI'),
+        'mobile_client_ids' => array_filter(array_map(
+            'trim',
+            explode(',', (string) env('GOOGLE_MOBILE_CLIENT_IDS', ''))
+        )),
     ],
 
     'gemini' => [
@@ -64,6 +68,9 @@ return [
         'sync_batch_size' => (int) env('EAES_SYNC_BATCH_SIZE', 200),
         'sync_chunk_size' => (int) env('EAES_SYNC_CHUNK_SIZE', 200),
         'evaluation_window_hours' => (int) env('EAES_EVALUATION_WINDOW_HOURS', 24),
+        'scan_early_checkin_buffer_min' => (int) env('EAES_SCAN_EARLY_CHECKIN_BUFFER_MIN', 0),
+        'checkout_grace_period_min' => (int) env('EAES_CHECKOUT_GRACE_PERIOD_MIN', 0),
+        'sync_grace_period_hours' => (int) env('EAES_SYNC_GRACE_PERIOD_HOURS', 72),
         'frontend_url' => env('FRONTEND_URL', 'http://localhost:5173'),
         'mobile_deep_link_scheme' => env('EAES_MOBILE_DEEP_LINK_SCHEME', 'eaes'),
         'force_https' => (bool) env('EAES_FORCE_HTTPS', false),

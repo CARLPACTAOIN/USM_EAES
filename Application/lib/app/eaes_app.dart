@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../config/app_config.dart';
-import '../features/scanner/presentation/scanner_home_screen.dart';
+import '../features/auth/presentation/auth_gate.dart';
 
 class EaesApp extends StatelessWidget {
   const EaesApp({super.key});
@@ -23,8 +23,8 @@ class EaesApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: _buildTheme(Brightness.light),
       darkTheme: _buildTheme(Brightness.dark),
-      themeMode: ThemeMode.system,
-      home: const ScannerHomeScreen(),
+      themeMode: ThemeMode.light,
+      home: const AuthGate(),
     );
   }
 
@@ -79,8 +79,9 @@ class EaesApp extends StatelessWidget {
       bottomNavigationBarTheme: BottomNavigationBarThemeData(
         backgroundColor: isDark ? const Color(0xFF111827) : Colors.white,
         selectedItemColor: _brandGreen,
-        unselectedItemColor:
-            isDark ? const Color(0xFF6B7280) : const Color(0xFF9CA3AF),
+        unselectedItemColor: isDark
+            ? const Color(0xFF6B7280)
+            : const Color(0xFF9CA3AF),
         type: BottomNavigationBarType.fixed,
         elevation: 12,
         selectedLabelStyle: const TextStyle(
@@ -150,30 +151,27 @@ class EaesApp extends StatelessWidget {
       // Input decoration
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: isDark
-            ? const Color(0xFF1E293B)
-            : const Color(0xFFF1F5F9),
+        fillColor: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
         border: OutlineInputBorder(
           borderRadius: borderRadius8,
           borderSide: BorderSide(
-            color: isDark
-                ? const Color(0xFF334155)
-                : const Color(0xFFCBD5E1),
+            color: isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1),
           ),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: borderRadius8,
           borderSide: BorderSide(
-            color: isDark
-                ? const Color(0xFF334155)
-                : const Color(0xFFCBD5E1),
+            color: isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1),
           ),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: borderRadius8,
           borderSide: const BorderSide(color: _brandGreen, width: 2),
         ),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 14,
+        ),
         labelStyle: TextStyle(
           fontFamily: 'Inter',
           fontSize: 14,
@@ -188,9 +186,7 @@ class EaesApp extends StatelessWidget {
 
       // Divider
       dividerTheme: DividerThemeData(
-        color: isDark
-            ? const Color(0xFF1E293B)
-            : const Color(0xFFE2E8F0),
+        color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0),
         thickness: 1,
         space: 1,
       ),

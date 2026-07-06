@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use App\Models\Event;
 use App\Models\Organization;
+use App\Services\AdminScopeService;
 use App\Support\ScannerAccess;
 
 class TenantScopeMiddleware
@@ -33,27 +34,22 @@ class TenantScopeMiddleware
             abort(403, 'Unauthorized action.');
         }
 
-        // 2. Tenancy Boundary Check
-        // Super Admin (OSA) has universal access, skip tenancy checks
-        if (ScannerAccess::hasRole($user, 'Super Admin (OSA)')) {
-            return $next($request);
-        }
-
         // Resolve organization constraints from request parameters (event_id, organization_id, etc.)
         $targetOrganizationId = null;
+        $targetEvent = null;
 
         if ($request->has('event_id')) {
-            $event = Event::find($request->input('event_id'));
-            if ($event) {
-                $targetOrganizationId = $event->organization_id;
+            $targetEvent = Event::find($request->input('event_id'));
+            if ($targetEvent) {
+                $targetOrganizationId = $targetEvent->organization_id;
             }
         } elseif ($request->route('event')) {
-            $event = $request->route('event');
-            if (is_string($event)) {
-                $event = Event::find($event);
+            $targetEvent = $request->route('event');
+            if (is_string($targetEvent)) {
+                $targetEvent = Event::find($targetEvent);
             }
-            if ($event instanceof Event) {
-                $targetOrganizationId = $event->organization_id;
+            if ($targetEvent instanceof Event) {
+                $targetOrganizationId = $targetEvent->organization_id;
             }
         }
 
@@ -76,26 +72,21 @@ class TenantScopeMiddleware
                 abort(404, 'Target organization not found.');
             }
 
-            $userOrg = Organization::find($user->organization_id);
-            if (!$userOrg && !$user->hasRole('Super Admin (OSA)')) {
-                abort(403, 'User does not belong to any organization.');
+            if ($permission === 'submit-evaluations') {
+                return $next($request);
             }
 
-            if (ScannerAccess::hasRole($user, 'USG Admin')) {
-                // USG Admin can access USG events or university-wide scope
-                if ($targetOrg->type !== 'usg' && $targetOrg->id !== $user->organization_id) {
-                    abort(403, 'Access denied. USG Admin is restricted to university-wide events.');
-                }
-            } elseif (ScannerAccess::hasRole($user, 'LSG Admin')) {
-                // LSG Admin can access constituent societies inside their College boundary
-                if ($targetOrg->college_id !== $userOrg->college_id) {
-                    abort(403, 'Access denied. LSG Admin is restricted to their constituent college boundary.');
-                }
-            } elseif (ScannerAccess::hasRole($user, 'ARO Admin') || ScannerAccess::hasRole($user, 'Society Admin') || ScannerAccess::hasRole($user, 'Scanner')) {
-                // Strictly restricted to their own assigned organization
-                if ($targetOrg->id !== $user->organization_id) {
-                    abort(403, 'Access denied. Restricted to your assigned organization boundary.');
-                }
+            if ($targetEvent instanceof Event && ScannerAccess::hasScannerSessionForEvent($user, $targetEvent, $user->currentAccessToken())) {
+                return $next($request);
+            }
+
+            if ($targetEvent instanceof Event && ScannerAccess::canAccessEvent($user, $targetEvent)) {
+                return $next($request);
+            }
+
+            $scope = app(AdminScopeService::class)->forUser($user);
+            if (!$scope || !$scope->canAccessOrganization($targetOrg)) {
+                abort(403, 'Access denied. Restricted to your assigned admin boundary.');
             }
         }
 

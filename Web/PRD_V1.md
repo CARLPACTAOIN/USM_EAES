@@ -42,7 +42,7 @@ The system implements Role-Based Access Control using the **Spatie Laravel-Permi
 
 * Permissions are defined as granular verbs (e.g., create-events, approve-proposals, force-validate-attendance).  
 * Roles are assigned to users and represent groups of permissions (e.g., osa\_admin, society\_admin, student).  
-* To accommodate the multi-tenant hierarchical structure of USM (Universities ![][image1] Colleges ![][image1] Societies ![][image1] Programs), permissions are strictly scoped in database queries by joining the user's organization\_id or college\_id.
+* To accommodate the multi-tenant hierarchical structure of USM (Universities ![][image1] Colleges ![][image1] Societies ![][image1] Programs), administrative permissions are strictly scoped in database queries from the user's active `admin_assignments` record, not from the student's profile membership columns.
 
 // Conceptual Laravel Spatie Middleware Check with Tenant Scope  
 public function handle($request, Closure $next, $permission)  
@@ -72,9 +72,11 @@ Using Spatie's conventions, roles are seeded with the following permissions:
 | :---- | :---- | :---- |
 | **Super Admin (OSA)** | Universal (across all colleges and societies) | manage-organizations, approve-proposals, view-all-analytics, force-validate-any, manage-global-settings |
 | **USG Admin** | University-wide events only | create-proposals, assign-scanners-own, view-own-analytics |
-| **ARO Admin** | University-level ARO events, including Recognition and Graduation | create-proposals, assign-scanners-own, view-own-analytics |
-| **LSG Admin** | Constituent societies inside their College boundary | create-proposals, view-college-analytics, view-constituent-data |
-| **Society Admin** | Strictly restricted to their own specific Society | create-proposals, assign-scanners-own, set-late-threshold, view-own-analytics, force-validate-own |
+| **LSG Admin** | Constituent societies inside their College boundary | create-proposals, assign-scanners-own, view-college-analytics, view-constituent-data |
+| **Society Admin** | Strictly restricted to their own Society or recognized non-academic organization | create-proposals, assign-scanners-own, set-late-threshold, view-own-analytics, force-validate-own |
+| **Academic Unit Admin** | Academic unit/college unit event organizer scope | create-proposals, invite-participant-scopes, assign-scanners-own, view-college-analytics, view-constituent-data, force-validate-own |
+| **Office Event Admin** | Administrative office event organizer scope | create-proposals, invite-participant-scopes, assign-scanners-own, view-own-analytics, force-validate-own |
+| **HR Admin** | HR-domain faculty/staff attendance scope | create-hr-events, manage-faculty-roster, assign-hr-scanners, view-hr-analytics, export-hr-attendance |
 | **Scanner** | Temporarily locked to a single assigned event session | scan-qr-codes, manual-entry-id |
 | **Faculty** | Own personal profiles | view-own-history, submit-evaluations |
 | **Student** | Own personal profile and personal logs | register-profile, view-own-history, submit-evaluations |
@@ -117,7 +119,8 @@ To allow the scanner to display student details (Name, Course) without an active
 * **Data Footprint:** On average, a hydrated record is approximately ![][image2].  
   ![][image3]  
   This lightweight ![][image4] payload is compressed via gzip on transfer, allowing sync to complete in under 3 seconds over standard local Wi-Fi.  
-* **Sync Triggers:** The scanner app automatically downloads a fresh student roster when:  
+* **Scope-aware hydration:** The scanner app hydrates only the roster attached to the activated `event_participation_scope_id`. Society scanners hydrate their society membership, LSG/USG central scanners hydrate only approved college/university participant scopes allowed by `capture_mode`, non-academic organization scanners hydrate active `organization_memberships`, and HR scanners hydrate verified faculty/staff roster entries only.
+* **Sync Triggers:** The scanner app automatically downloads a fresh participant roster when:  
   1. The scanner successfully logs into an event session while online.  
   2. The user manually taps "Sync Student Directory" while an active internet connection is detected.
 
@@ -164,21 +167,23 @@ DB::transaction(function () use ($eventId, $studentIds) {
 
 * **Feature 1.1 \- Google OAuth Registration & Login:** Enforced through Laravel Socialite. On Callback, the system checks if the email domain matches the institutional @usm.edu.ph constraint. On success, Laravel Sanctum issues an API bearer token.  
 * **Feature 1.2 \- Student Profile Hydration & QR Registration:** Upon initial registration, students must fill out their hierarchical profile (College ![][image1] Society ![][image1] Program) and parse their physical ID QR code using their webcam.  
-* **Feature 1.3 \- Admin Applications & Assignment Governance:** Students use one institutional account and may apply for USG, ARO, LSG, or Society Admin authority. OSA reviews applications, may approve new Society registrations, and creates term-bound `admin_assignments`. `admin_assignments` are the source of truth for administrative authority; Spatie roles plus `users.organization_id` / `users.college_id` are compatibility projections synchronized only by `AdminAssignmentService`.
-* **Onboarding Master Data Rule:** Colleges and Programs are official institutional master data seeded before deployment and maintained only by OSA/Super Admin. USG, ARO, and per-college LSG shells are seeded governance organizations. Society records may be requested by students/officers but become active only after OSA approval.
+* **Feature 1.3 \- OSA Admin Assignment Governance:** OSA/Super Admin directly manages official organizations and term-bound `admin_assignments`. Students cannot apply for admin roles or request/register organizations. OSA searches existing student/officer/faculty/staff accounts or creates non-student staff accounts, then assigns USG, LSG, Society, Academic Unit, Office Event, HR, or Super Admin authority with academic-year term boundaries. `admin_assignments` are the source of truth for administrative authority and admin tenant scope. Spatie roles are synchronized as the permission projection only; `users.organization_id`, `users.college_id`, and `users.program_id` remain student profile membership fields for portal, attendance, evaluation, scanner eligibility, rosters, and student-affairs analytics denominators. OSA/Super Admin accounts are staff/admin-only accounts and are not required to carry student profile membership. The legacy `admin_applications` table is deprecated and no longer used by routes or UI.
+* **Onboarding Separation:** Institutional Google login still requires `@usm.edu.ph`. Accounts with `s.` email prefixes default to `user_type=student` and must complete student onboarding. Non-`s.` institutional accounts default to `faculty_or_staff_pending`; HR roster verification or imported employee records are the source of truth before faculty/staff attendance scanning is trusted.
+* **Onboarding Master Data Rule:** Colleges and Programs are official institutional master data seeded before deployment and maintained only by OSA/Super Admin. USG and per-college LSG shells are seeded governance organizations. Society organizations are created and maintained by OSA only.
 
 ### **Epic 2: Event Proposal & Permit System (PPA)**
 
-* **Feature 2.1 \- Digital PPA Submission:** Society, USG, LSG, and ARO Admins construct digital proposals featuring all fields from the official paper forms, including budget allocations, location classifications (on-campus vs. off-campus), and target demographics.  
+* **Feature 2.1 \- Digital PPA Submission:** Society, USG, LSG, non-academic organization, academic unit, and administrative office admins construct digital proposals featuring all fields from the official paper forms, including budget allocations, location classifications (on-campus vs. off-campus), and target demographics.  
 * **Feature 2.2 \- OSA Proposal Review Pipeline:** A central dashboard allowing OSA Directors to approve or reject PPAs. The scanner interface for any event remains locked until the proposal status transitions to Approved.  
-* **Feature 2.3 \- Multi-Organization Event Linking:** Allows USG/LSG/ARO to list a parent event and link sub-organizational PPAs as participant proposals under a master permit.
-* **Organizer Rule \- Recognition and Graduation:** Recognition and Graduation events are ARO-owned university-level events. They should be created under an ARO organization (`organizations.type = "aro"`) rather than under a Society, LSG, or USG organizer unless an approved deviation explicitly says otherwise. Their attendee audience can span multiple colleges and societies, so organizer ownership must not be treated as the student-membership boundary.
+* **Feature 2.3 \- Multi-Organization Event Linking and Participant PPAs:** Allows USG/LSG/academic-unit/office organizers to list a parent event and invite sub-organizational PPAs as participant scopes under a master permit. Each `event_participation_scope` records organizer vs participant role, participant type, PPA status, capture mode, and roll-up analytics eligibility. The Events dashboard separates **Organized Events** from **Participating Events** so invited organizations can find submitted parent events, submit or resubmit only their own participant PPA, and manage scanners only for their own approved scope. Organizer drafts remain private until the parent proposal is submitted. Participant scanners cannot be assigned, activated, hydrated, synced, or counted as official analytics participants until their participant PPA is approved or marked not required.
+* **Feature 2.4 \- Event Domains:** `events.event_domain` separates student-affairs, HR, academic-records, and academic-unit contexts. HR events use faculty/staff attendance rosters, do not require OSA PPA approval, and are managed by HR Admins through HR-domain permissions.
+* **Organizer Rule \- Recognition and Graduation:** Recognition and Graduation events are no longer modeled as a separate records-office admin role or organization. Until a dedicated staff-office module exists, OSA assigns these events to an active approved organizer through the normal proposal workflow, and university-wide audience calculations remain based on event audience rules rather than student membership in the organizer.
 
 ### **Epic 3: Mobile Companion App (Scanner Mode)**
 
-* **Feature 3.1 \- Deep-Linked Scanner Sessions:** Society officers can be designated as scanners. Tapping their unique tokenized link launches the Flutter scanner app and locks them into an event-scoped scanning interface.  
+* **Feature 3.1 \- Account-Authenticated, Event-Scoped Scanner Sessions:** Scanner access is account-based and assignment-scoped. Admins with scanner-assignment authority assign eligible institutional student/officer accounts to approved events from their authorized organization or college scope. The Flutter scanner app authenticates the user with Google OAuth, lists only active `event_scanner_assignments` for that account, and activates a selected assignment. Activation is the only user-facing scanner session creation path and internally creates a device-bound `scanner_sessions` token for roster hydration, offline capture, and sync. Normal student login alone does not grant scanner hydrate/sync access; only the activated scanner session token can call scanner validation, hydrate, and sync endpoints. `scanner_sessions` remain event-scoped, revocable, expiring, auditable, and device-bound as the runtime session layer, not as shareable dashboard-generated scanner links.
 * **Feature 3.2 \- Dual-Mode Attendance Interface:** Allows toggle transitions between Time-In and Time-Out states, accompanied by audio and visual success/failure indicator cues.  
-* **Feature 3.3 \- Offline SQLite Storage & Sync Engine:** Executes background synchronizations using the client connectivity listeners and sync throttling models detailed in Section 3\.
+* **Feature 3.3 \- Offline SQLite Storage & Sync Engine:** Executes background synchronizations using the client connectivity listeners and sync throttling models detailed in Section 3\. The mobile app blocks new scan capture outside the allowed event scan window but continues syncing previously captured valid offline scans until the sync grace period closes.
 
 ### **Epic 4: Attendance Processing Engine**
 
@@ -190,6 +195,7 @@ DB::transaction(function () use ($eventId, $studentIds) {
 
 * **Feature 5.1 \- Digital Activity Evaluation Form:** Houses the official USM-OSA digital evaluation format containing Likert scale categories and open comment text fields.  
 * **Feature 5.2 \- Evaluation Gate Mechanism:** Keeps a student's AttendanceRecord.valid status set to false until they submit their evaluation form. The submission window closes exactly 24 hours after the event (or final day) concludes.
+* **Feature 5.3 \- Event Lifecycle Automation:** Proposal approval remains separate from event runtime state. Approved events use `events.lifecycle_phase` with `scheduled`, `active`, `ended`, `evaluation_open`, `evaluation_closed`, `processing`, and `completed` phases computed from `event_days`, the 24-hour evaluation window, unresolved scans/pending links, sentiment processing, and scanner-session closure.
 
 ### **Epic 6: Analytics & Compiled Export Module**
 
@@ -278,7 +284,7 @@ JSON Response Schema:
 ### **6.3 NLP Query Assistant (Admin Dashboard Chat)**
 
 * **Implementation Pattern:** System uses a structured **Text-to-SQL / ORM Query Builder mapping pattern**. The LLM reads the natural language question, processes the user's Laravel Spatie role scope, and outputs structured query parameters.  
-* **Safety & Security Boundary:** To prevent prompt injection and unauthorized cross-tenant access, the database schema is mapped via read-only SQL views, and the backend dynamically appends the Spatie-resolved organization\_id or college\_id as hard parameters to the query wrapper before execution.
+* **Safety & Security Boundary:** To prevent prompt injection and unauthorized cross-tenant access, the database schema is mapped via read-only SQL views, and the backend dynamically appends active `admin_assignments` organization or college scope as hard parameters to the query wrapper before execution.
 
 ## **7\. Database Entity Schema Blueprint (PostgreSQL 16\)**
 
@@ -317,7 +323,7 @@ JSON Response Schema:
 * college\_id (UUID, Foreign Key, Nullable for university-wide orgs)  
 * name (String)  
 * acronym (String, e.g., "PSITS")  
-* type (Enum: "society", "usg", "lsg", "aro")
+* type (Enum: "society", "usg", "lsg")
 * logo\_path (String, Nullable)  
 * status (String, e.g., "active")
 
@@ -340,15 +346,32 @@ JSON Response Schema:
 * email (String, Unique)  
 * name (String)  
 * role (String, handled via Spatie roles relationship)  
-* organization\_id (UUID, Foreign Key, Nullable)  
+* organization\_id (UUID, Foreign Key, Nullable; student profile membership, not admin tenant scope)  
+* user\_type (Enum/String: student, faculty, staff, faculty\_or\_staff\_pending)  
 * student\_id\_number (String, Unique, Nullable)  
 * qr\_code\_value (String, Unique, Nullable)
+
+#### **organization\_memberships**
+
+* id (UUID, Primary Key)  
+* user\_id (UUID, Foreign Key to users)  
+* organization\_id (UUID, Foreign Key to organizations)  
+* college\_id / program\_id (UUID, Nullable)  
+* membership\_type (primary\_academic, secondary\_org, non\_academic, officer)  
+* status (active, inactive, pending, rejected)  
+* academic\_year, source, verified\_by, verified\_at  
+* timestamps
+
+#### **employee\_profiles / employee\_roster\_entries**
+
+* Employee profile and imported roster tables store faculty/staff `employee_id`, email, office/department, college, position title, verification status, and QR code value where available.  
+* HR roster records are the verification source for HR-domain scanner hydration and sync validation.
 
 #### **admin\_applications**
 
 * id (UUID, Primary Key)  
 * applicant\_id (UUID, Foreign Key to users)  
-* request\_type (String: existing\_usg, existing\_aro, existing\_lsg, existing\_society, new\_society)  
+* request\_type (String: existing\_usg, existing\_lsg, existing\_society, new\_society)  
 * role\_name (String)  
 * organization\_id (UUID, Nullable)  
 * college\_id (UUID, Nullable)  
@@ -376,6 +399,8 @@ JSON Response Schema:
 * organization\_id (UUID, Foreign Key)  
 * title (String)  
 * status (Enum: "draft", "submitted", "under\_review", "approved", "rejected", "completed")  
+* lifecycle\_phase (Enum: "scheduled", "active", "ended", "evaluation\_open", "evaluation\_closed", "processing", "completed")  
+* event\_domain (Enum/String: student\_affairs, hr, academic\_records, academic\_unit)  
 * start\_date (Date)  
 * end\_date (Date)  
 * society\_late\_threshold\_min (Integer, Default 15\)  
@@ -392,14 +417,71 @@ JSON Response Schema:
 * start\_time (Time)  
 * end\_time (Time)
 
+#### **event\_participation\_scopes**
+
+* id (UUID, Primary Key)  
+* event\_id (UUID, Foreign Key to events)  
+* parent\_scope\_id (UUID, Nullable self-reference)  
+* linked\_event\_id (UUID, Nullable)  
+* participation\_role (organizer, participant)  
+* participant\_type (college, organization, society, program, non\_academic\_org, academic\_unit, administrative\_office, custom\_roster, hr\_unit)  
+* organization\_id / college\_id / program\_id (UUID, Nullable)  
+* participant\_name\_snapshot  
+* ppa\_required, ppa\_status, ppa\_softcopy\_path, hardcopy\_submitted, org\_head\_signed, adviser\_signed  
+* submitted\_by, submitted\_at, reviewed\_by, reviewed\_at, review\_remarks, approved\_at  
+* capture\_mode (self\_scanning, parent\_scanning, delegated\_scanning, central\_gate)  
+* delegated\_to\_organization\_id (UUID, Nullable)  
+* analytics\_rollup\_enabled, status, timestamps
+
+#### **scanner\_sessions**
+
+* id (UUID, Primary Key)  
+* event\_id (UUID, Foreign Key)  
+* assignment\_id (UUID, Foreign Key to event\_scanner\_assignments, Nullable for legacy deep links)  
+* event\_participation\_scope\_id (UUID, Foreign Key to event\_participation\_scopes, Nullable for legacy sessions)  
+* scanner\_user\_id (UUID, Foreign Key to users, Nullable)  
+* token\_id (String reference to Sanctum token)  
+* issued\_by (UUID, Foreign Key to users)  
+* label (String, Nullable)  
+* device\_id (String, Nullable)  
+* device\_fingerprint\_hash (String, Nullable)  
+* status (Enum: "active", "expired", "revoked")  
+* issued\_at, activated\_at, expires\_at, revoked\_at, last\_seen\_at (DateTime TZ)  
+* revoked\_by (UUID, Nullable)  
+* revocation\_reason (Text, Nullable)
+
+#### **event\_scanner\_assignments**
+
+* id (UUID, Primary Key)  
+* event\_id (UUID, Foreign Key)  
+* event\_participation\_scope\_id (UUID, Foreign Key to event\_participation\_scopes)  
+* audience\_scope\_type (String, Nullable)  
+* scanner\_user\_id (UUID, Foreign Key to users)  
+* assigned\_by\_user\_id (UUID, Foreign Key to users)  
+* label (String, Nullable)  
+* status (Enum/String: "active", "revoked", "expired")  
+* revoked\_at, revoked\_by\_user\_id, revocation\_reason (Nullable)  
+* expires\_at (DateTime TZ, Nullable; normally aligned to sync grace)  
+* max\_devices (Integer, Default 1)  
+* notes (Text, Nullable)  
+* last\_activated\_at (DateTime TZ, Nullable)  
+* timestamps
+
 #### **raw\_scans**
 
 * id (UUID, Primary Key)  
 * event\_id (UUID, Foreign Key)  
+* event\_participation\_scope\_id (UUID, Foreign Key to event\_participation\_scopes, Nullable for legacy scans)  
 * event\_day\_id (UUID, Foreign Key, Nullable)  
+* scanner\_session\_id (UUID, Foreign Key, Nullable)  
+* scanner\_user\_id (UUID, Foreign Key, Nullable)  
+* captured\_by\_organization\_id (UUID, Nullable)  
+* captured\_by\_admin\_scope (String, Nullable)  
 * student\_id (UUID, Foreign Key)  
 * scan\_type (Enum: "time\_in", "time\_out")  
 * scanned\_at (DateTime TZ)  
+* server\_received\_at (DateTime TZ, Nullable)  
+* processed\_at (DateTime TZ, Nullable)  
 * device\_id (String)  
 * manual\_entry (Boolean, Default false)  
 * dedup\_key (String, Unique)
@@ -408,6 +490,7 @@ JSON Response Schema:
 
 * id (UUID, Primary Key)  
 * event\_id (UUID, Foreign Key)  
+* event\_participation\_scope\_id (UUID, Foreign Key to event\_participation\_scopes, Nullable for legacy records)  
 * event\_day\_id (UUID, Foreign Key, Nullable)  
 * student\_id (UUID, Foreign Key)  
 * time\_in (DateTime TZ, Nullable)  

@@ -1,27 +1,34 @@
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
-/// Full-width camera viewfinder with a scan-frame overlay.
-///
-/// Shows the live camera when [active] is true, or a placeholder when false.
-/// [scanLocked] switches the border to orange to indicate a scan is processing.
+enum ViewfinderProcessingState { idle, saving, captured, duplicate }
+
 class ScannerViewfinder extends StatelessWidget {
   const ScannerViewfinder({
     super.key,
     required this.active,
-    required this.scanLocked,
+    required this.processingState,
     required this.onDetect,
   });
 
   final bool active;
-  final bool scanLocked;
+  final ViewfinderProcessingState processingState;
   final ValueChanged<BarcodeCapture> onDetect;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final borderColor =
-        scanLocked ? Colors.orange.shade500 : const Color(0xFF1B4D3E);
+    final isSaving = processingState == ViewfinderProcessingState.saving;
+    final isCaptured = processingState == ViewfinderProcessingState.captured;
+    final isDuplicate = processingState == ViewfinderProcessingState.duplicate;
+
+    final borderColor = isSaving
+        ? Colors.orange.shade500
+        : isCaptured
+        ? const Color(0xFF16A34A)
+        : isDuplicate
+        ? Colors.amber.shade600
+        : const Color(0xFF1B4D3E);
 
     return AspectRatio(
       aspectRatio: 1,
@@ -35,20 +42,51 @@ class ScannerViewfinder extends StatelessWidget {
               ? Stack(
                   fit: StackFit.expand,
                   children: [
-                    // Live camera feed
                     MobileScanner(onDetect: onDetect),
-
-                    // Corner bracket overlay
                     IgnorePointer(
                       child: CustomPaint(
                         painter: _ScanFramePainter(
                           borderColor: borderColor,
-                          scanLocked: scanLocked,
+                          highlighted: isSaving || isCaptured || isDuplicate,
                         ),
                       ),
                     ),
-
-                    // Bottom hint banner
+                    if (isCaptured)
+                      Positioned(
+                        left: 16,
+                        right: 16,
+                        bottom: 72,
+                        child: _ProcessingCard(
+                          color: const Color(0xFF16A34A),
+                          icon: Icons.check_circle_rounded,
+                          title: 'Captured — ready for next',
+                          subtitle: 'Move the next QR into the frame.',
+                        ),
+                      ),
+                    if (isSaving)
+                      Positioned(
+                        left: 16,
+                        right: 16,
+                        bottom: 72,
+                        child: _ProcessingCard(
+                          color: Colors.orange.shade700,
+                          icon: Icons.hourglass_top_rounded,
+                          title: 'Saving scan…',
+                          showSpinner: true,
+                        ),
+                      ),
+                    if (isDuplicate)
+                      Positioned(
+                        left: 16,
+                        right: 16,
+                        bottom: 72,
+                        child: _ProcessingCard(
+                          color: Colors.amber.shade800,
+                          icon: Icons.warning_amber_rounded,
+                          title: 'Already scanned just now.',
+                          subtitle: 'Please scan the next student.',
+                        ),
+                      ),
                     Positioned(
                       left: 0,
                       right: 0,
@@ -63,7 +101,7 @@ class ScannerViewfinder extends StatelessWidget {
                             begin: Alignment.bottomCenter,
                             end: Alignment.topCenter,
                             colors: [
-                              Colors.black.withValues(alpha: 0.75),
+                              Colors.black.withValues(alpha: 0.8),
                               Colors.transparent,
                             ],
                           ),
@@ -72,20 +110,24 @@ class ScannerViewfinder extends StatelessWidget {
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
                             Icon(
-                              scanLocked
+                              isSaving
                                   ? Icons.hourglass_top_rounded
+                                  : isCaptured
+                                  ? Icons.check_circle_rounded
                                   : Icons.qr_code_scanner_rounded,
                               color: Colors.white,
                               size: 16,
                             ),
                             const SizedBox(width: 8),
                             Text(
-                              scanLocked
+                              isSaving
                                   ? 'Saving scan…'
+                                  : isCaptured
+                                  ? 'Captured — pausing briefly…'
                                   : 'Align QR code in the frame',
                               style: theme.textTheme.labelLarge?.copyWith(
                                 color: Colors.white,
-                                fontWeight: FontWeight.w500,
+                                fontWeight: FontWeight.w600,
                               ),
                             ),
                           ],
@@ -120,19 +162,92 @@ class ScannerViewfinder extends StatelessWidget {
   }
 }
 
-/// Draws four L-shaped corner brackets around the scan frame.
+class _ProcessingCard extends StatelessWidget {
+  const _ProcessingCard({
+    required this.color,
+    required this.icon,
+    required this.title,
+    this.subtitle,
+    this.showSpinner = false,
+  });
+
+  final Color color;
+  final IconData icon;
+  final String title;
+  final String? subtitle;
+  final bool showSpinner;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.25),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          if (showSpinner)
+            const SizedBox.square(
+              dimension: 22,
+              child: CircularProgressIndicator(
+                strokeWidth: 2.5,
+                color: Colors.white,
+              ),
+            )
+          else
+            Icon(icon, color: Colors.white, size: 22),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 15,
+                  ),
+                ),
+                if (subtitle != null) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle!,
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.9),
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _ScanFramePainter extends CustomPainter {
-  _ScanFramePainter({required this.borderColor, required this.scanLocked});
+  _ScanFramePainter({required this.borderColor, required this.highlighted});
 
   final Color borderColor;
-  final bool scanLocked;
+  final bool highlighted;
 
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
       ..color = borderColor
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 3.5
+      ..strokeWidth = highlighted ? 4.5 : 3.5
       ..strokeCap = StrokeCap.round;
 
     const padding = 32.0;
@@ -144,29 +259,35 @@ class _ScanFramePainter extends CustomPainter {
     final right = size.width - padding;
     final bottom = size.height - padding;
 
-    // Top-left
     canvas
       ..drawLine(Offset(left + r, top), Offset(left + cornerLen, top), paint)
       ..drawLine(Offset(left, top + r), Offset(left, top + cornerLen), paint)
-      // Top-right
+      ..drawLine(Offset(right - cornerLen, top), Offset(right - r, top), paint)
+      ..drawLine(Offset(right, top + r), Offset(right, top + cornerLen), paint)
       ..drawLine(
-          Offset(right - cornerLen, top), Offset(right - r, top), paint)
+        Offset(left + r, bottom),
+        Offset(left + cornerLen, bottom),
+        paint,
+      )
       ..drawLine(
-          Offset(right, top + r), Offset(right, top + cornerLen), paint)
-      // Bottom-left
+        Offset(left, bottom - cornerLen),
+        Offset(left, bottom - r),
+        paint,
+      )
       ..drawLine(
-          Offset(left + r, bottom), Offset(left + cornerLen, bottom), paint)
+        Offset(right - cornerLen, bottom),
+        Offset(right - r, bottom),
+        paint,
+      )
       ..drawLine(
-          Offset(left, bottom - cornerLen), Offset(left, bottom - r), paint)
-      // Bottom-right
-      ..drawLine(
-          Offset(right - cornerLen, bottom), Offset(right - r, bottom), paint)
-      ..drawLine(
-          Offset(right, bottom - cornerLen), Offset(right, bottom - r), paint);
+        Offset(right, bottom - cornerLen),
+        Offset(right, bottom - r),
+        paint,
+      );
   }
 
   @override
   bool shouldRepaint(_ScanFramePainter oldDelegate) =>
       oldDelegate.borderColor != borderColor ||
-      oldDelegate.scanLocked != scanLocked;
+      oldDelegate.highlighted != highlighted;
 }

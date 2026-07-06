@@ -15,7 +15,9 @@ class Event extends Model
         'parent_event_id',
         'title',
         'proposal_category',
-        'status', // "draft", "submitted", "under_review", "approved", "rejected", "completed"
+        'status', // Proposal workflow: "draft", "submitted", "under_review", "approved", "rejected", "completed"
+        'lifecycle_phase',
+        'event_domain',
         'start_date',
         'end_date',
         'location_type',
@@ -70,6 +72,27 @@ class Event extends Model
     public function rawScans()
     {
         return $this->hasMany(RawScan::class);
+    }
+
+    public function scannerSessions()
+    {
+        return $this->hasMany(ScannerSession::class);
+    }
+
+    public function scannerAssignments()
+    {
+        return $this->hasMany(EventScannerAssignment::class);
+    }
+
+    public function participationScopes()
+    {
+        return $this->hasMany(EventParticipationScope::class);
+    }
+
+    public function organizerParticipationScope()
+    {
+        return $this->hasOne(EventParticipationScope::class)
+            ->where('participation_role', EventParticipationScope::ROLE_ORGANIZER);
     }
 
     public function attendanceRecords()

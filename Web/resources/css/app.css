@@ -415,6 +415,491 @@ body {
     margin-top: 0.25rem;
 }
 
+/* ─── Admin Access (OSA governance) ─────────────────────── */
+.admin-access-page {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+
+.admin-access-hero {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.admin-access-hero-main {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.875rem;
+    min-width: 0;
+}
+
+.admin-access-hero-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    flex-shrink: 0;
+}
+
+.admin-access-metrics {
+    display: grid;
+    grid-template-columns: repeat(1, minmax(0, 1fr));
+    gap: 0.875rem;
+}
+
+.admin-access-metric {
+    min-height: 6rem;
+    padding: 1rem;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--color-border);
+    background: var(--color-surface);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+}
+
+.admin-access-metric-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--color-text-tertiary);
+}
+
+.admin-access-metric-value {
+    font-family: var(--font-mono);
+    font-size: 1.75rem;
+    line-height: 1;
+    letter-spacing: 0;
+    color: var(--color-text-primary);
+}
+
+.admin-access-metric-note {
+    font-size: 0.8125rem;
+    color: var(--color-text-secondary);
+}
+
+.admin-access-record-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1.5rem;
+}
+
+.admin-access-section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid var(--color-border);
+    background: var(--color-surface-raised);
+}
+
+.admin-access-record-list {
+    display: flex;
+    flex-direction: column;
+}
+
+.admin-access-record-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1.35fr) minmax(13rem, 0.85fr) auto;
+    align-items: center;
+    gap: 1rem;
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid var(--color-border);
+    background: var(--color-surface);
+}
+
+.admin-access-record-row:last-child {
+    border-bottom: 0;
+}
+
+.admin-access-record-row:hover {
+    background: color-mix(in srgb, var(--color-surface-raised) 72%, var(--color-surface));
+}
+
+.admin-access-record-main {
+    min-width: 0;
+}
+
+.admin-access-record-meta {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.375rem;
+    margin-top: 0.5rem;
+}
+
+.admin-access-record-detail {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.375rem 0.5rem;
+    font-size: 0.8125rem;
+    color: var(--color-text-secondary);
+}
+
+.admin-access-detail-label {
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--color-text-tertiary);
+}
+
+.admin-access-detail-separator {
+    width: 1px;
+    height: 0.875rem;
+    background: var(--color-border);
+}
+
+.admin-access-record-actions {
+    justify-self: end;
+}
+
+.admin-access-meta-chip {
+    display: inline-flex;
+    align-items: center;
+    height: 1.5rem;
+    padding: 0 0.5rem;
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    background: var(--color-surface-inset);
+    border: 1px solid var(--color-border);
+}
+
+.admin-access-table-card {
+    min-width: 0;
+}
+
+.admin-access-table-scroll {
+    overflow-x: auto;
+}
+
+.admin-access-table th,
+.admin-access-table td {
+    white-space: nowrap;
+}
+
+.admin-access-table td:first-child {
+    min-width: 15rem;
+}
+
+.admin-access-entity {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    min-width: 0;
+}
+
+.admin-access-entity-mark {
+    width: 2rem;
+    height: 2rem;
+    border-radius: var(--radius-md);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    font-weight: 700;
+    color: var(--color-accent);
+    background: var(--color-accent-subtle);
+    border: 1px solid color-mix(in srgb, var(--color-accent) 20%, transparent);
+}
+
+.admin-access-type-pill {
+    display: inline-flex;
+    align-items: center;
+    height: 1.5rem;
+    padding: 0 0.5rem;
+    border-radius: 9999px;
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    font-weight: 700;
+    color: var(--color-text-secondary);
+    background: var(--color-surface-inset);
+    border: 1px solid var(--color-border);
+}
+
+.admin-access-muted-line {
+    display: inline-block;
+    max-width: 13rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    vertical-align: bottom;
+}
+
+.admin-access-action-row {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.5rem;
+}
+
+.admin-access-assign {
+    overflow: hidden;
+}
+
+.admin-access-assign-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 1rem;
+    padding: 1.5rem 1.5rem 1.25rem;
+    border-bottom: 1px solid var(--color-border);
+    background: linear-gradient(180deg, var(--color-surface-raised) 0%, var(--color-surface) 100%);
+}
+
+.admin-access-assign-icon {
+    width: 2.75rem;
+    height: 2.75rem;
+    border-radius: var(--radius-lg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    background: var(--color-accent-subtle);
+    color: var(--color-accent);
+    border: 1px solid color-mix(in srgb, var(--color-accent) 20%, transparent);
+}
+
+.admin-access-zone {
+    padding: 1.25rem 1.5rem;
+    border-bottom: 1px solid var(--color-border);
+}
+
+.admin-access-zone:last-child {
+    border-bottom: none;
+}
+
+.admin-access-zone-head {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+}
+
+.admin-access-zone-step {
+    width: 1.5rem;
+    height: 1.5rem;
+    border-radius: 9999px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    font-family: var(--font-mono);
+    background: var(--color-accent-subtle);
+    color: var(--color-accent);
+    border: 1px solid color-mix(in srgb, var(--color-accent) 25%, transparent);
+}
+
+.admin-access-zone-title {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--color-text-secondary);
+}
+
+.admin-access-search-wrap {
+    position: relative;
+}
+
+.admin-access-search-input {
+    padding-left: 2.5rem;
+    min-height: 2.75rem;
+    font-size: 0.9375rem;
+}
+
+.admin-access-search-icon {
+    position: absolute;
+    inset-block: 0;
+    left: 0.875rem;
+    display: flex;
+    align-items: center;
+    pointer-events: none;
+    color: var(--color-text-tertiary);
+}
+
+.admin-access-user-chip {
+    display: flex;
+    align-items: center;
+    gap: 0.875rem;
+    padding: 0.875rem 1rem;
+    margin-top: 0.875rem;
+    border-radius: var(--radius-lg);
+    border: 1px solid color-mix(in srgb, var(--color-accent) 30%, var(--color-border));
+    background: color-mix(in srgb, var(--color-accent) 6%, var(--color-surface-raised));
+}
+
+.admin-access-user-avatar {
+    width: 2.5rem;
+    height: 2.5rem;
+    border-radius: var(--radius-md);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 0.875rem;
+    color: white;
+    background: linear-gradient(135deg, var(--color-accent), color-mix(in srgb, var(--color-accent) 70%, #6366f1));
+    flex-shrink: 0;
+}
+
+.admin-access-role-grid {
+    display: grid;
+    grid-template-columns: repeat(1, minmax(0, 1fr));
+    gap: 0.625rem;
+}
+
+@media (min-width: 640px) {
+    .admin-access-role-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+.admin-access-role-card {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    padding: 0.875rem 1rem;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--color-border);
+    background: var(--color-surface-raised);
+    cursor: pointer;
+    transition: border-color var(--duration-normal) var(--ease-out),
+                background-color var(--duration-normal) var(--ease-out),
+                box-shadow var(--duration-normal) var(--ease-out);
+    text-align: left;
+}
+
+.admin-access-role-card:hover {
+    border-color: var(--color-border-hover);
+    background: var(--color-surface);
+}
+
+.admin-access-role-card.is-active {
+    border-color: var(--color-accent);
+    background: color-mix(in srgb, var(--color-accent) 8%, var(--color-surface));
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent) 20%, transparent);
+}
+
+.admin-access-role-card:focus-within {
+    outline: 2px solid color-mix(in srgb, var(--color-accent) 45%, transparent);
+    outline-offset: 2px;
+}
+
+.admin-access-role-icon {
+    width: 2rem;
+    height: 2rem;
+    border-radius: var(--radius-md);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    background: var(--color-surface-inset);
+    color: var(--color-text-secondary);
+    transition: color var(--duration-normal) var(--ease-out),
+                background-color var(--duration-normal) var(--ease-out);
+}
+
+.admin-access-role-card.is-active .admin-access-role-icon {
+    background: var(--color-accent-subtle);
+    color: var(--color-accent);
+}
+
+.admin-access-scope-panel {
+    padding: 1rem;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--color-border);
+    background: var(--color-surface-raised);
+}
+
+.admin-access-scope-empty {
+    padding: 2rem 1rem;
+    text-align: center;
+    border-radius: var(--radius-lg);
+    border: 1px dashed var(--color-border);
+    color: var(--color-text-tertiary);
+    font-size: 0.875rem;
+}
+
+.admin-access-assign-footer {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 1rem 1.5rem 1.25rem;
+    background: var(--color-surface-raised);
+    border-top: 1px solid var(--color-border);
+}
+
+.admin-access-assign-hint {
+    font-size: 0.8125rem;
+    color: var(--color-text-tertiary);
+    max-width: 28rem;
+    line-height: 1.5;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .admin-access-role-card,
+    .admin-access-role-icon {
+        transition: none;
+    }
+}
+
+@media (min-width: 768px) {
+    .admin-access-metrics {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+}
+
+@media (min-width: 1280px) {
+    .admin-access-record-grid {
+        grid-template-columns: minmax(26rem, 0.95fr) minmax(34rem, 1.35fr);
+    }
+}
+
+@media (max-width: 767px) {
+    .admin-access-hero {
+        flex-direction: column;
+    }
+
+    .admin-access-hero-actions {
+        width: 100%;
+    }
+
+    .admin-access-hero-actions .btn {
+        flex: 1 1 10rem;
+    }
+
+    .admin-access-record-row {
+        grid-template-columns: minmax(0, 1fr);
+        align-items: start;
+    }
+
+    .admin-access-record-actions {
+        justify-self: stretch;
+    }
+
+    .admin-access-action-row {
+        width: 100%;
+    }
+
+    .admin-access-action-row form,
+    .admin-access-action-row .btn {
+        flex: 1 1 0;
+    }
+}
+
 /* ─── Sidebar Navigation ────────────────────────────────── */
 .sidebar {
     background-color: var(--color-sidebar);

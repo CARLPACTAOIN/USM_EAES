@@ -7,13 +7,19 @@ use App\Exports\EventEvaluationExport;
 use App\Http\Controllers\Controller;
 use App\Models\Event;
 use App\Models\User;
+use App\Services\AdminScopeService;
 use App\Support\EventExportData;
+use App\Support\EventTenantScope;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
 use Maatwebsite\Excel\Facades\Excel;
 
 class EventExportController extends Controller
 {
+    public function __construct(private readonly AdminScopeService $adminScopes)
+    {
+    }
+
     public function attendancePdf(Request $request, Event $event)
     {
         $this->authorizeEventAccess($event, $request->user());
@@ -62,7 +68,13 @@ class EventExportController extends Controller
 
     private function authorizeEventAccess(Event $event, User $user): void
     {
-        if ($user->hasRole('Super Admin (OSA)')) {
+        $scope = $this->adminScopes->forUser($user);
+
+        if (!$scope) {
+            abort(403, 'Access denied. No active admin assignment found.');
+        }
+
+        if ($scope->isSuperAdmin()) {
             if ($event->status === 'draft') {
                 abort(403, 'Draft proposals are visible only to their organizers until submitted.');
             }
@@ -70,19 +82,6 @@ class EventExportController extends Controller
             return;
         }
 
-        $event->loadMissing('organization');
-        $user->loadMissing('organization');
-
-        if ($user->hasRole('LSG Admin')) {
-            if (!$user->organization || !$event->organization || $user->organization->college_id !== $event->organization->college_id) {
-                abort(403, 'Access denied. LSG Admin restricted to college boundary.');
-            }
-
-            return;
-        }
-
-        if ($event->organization_id !== $user->organization_id) {
-            abort(403, 'Access denied. Restricted to your organization boundary.');
-        }
+        EventTenantScope::authorize($event, $user);
     }
 }

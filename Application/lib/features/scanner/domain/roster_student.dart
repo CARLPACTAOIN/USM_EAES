@@ -4,12 +4,14 @@ class RosterStudent {
     required this.qrCodeValue,
     required this.name,
     required this.programCode,
+    this.studentIdNumber,
   });
 
   final String studentId;
   final String qrCodeValue;
   final String name;
   final String? programCode;
+  final String? studentIdNumber;
 
   factory RosterStudent.fromJson(Map<String, dynamic> json) {
     return RosterStudent(
@@ -17,6 +19,7 @@ class RosterStudent {
       qrCodeValue: json['qr_code_value'].toString(),
       name: json['name'].toString(),
       programCode: json['program_code']?.toString(),
+      studentIdNumber: json['student_id_number']?.toString(),
     );
   }
 
@@ -26,6 +29,7 @@ class RosterStudent {
       qrCodeValue: row['qr_code_value'] as String,
       name: row['name'] as String,
       programCode: row['program_code'] as String?,
+      studentIdNumber: row['student_id_number'] as String?,
     );
   }
 
@@ -35,6 +39,7 @@ class RosterStudent {
       'qr_code_value': qrCodeValue,
       'name': name,
       'program_code': programCode,
+      'student_id_number': studentIdNumber,
       'updated_at': DateTime.now().toUtc().toIso8601String(),
     };
   }

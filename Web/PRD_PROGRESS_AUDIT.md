@@ -2,7 +2,7 @@
 
 **Branch / snapshot:** `main` (local)  
 **PRD source:** `PRD_V1.md` (v2.0 content, filename `PRD_V1.md`)  
-**Last reviewed:** 2026-06-29  
+**Last reviewed:** 2026-07-03  
 **Backend path:** `Web/` (Laravel 12 backend with UUID schemas)
 
 > This file tracks implementation status only. It does not override `PRD_V1.md`.
@@ -41,9 +41,10 @@
 | Item | Status | Evidence / Notes |
 |------|--------|------------------|
 | Scope: evaluation-focused (no digital semestral accomplishment report) | N/A | Confirmed in PRD §1.2 |
-| PPA digitization | Done | Web dashboard and APIs capture proposal metadata, official PPA softcopy upload, hardcopy/signature status, submit/review/approve/reject, and scanner links |
+| PPA digitization | Done | Web dashboard and APIs capture proposal metadata, official PPA softcopy upload, hardcopy/signature status, submit/review/approve/reject, participant-scope PPAs, and account-based scoped scanner assignments |
 | QR attendance + evaluation gate | Done | Sync controllers, EILO background job, pending QR dashboard, and student evaluation gate verified |
-| Offline scanner + sync | Done | Flutter scanner has deep-link session parsing, mode switching, SQLite repository, camera/manual capture UI, API sync client, controller tests, and backend dashboard-link token coverage; Flutter format/analyze/test verified on 2026-06-26 |
+| Offline scanner + sync | Done | Flutter scanner has Google mobile login, assigned-event listing/activation, participation-scope display, mode switching, SQLite repository, camera/manual capture UI, scope-stamped offline scans, API sync client, scanner-session persistence, controller tests, scanner-session phase indicators, and assignment-activation token coverage |
+| Event lifecycle + scanner sessions | Done | `events.lifecycle_phase`, `events.event_domain`, `event_participation_scopes`, `event_scanner_assignments`, `scanner_sessions`, assignment/scope-aware hydrate/sync guards, revocation, device binding, scan-window validation, and scheduled lifecycle updates implemented |
 | Swappable Gemini/Ollama NLP Assistant | Done | Container-bound AiServiceInterface supporting Gemini API and OpenAI-compatible Ollama Cloud (with connect & request timeouts, robust error logging, and dynamic UI branding) |
 
 ---
@@ -53,8 +54,8 @@
 | Item | Status | Evidence / Notes |
 |------|--------|------------------|
 | `spatie/laravel-permission` package | Done | Installed and customized to support UUID model_id |
-| Roles & permissions seeders (§2.2 table) | Done | `RolePermissionSeeder` maps all permissions and roles for web/api guards, including ARO Admin |
-| Tenant-scoped middleware (org/college) | Done | `TenantScopeMiddleware` intercepts routing to restrict organization boundaries, including ARO own-organization scope |
+| Roles & permissions seeders (§2.2 table) | Done | `RolePermissionSeeder` maps all active permissions and roles for web/api guards |
+| Tenant-scoped middleware (org/college) | Done | `TenantScopeMiddleware` intercepts routing to restrict organization and college boundaries |
 | User model aligned with PRD (UUID, `google_sub`, `organization_id`, etc.) | Done | `User.php` updated with UUID primary key, `HasUuids` trait, and fillables |
 
 ---
@@ -63,11 +64,11 @@
 
 | Item | Status | Evidence / Notes |
 |------|--------|------------------|
-| Roster hydration API (§3.1) | Done | Hydrate route `/events/{id}/hydrate` returns compressed student roster |
+| Roster hydration API (§3.1) | Done | Hydrate route `/events/{id}/hydrate` returns compressed roster scoped to the activated `event_participation_scope_id`, including student, multi-membership, non-academic, and HR roster paths |
 | Unresolved scan + server resolution (§3.2) | Done | `raw_scans` supports nullable `student_id`; pending QR links table and resolve/flag views with audit logging implemented |
-| Bulk sync + idempotency keys (§3.3) | Done | `/attendance/sync` API ingests logs, checks `dedup_key` duplicates, and saves scans |
-| `ResolveAttendanceJob` + queue throttling | Done | Queueable job executes lockForUpdate transaction EILO mappings |
-| Flutter offline SQLite scanner | Done | `sqflite`, `mobile_scanner`, `app_links`, `connectivity_plus`, and API client dependencies configured; local DB/sync classes, testable controller contracts, and offline/sync unit coverage verified |
+| Bulk sync + idempotency keys (§3.3) | Done | `/attendance/sync` API ingests logs, checks `dedup_key` duplicates, saves accepted in-window scans, rejects out-of-scope participants, and returns per-scan rejections for timestamps outside the event scan window |
+| `ResolveAttendanceJob` + queue throttling | Done | Queueable job executes lockForUpdate transaction EILO mappings scoped by `event_participation_scope_id` |
+| Flutter offline SQLite scanner | Done | `sqflite`, `mobile_scanner`, `connectivity_plus`, and API client dependencies configured; local DB/sync classes, global session feedback, duplicate-scan cooldown, student-ID manual entry, scope-stamped SQLite v3 offline scans, sync status panel with failed/retry states, auto-wipe after completed events, friendly error mapping, and expanded controller/widget tests verified |
 
 ---
 
@@ -78,8 +79,8 @@
 | Feature | Status | Evidence / Notes |
 |---------|--------|------------------|
 | 1.1 Google OAuth + `@usm.edu.ph` + Sanctum tokens | Done | `GoogleAuthController` redirects with account selection + USM domain hint, checks domain, clears rejected sessions, and issues web auth |
-| 1.2 Student profile + QR registration | Done | Student profile page with dependent college-to-organization select dropdowns and html5-qrcode webcam capture/manual entry fallback |
-| 1.3 Admin applications + assignment governance | Done | Student portal application flow, OSA review console, term-bound `admin_assignments`, new Society approval, and `AdminAssignmentService` as the only admin-role/scope projection writer |
+| 1.2 Student profile + QR registration | Done | Student profile page supporting both onboarding/edit mode (with dependent select dropdowns and webcam QR capture) and a clean read-only view mode when complete. QR inputs collapse by default if already registered. |
+| 1.3 OSA admin assignment governance | Done | OSA Admin Access page for direct organization management and term-bound `admin_assignments`; student admin-application routes/UI removed; `AdminScopeService` assignment-scoped admin boundaries; Academic Unit, Office Event, and HR roles added; `AdminAssignmentService` role-only permission projection sync; legacy `admin_applications` deprecated |
 
 ### Epic 2: PPA
 
@@ -87,6 +88,8 @@
 |---------|--------|------------------|
 | 2.1 Digital PPA submission | Done | Event proposal creation saves location details, budgets, days, official proposal softcopy, resolution number, and hardcopy/signature status before submission/approval |
 | 2.2 OSA review pipeline | Done | OSA review, approval, rejection status routes completed; OSA lists now exclude organizer-private drafts and expose proposal detail metadata for review |
+| 2.3 Participant PPAs and distributed attendance ownership | Done | `event_participation_scopes` model/migration, Organized/Participating Events dashboard tabs, participant PPA submit/review/approve/reject routes, scope-aware scanner assignment/revocation, runtime hydrate/sync gating, and roll-up analytics implemented |
+| 2.4 HR event domain | Done | `events.event_domain`, HR Admin role/permissions, employee roster models, non-student Google onboarding separation, HR no-PPA event creation, and HR roster hydration path implemented |
 | 4.2 Dual-threshold statuses | Done | Computes society status and general competition status against thresholds |
 | 4.3 Multi-day session management | Done | EILO groups scans by day and maps to specific `event_day_id` records |
 
@@ -101,8 +104,8 @@
 
 | Feature | Status | Evidence / Notes |
 |---------|--------|------------------|
-| 6.1 Aggregated analytics dashboards | Done | Two-level analytics implemented: (1) per-event modal in events dashboard with attendance, evaluation, sentiment, and demographic breakdowns; (2) Organization Performance Analytics page supporting program-level filtering under each organization (cascade filters: SY, Sem, College, Org, Program, Event Type), detailed late/absent/left-early indicators, and a Program Comparison Leaderboard — all scoped by Spatie RBAC. |
-| 6.2 PDF/Excel export engine | Done | Dashboard export routes generate scoped PDF/XLSX attendance and evaluation reports with event metadata, PPA hardcopy status, validity, ratings, comments, sentiment fields, timestamp, and generated-by user |
+| 6.1 Aggregated analytics dashboards | Done | Two-level analytics implemented: (1) per-event modal in events dashboard with global unique attendance, participant-scope roll-ups, attendance, evaluation, sentiment, and demographic breakdowns; (2) Organization Performance Analytics page supporting program-level filtering under each organization (cascade filters: SY, Sem, College, Org, Program, Event Type), detailed late/absent/left-early indicators, and a Program Comparison Leaderboard — all scoped by Spatie RBAC. |
+| 6.2 PDF/Excel export engine | Done | Dashboard export routes generate scoped PDF/XLSX attendance and evaluation reports with event metadata, participant scope, PPA hardcopy status, validity, ratings, comments, sentiment fields, timestamp, and generated-by user |
 | 6.3 Gawad Parangal metrics | Done | Computes active membership, average attendance rate, eval score averages, and program comparison indicators |
 
 ---
@@ -135,12 +138,17 @@
 | `users` (PRD shape) | Done | Custom user columns migrated; college_id and program_id UUID foreign keys added |
 | `programs` | Done | UUID schema representing academic programs under colleges, migrated with unique college+code constraint |
 | `organization_programs` | Done | Pivot mapping many-to-many relationship between organizations and programs, migrated |
-| `admin_applications` | Done | OSA-reviewed admin access and new Society requests with duplicate pending-application guard |
-| `admin_assignments` | Done | Source-of-truth admin authority table with active primary admin uniqueness by role/scope/academic year |
-| `events` | Done | Custom PPA columns (location, budget, target) migrated with UUID |
+| `organization_memberships` | Done | UUID multi-membership table added for primary academic, secondary org, non-academic, and officer membership attribution |
+| `employee_profiles` / `employee_roster_entries` | Done | UUID HR/faculty/staff profile and roster tables added for employee verification and HR scanner hydration |
+| `admin_applications` | Deprecated | Legacy student-application table retained for data preservation only; routes, controllers, and UI removed in favor of OSA-direct assignment governance |
+| `admin_assignments` | Done | Source-of-truth admin authority and tenant scope table with active primary admin uniqueness by role/scope/academic year; user profile organization/college/program fields remain student membership |
+| `events` | Done | Custom PPA columns (location, budget, target), lifecycle phase, and event domain migrated with UUID |
 | `event_days` | Done | UUID schema defined and migrated |
-| `raw_scans` | Done | Nullable student, QR, dedup_key columns migrated with UUID |
-| `attendance_records` | Done | EILO statuses, validity, and override columns migrated with UUID |
+| `event_participation_scopes` | Done | UUID organizer/participant scope table added with PPA status, capture mode, delegated owner, and analytics roll-up fields |
+| `event_scanner_assignments` | Done | UUID scanner assignment table separates admin intent from runtime sessions, with event/scope/user/assigned-by, audience type, status, revocation, expiry, max devices, notes, and last activation fields |
+| `scanner_sessions` | Done | UUID scanner-session table added with event/scope/user/token, assignment link, label, device binding, status, expiry, revocation, and last-seen fields |
+| `raw_scans` | Done | Nullable student, QR, dedup_key, scanner-session/user audit, participation scope, captured-by organization/admin scope, server received, and processed markers migrated with UUID |
+| `attendance_records` | Done | EILO statuses, participation scope, validity, and override columns migrated with UUID |
 | `evaluations` | Done | Score JSONB, comment, sentiment metrics migrated with UUID |
 | `audit_logs` (NFR) | Done | Action, UUID targets, and change details migrated with UUID |
 | `pending_student_links` (§3.2) | Done | UUID table added for unresolved QR review, resolution, and flagging |
@@ -167,6 +175,13 @@
 
 ## Sprint Notes
 
+- **2026-07-03 (participant PPA, distributed attendance ownership, and HR domain):**
+  - Added `event_participation_scopes`, `organization_memberships`, employee profile/roster tables, and event-domain columns, with backfills from existing organizer events and linked child PPAs.
+  - Scoped scanner assignment/session/hydrate/sync/runtime guards to approved participant scopes; sync now rejects out-of-scope scans and EILO resolution preserves `event_participation_scope_id`.
+  - Added dashboard participant-scope management, participant PPA submit/review/approve/reject actions, scope-aware scanner assignment, per-scope analytics roll-up UI, and Organized/Participating Events tabs so invited organizations can find submitted parent events without exposing organizer drafts.
+  - Added Academic Unit Admin, Office Event Admin, and HR Admin role support across seeders, admin access assignment, route guards, scanner access, organization management, and auth redirects.
+  - Separated student vs faculty/staff onboarding defaults, added HR no-PPA event creation, and introduced HR roster hydration for faculty/staff attendance events.
+  - Updated Flutter scanner contracts to persist/display assignment participation scopes and stamp offline scans with `event_participation_scope_id` in SQLite v3 and sync payloads.
 - **2026-05-29:** Repository contains Laravel 12 skeleton in `Web/` and PRD only. No domain migrations, packages, API, or mobile app. Next recommended milestone: `composer install`, PostgreSQL env, `php artisan install:api`, Spatie + initial UUID schema per PRD §7.
 - **2026-05-30:** 
   - Installed `spatie/laravel-permission`, `laravel/socialite`, and `laravel/sanctum` packages.
@@ -182,7 +197,7 @@
   - Built `AnalyticsController` for stats reports and Gawad Parangal organizational membership active ratios.
   - Written and validated full E2E pipeline test suite (`UsmEaesTest.php`) executing all modules successfully.
 - **2026-06-25:**
-  - Added ARO organizer scope for Recognition and Graduation events per PRD §2.2 and Epic 2; backend role, tenant checks, admin routes, parent-event linking, analytics audience counts, and pending QR resolution now support `organizations.type = aro`.
+  - Added the initial university-level organizer scope for Recognition and Graduation events per PRD §2.2 and Epic 2. This scope was later retired in favor of the active USG/LSG/Society admin model and OSA-controlled proposal workflow.
   - Added backend scanner lock enforcement so hydrate, sync, and scanner validation reject unapproved event proposals.
   - Added `pending_student_links` migration/model/API for unresolved QR records, including resolve/flag routes and audit logging.
   - Standardized created API responses from nonstandard `210` to HTTP `201`.
@@ -213,9 +228,9 @@
     - Added compact export links to the event proposal table without changing the proposal modal workflow.
   - Verified with `php artisan test` (31 tests / 128 assertions), `composer audit` (no advisories), and `npm run build` using local Node 20.19.4 from the XAMPP Node path.
 - **2026-06-26 (scanner hardening):**
-  - Advanced PRD Epic 3 by making dashboard-generated scanner deep links usable by the Flutter scanner API path:
+  - Advanced PRD Epic 3 by hardening scanner session tokens for the Flutter scanner API path:
     - Added scanner-token ability authorization for Sanctum-protected hydrate/sync routes without granting scanner access to student tokens.
-    - Added backend feature coverage for dashboard-generated scanner-link validation, roster hydration, sync ingestion, same-batch duplicate dedup handling, cross-tenant rejection, unresolved QR handling, and EILO attendance resolution.
+    - Added backend feature coverage for scanner-session validation, roster hydration, sync ingestion, same-batch duplicate dedup handling, cross-tenant rejection, unresolved QR handling, and EILO attendance resolution.
     - Added Flutter scanner controller contracts and tests for session activation, hydration, known QR capture, unresolved/manual capture, duplicate local dedup keys, offline sync blocking, and successful sync unresolved counts.
     - Improved scanner UI state visibility with active event, mode, pending count, and last scan result panels.
   - Verified backend with `php artisan test` (34 tests / 145 assertions) and `composer audit` (no advisories). Verified Flutter from the user's PowerShell with `flutter pub get`, `dart format --set-exit-if-changed .`, `flutter analyze --no-pub` (no issues), and `flutter test --no-pub` (9 tests passing).
@@ -228,7 +243,7 @@
   - Verified with `php artisan test` (46 tests / 174 assertions), `composer audit` (no advisories), and `npm run build` using local Node 20.19.4 from the XAMPP Node path.
 - **2026-06-26 (organization analytics overview):**
   - Implemented Organization Performance Analytics Overview (PRD Epic 6.1 second level):
-    - Added `AnalyticsOverviewController` with full RBAC tenant scoping: OSA sees all orgs, LSG sees college orgs, Society/USG/ARO see own org only.
+    - Added `AnalyticsOverviewController` with full RBAC tenant scoping: OSA sees all orgs, LSG sees college orgs, Society/USG see own org only.
     - Aggregated per-org metrics: total completed events, avg attendance rate, avg evaluation score, eval response rate, active member ratio, sentiment positive/negative percentage, and per-event breakdown list.
     - Ranked leaderboard table (composite score = 50% attendance + 50% eval score normalized) visible when multiple orgs are in scope.
     - Full-page blade view at `/dashboard/analytics` with summary KPI strip, responsive org profile cards, and expandable per-event detail rows linking to per-event analytics modal.
@@ -257,15 +272,65 @@
   - Hid proposal creation controls from OSA, enforced `create-proposals` on organizer-only web actions, and mirrored non-draft OSA visibility in the API event list.
 - **2026-06-27 (hybrid onboarding and admin governance):**
   - Replaced direct admin provisioning with one-account admin applications, OSA approval/rejection, and term-bound `admin_assignments` as the source of truth.
-  - Added `AdminAssignmentService` to centralize all admin role grants/removals plus `users.organization_id` / `users.college_id` compatibility projection sync; controllers no longer assign admin roles directly.
-  - Added official master-data seeding for Colleges, Programs, USG, ARO, and per-college LSG shells while keeping Society registration OSA-reviewed.
+  - Added `AdminAssignmentService` to centralize all admin role grants/removals. `users.organization_id`, `users.college_id`, and `users.program_id` are student profile membership fields and are no longer overwritten by admin assignment sync.
+  - Added official master-data seeding for Colleges, Programs, USG, and per-college LSG shells while keeping Society registration OSA-reviewed.
   - Added constraints for duplicate pending admin applications, active primary admin assignments, program college+code identity, and organization type+college+acronym identity.
   - Added an OSA proposal-detail modal showing schedule, event days, venue, offices, target participants, funding, budget, resolution, softcopy, hardcopy, and signature metadata before review actions.
   - Improved proposal form defaults so start date pre-fills end date and D1 date without overwriting deliberate multi-day edits, and added a shared sign-out confirmation modal.
 - **2026-06-28 (Google auth guardrail):**
   - Hardened Google OAuth redirect with forced account selection and an `hd=usm.edu.ph` hint so a rejected personal Gmail session does not trap the next login attempt.
   - Rejected non-institutional callbacks now clear local auth session state before returning to login; verified with `php artisan test --filter=GoogleAuthControllerTest`.
-- **2026-06-29 (scanner-link token schema):**
-  - Corrected Sanctum `personal_access_tokens.tokenable_id` from bigint to UUID for PostgreSQL so dashboard-generated scanner links can create event-scoped tokens for UUID users.
+- **2026-06-29 (scanner session token schema):**
+  - Corrected Sanctum `personal_access_tokens.tokenable_id` from bigint to UUID for PostgreSQL so event-scoped scanner session tokens can be issued for UUID users.
   - Updated the fresh-install migration to use `uuidMorphs('tokenable')`, added a one-time PostgreSQL conversion migration, and verified the local database column reports `uuid`.
-  - Verified with `php artisan test --filter=test_scanner_link_generation` and `php artisan test --filter=test_dashboard_generated_scanner_link_drives_hydrate_sync_and_eilo_resolution`.
+  - Verified with scanner session token coverage.
+- **2026-06-30 (scanner UX and sync hardening):**
+  - Flutter scanner: global session feedback banner with activation loading/success/error states and auto-navigation to Scanner tab; Scanner tab now shows session/roster/network/sync status; prominent saving/duplicate overlays; 5-second duplicate cooldown by event + scan type; student ID manual entry (`NN-NNNNN`) with roster lookup and unresolved fallback; friendly error mapping with debug-only technical details; SQLite v2 sync statuses (`pending`/`syncing`/`synced`/`failed`) with retry; auto-wipe of roster/session after completed events once all scans are confirmed synced.
+  - Laravel: hydrate roster now returns `student_id_number`; pending QR links dashboard shows QR vs Manual ID source.
+  - Verified with `flutter analyze`, `flutter test` (22 tests), and scanner-session backend coverage.
+- **2026-06-30 (scanner UI declutter):**
+  - Reduced post-update redundancy and clutter on the Flutter scanner per the ui-ux-pro-max design system (minimal single-column, one primary CTA, glanceable status): replaced the full sync panel on the Scanner and Live Scanner screens with a compact read-only `SyncSummaryStrip`, keeping the full `SyncStatusPanel` (counters, timestamps, retry) only on Offline Tools.
+  - Simplified `EventReadyCard` from six status chips to a status badge plus a single network/roster meta row; folded network status into the sync panel header and removed the standalone Offline Tools connection card; collapsed redundant scanner action rows; removed the duplicate last-scan card from the Scanner tab and the now-unused `EaesMetricChip`.
+  - Added toast-style auto-dismiss (4s) for success/warning global feedback banners.
+  - Verified with `flutter analyze` (no issues) and `flutter test` (22 tests passing).
+- **2026-06-30 (scan throttle + frame-exit guard):**
+  - After a successful camera capture the Live Scanner now throttles detection for a short window (`AppConfig.postScanThrottleMs`, default 800ms, spec range 500–1000ms) to prevent rapid repeated reads of the next code; a green "Captured — ready for next" viewfinder state plus medium haptic confirms the capture during the pause.
+  - Added an optional "QR must leave the frame" guard (`AppConfig.requireQrExitFrame`, default on): the same value is ignored while it lingers in view and is only re-armed after the camera reports no detections for `AppConfig.frameClearMs` (default 700ms). Frame-presence tracking updates on every detection, including during the throttle window, so the guard stays accurate.
+  - These complement the existing per-record duplicate cooldown and `isSavingScan` guard without changing controller sync semantics.
+  - Verified with `flutter analyze` (no issues) and `flutter test` (22 tests passing).
+- **2026-06-30 (event lifecycle and scanner sessions):**
+  - Added separate event lifecycle phase tracking from proposal status, scheduled lifecycle updates, scanner-session runtime tokens, assignment/session revoke dashboard actions, device binding, 72-hour sync grace enforcement, and per-scan rejection for offline timestamps outside the event scan window.
+  - Flutter scanner now reads lifecycle/session state from validation, sends device identity during activation/hydration, blocks new local captures when the event is not active, and keeps sync available for pending scans during ended/evaluation phases.
+- **2026-06-30 (mobile scanner authentication and assignments):**
+  - Added `event_scanner_assignments` as the admin intent layer for event-scoped scanner access, plus assignment-aware scanner session activation APIs.
+  - Added restricted mobile Google OAuth login (`scanner-assignments` token only), assignment listing, event activation, mobile logout, and assignment-aware hydrate/sync validation that prevents normal student tokens from scanning.
+  - Added dashboard scanner-access modal controls for assigning/revoking student scanners and viewing assignment/session state.
+  - Added Flutter login, assigned-events, activation, empty/revoked/offline messaging, secure auth/session persistence, and activation-to-hydration wiring.
+- **2026-07-06 (mobile Google account picker hardening):**
+  - Wrapped Flutter Google sign-in behind a testable gateway so Android initializes Credential Manager with the web `GOOGLE_SERVER_CLIENT_ID` while omitting Android `clientId`; `GOOGLE_HOSTED_DOMAIN` now defaults to empty so Android does not apply a native Workspace filter before Laravel performs `@usm.edu.ph` validation.
+  - Android canceled credential results now surface as OAuth setup issues without reopening a second account picker.
+  - Added mobile-login API tests for valid USM, non-USM, and unexpected-audience tokeninfo responses, plus Flutter coverage for Android initialization, explicit hosted-domain configuration, and canceled-result handling.
+  - Captured this workstation's debug SHA-1 (`1E:F4:E2:DA:ED:C6:4F:33:E4:53:AE:32:03:6F:75:D9:CB:28:40:5A`) for Google Android OAuth registration with package `edu.usm.eaes.eaes_scanner`.
+  - Documented Android OAuth setup for package `edu.usm.eaes.eaes_scanner`, signing SHA-1 registration, `GOOGLE_HOSTED_DOMAIN`, and backend `GOOGLE_MOBILE_CLIENT_IDS` alignment.
+- **2026-06-30 (assignment-only scanner workflow):**
+  - Removed the user-facing dashboard scanner-link generation route/action, deep-link flash card, Generate Link/Regenerate/Add Device controls, and mobile manual scanner-link entry flow.
+  - Made assignment activation (`POST /api/v1/scanner/assignments/{assignment}/activate`) the only supported scanner session creation path; `scanner_sessions` remain as the internal runtime/device/audit layer for hydrate and sync.
+  - Scoped dashboard scanner search/selection to the admin's authorized organization or college boundary and kept active device/session history visible for monitoring and revocation.
+- **2026-07-01 (admin scope separation):**
+  - Added `AdminScopeService` / `AdminScope` so dashboard, API, export, analytics, pending QR, scanner assignment, scanner access, event tenant, and NLP query boundaries resolve admin authority from active primary `admin_assignments`.
+  - Changed admin assignment projection sync to grant/remove Spatie admin roles only; revoking or expiring an assignment no longer mutates the student's profile organization, college, or program.
+  - Kept student portal profile/history, scanner eligibility, roster hydration, analytics denominators, and pending QR student resolution on the existing student profile membership columns.
+  - Added admin-capable sidebar navigation back to Student Portal while preserving dashboard-first login for admin users.
+- **2026-07-01 (admin role cleanup):**
+  - Retired the unused records-office admin role and organization shell from role seeders, institutional master-data seeding, admin applications, route guards, dashboard/API scope checks, scanner access roles, parent-event linking, analytics audience logic, and tests.
+  - Kept OSA/Super Admin as a staff/admin-only account: OSA no longer gets Student portal navigation or `/portal` access unless the account explicitly has the Student role.
+- **2026-07-01 (OSA-only admin and organization onboarding):**
+  - Removed student portal admin-application routes, sidebar links, controller, and view; students manage profile, attendance history, evaluations, and scanner access only.
+  - Redesigned OSA Admin Access as the primary workflow: user search, direct assignment creation, organization management, and assignment revoke/expire actions.
+  - Added `OrganizationManagementService` and OSA-only organization create/update routes for society, LSG, and USG records.
+  - Deprecated `admin_applications` table usage in routes/UI while preserving the physical table for later cleanup.
+- **2026-07-01 (Admin Access UI Refinement):**
+  - Replaced the two-column grid layout in the OSA Admin Access page with a single full-width card layout managed by Alpine.js segmented tabs.
+  - Implemented independent filter and search controls for both the Organizations and Admin Assignments tabs.
+  - Added a search filter, role filter, status filter, and term filter to the Admin Assignments tab, wiring them up in the backend controller.
+  - Preserved each tab's active and query state using URL parameter sync and tab-aware backend redirects.

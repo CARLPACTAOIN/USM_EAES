@@ -1,14 +1,26 @@
 <x-layouts.app :title="'Event Proposals — EAES'">
     @php
+        $workspace = $workspace ?? 'organized';
+        $isParticipatingWorkspace = $workspace === 'participating';
         $statusFilters = $user->hasRole('Super Admin (OSA)')
             ? ['submitted', 'under_review', 'approved', 'rejected', 'completed']
             : ['draft', 'submitted', 'under_review', 'approved', 'rejected', 'completed'];
+        $workspaceRoute = fn (string $targetWorkspace) => route('dashboard.events', array_filter([
+            'workspace' => $targetWorkspace,
+            'status' => request('status'),
+        ]));
+        $statusRoute = fn (?string $status = null) => route('dashboard.events', array_filter([
+            'workspace' => $workspace,
+            'status' => $status,
+        ]));
     @endphp
 
     <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
         <div>
             <h1 class="text-2xl font-display text-(--color-text-primary)">Event Proposals</h1>
-            <p class="text-sm text-(--color-text-secondary) mt-1">Manage PPA event proposals</p>
+            <p class="text-sm text-(--color-text-secondary) mt-1">
+                {{ $isParticipatingWorkspace ? 'Submit invited participant PPAs and manage approved scoped scanners' : 'Manage owned PPA event proposals and participant invitations' }}
+            </p>
         </div>
         @if($canCreateProposals)
         <button type="button" onclick="const modal = document.getElementById('create-event-modal'); modal.showModal(); setTimeout(() => document.getElementById('title')?.focus(), 50)" class="btn btn-primary shrink-0">
@@ -18,36 +30,31 @@
         @endif
     </div>
 
+    {{-- Workspace Tabs --}}
+    <div class="flex flex-wrap gap-2 mb-4">
+        <a href="{{ $workspaceRoute('organized') }}"
+           class="btn btn-sm {{ !$isParticipatingWorkspace ? 'btn-primary' : 'btn-secondary' }}">
+            Organized Events
+            <span class="ml-1 text-xs opacity-80">{{ $organizedEventsCount ?? 0 }}</span>
+        </a>
+        <a href="{{ $workspaceRoute('participating') }}"
+           class="btn btn-sm {{ $isParticipatingWorkspace ? 'btn-primary' : 'btn-secondary' }}">
+            Participating Events
+            <span class="ml-1 text-xs opacity-80">{{ $participatingEventsCount ?? 0 }}</span>
+        </a>
+    </div>
+
     {{-- Status Filter --}}
     <div class="flex flex-wrap gap-2 mb-6">
-        <a href="{{ route('dashboard.events') }}"
+        <a href="{{ $statusRoute() }}"
            class="btn btn-sm {{ !request('status') ? 'btn-primary' : 'btn-secondary' }}">All</a>
         @foreach($statusFilters as $status)
-        <a href="{{ route('dashboard.events', ['status' => $status]) }}"
+        <a href="{{ $statusRoute($status) }}"
            class="btn btn-sm {{ request('status') === $status ? 'btn-primary' : 'btn-secondary' }}">
             {{ ucwords(str_replace('_', ' ', $status)) }}
         </a>
         @endforeach
     </div>
-
-    {{-- Scanner Link Flash --}}
-    @if(session('scanner_link'))
-    <div class="card mb-6" style="border-left: 4px solid var(--color-accent);">
-        <div class="card-body">
-            <h3 class="font-semibold text-(--color-text-primary) mb-2">Scanner Deep-Link Generated</h3>
-            <div class="flex items-center gap-2">
-                <input type="text" value="{{ session('scanner_link') }}" id="scanner-link-input"
-                       class="form-input font-data text-sm flex-1" readonly>
-                <button type="button" onclick="navigator.clipboard.writeText(document.getElementById('scanner-link-input').value)"
-                        class="btn btn-secondary btn-sm shrink-0">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
-                    Copy
-                </button>
-            </div>
-            <p class="text-xs text-(--color-text-tertiary) mt-2">Share this link with your scanner operators. Opens directly in the EAES Scanner app.</p>
-        </div>
-    </div>
-    @endif
 
     {{-- Events Table --}}
     <div class="card overflow-hidden">
@@ -67,6 +74,11 @@
                 <tbody>
                     @forelse($events as $event)
                     @php
+                        $eventScopes = $event->participationScopes;
+                        $participantScopes = $eventScopes
+                            ->where('participation_role', \App\Models\EventParticipationScope::ROLE_PARTICIPANT)
+                            ->values();
+                        $primaryParticipantScope = $isParticipatingWorkspace ? $participantScopes->first() : null;
                         $target = $event->target_demographics ?? [];
                         $budget = $event->budget_allocations ?? [];
                         $eventDaysSummary = $event->eventDays
@@ -82,6 +94,10 @@
                         $budgetCost = isset($budget['budget_cost']) && $budget['budget_cost'] !== null && $budget['budget_cost'] !== ''
                             ? 'PHP ' . number_format((float) $budget['budget_cost'], 2)
                             : 'N/A';
+                        $approvedScopeCount = $eventScopes
+                            ->filter(fn ($scope) => $scope->status === 'active' && (!$scope->ppa_required || in_array($scope->ppa_status, ['approved', 'not_required'], true)))
+                            ->count();
+                        $participantScopeCount = $participantScopes->count();
                     @endphp
                     <tr>
                         <td>
@@ -108,45 +124,73 @@
                         </td>
                         <td>
                             <div class="space-y-1 text-xs">
-                                @if($event->proposal_document_path)
-                                    <a href="{{ route('dashboard.events.proposal-document', $event->id) }}" class="inline-flex items-center gap-1 text-(--color-accent) hover:underline">
-                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414A1 1 0 0119 9.414V19a2 2 0 01-2 2z"/></svg>
-                                        Softcopy
-                                    </a>
+                                @if($isParticipatingWorkspace && $primaryParticipantScope)
+                                    <div class="font-medium text-(--color-text-primary)">Your participant PPA</div>
+                                    <span class="badge badge-{{ str_replace('_', '-', $primaryParticipantScope->ppa_status) }}">
+                                        {{ ucwords(str_replace('_', ' ', $primaryParticipantScope->ppa_status)) }}
+                                    </span>
+                                    <div class="{{ $primaryParticipantScope->ppa_softcopy_path ? 'text-(--color-success)' : 'text-(--color-warning)' }}">
+                                        {{ $primaryParticipantScope->ppa_softcopy_path ? 'Softcopy attached' : 'Softcopy pending' }}
+                                    </div>
+                                    <div class="{{ $primaryParticipantScope->hardcopy_submitted ? 'text-(--color-success)' : 'text-(--color-warning)' }}">
+                                        {{ $primaryParticipantScope->hardcopy_submitted ? 'Hardcopy recorded' : 'Hardcopy pending' }}
+                                    </div>
+                                    <div class="text-(--color-text-tertiary)">
+                                        {{ $approvedScopeCount > 0 ? 'Scoped scanner access ready' : 'Scanner access locked' }}
+                                    </div>
                                 @else
-                                    <span class="text-(--color-destructive)">Missing softcopy</span>
+                                    @if($event->proposal_document_path)
+                                        <a href="{{ route('dashboard.events.proposal-document', $event->id) }}" class="inline-flex items-center gap-1 text-(--color-accent) hover:underline">
+                                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414A1 1 0 0119 9.414V19a2 2 0 01-2 2z"/></svg>
+                                            Softcopy
+                                        </a>
+                                    @else
+                                        <span class="text-(--color-destructive)">Missing softcopy</span>
+                                    @endif
+
+                                    <div class="{{ $event->hardcopy_submitted ? 'text-(--color-success)' : 'text-(--color-warning)' }}">
+                                        {{ $event->hardcopy_submitted ? 'Hardcopy submitted' : 'Hardcopy pending' }}
+                                    </div>
+
+                                    <div class="text-(--color-text-tertiary)">
+                                        Head {{ $event->head_organization_signed ? 'signed' : 'pending' }},
+                                        Adviser {{ $event->adviser_signed ? 'signed' : 'pending' }}
+                                    </div>
+                                    <div class="text-(--color-text-tertiary)">
+                                        {{ $approvedScopeCount }} runtime scope(s), {{ $participantScopeCount }} participant
+                                    </div>
                                 @endif
-
-                                <div class="{{ $event->hardcopy_submitted ? 'text-(--color-success)' : 'text-(--color-warning)' }}">
-                                    {{ $event->hardcopy_submitted ? 'Hardcopy submitted' : 'Hardcopy pending' }}
-                                </div>
-
-                                <div class="text-(--color-text-tertiary)">
-                                    Head {{ $event->head_organization_signed ? 'signed' : 'pending' }},
-                                    Adviser {{ $event->adviser_signed ? 'signed' : 'pending' }}
+                            </div>
+                        </td>
+                        <td>
+                            <div class="space-y-1">
+                                <span class="badge badge-{{ str_replace('_', '-', $event->status) }}">
+                                    {{ ucwords(str_replace('_', ' ', $event->status)) }}
+                                </span>
+                                <div class="text-xs text-(--color-text-tertiary)">
+                                    Phase: {{ ucwords(str_replace('_', ' ', $event->lifecycle_phase ?? 'scheduled')) }}
                                 </div>
                             </div>
                         </td>
                         <td>
-                            <span class="badge badge-{{ str_replace('_', '-', $event->status) }}">
-                                {{ ucwords(str_replace('_', ' ', $event->status)) }}
-                            </span>
-                        </td>
-                        <td>
-                            <button type="button"
-                                    class="btn btn-sm btn-secondary event-export-button"
-                                    aria-haspopup="dialog"
-                                    aria-controls="export-modal"
-                                    title="Open export options"
-                                    data-export-trigger
-                                    data-export-title="{{ $event->title }}"
-                                    data-attendance-pdf="{{ route('dashboard.events.exports.attendance.pdf', $event->id) }}"
-                                    data-attendance-excel="{{ route('dashboard.events.exports.attendance.excel', $event->id) }}"
-                                    data-evaluations-pdf="{{ route('dashboard.events.exports.evaluations.pdf', $event->id) }}"
-                                    data-evaluations-excel="{{ route('dashboard.events.exports.evaluations.excel', $event->id) }}">
-                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v12m0 0l4-4m-4 4l-4-4M5 21h14"/></svg>
-                                Export
-                            </button>
+                            @if(!$isParticipatingWorkspace)
+                                <button type="button"
+                                        class="btn btn-sm btn-secondary event-export-button"
+                                        aria-haspopup="dialog"
+                                        aria-controls="export-modal"
+                                        title="Open export options"
+                                        data-export-trigger
+                                        data-export-title="{{ $event->title }}"
+                                        data-attendance-pdf="{{ route('dashboard.events.exports.attendance.pdf', $event->id) }}"
+                                        data-attendance-excel="{{ route('dashboard.events.exports.attendance.excel', $event->id) }}"
+                                        data-evaluations-pdf="{{ route('dashboard.events.exports.evaluations.pdf', $event->id) }}"
+                                        data-evaluations-excel="{{ route('dashboard.events.exports.evaluations.excel', $event->id) }}">
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v12m0 0l4-4m-4 4l-4-4M5 21h14"/></svg>
+                                    Export
+                                </button>
+                            @else
+                                <span class="text-xs text-(--color-text-tertiary)">Event owner export</span>
+                            @endif
                         </td>
                         <td class="text-right">
                             <div class="flex items-center justify-end gap-1">
@@ -182,8 +226,20 @@
                                 </button>
                                 @endif
 
+                                <button type="button"
+                                        class="btn btn-sm btn-secondary"
+                                        title="{{ $isParticipatingWorkspace ? 'Open your participant PPA scope' : 'Manage participant scopes' }}"
+                                        onclick="document.getElementById('participant-scope-modal-{{ $event->id }}')?.showModal()">
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M8.25 6.75h7.5M8.25 12h7.5m-7.5 5.25h4.5M4.5 5.25A2.25 2.25 0 016.75 3h10.5a2.25 2.25 0 012.25 2.25v13.5A2.25 2.25 0 0117.25 21H6.75a2.25 2.25 0 01-2.25-2.25V5.25z"/></svg>
+                                    @if($isParticipatingWorkspace && $primaryParticipantScope && in_array($primaryParticipantScope->ppa_status, ['draft', 'rejected'], true))
+                                        Submit PPA
+                                    @else
+                                        Scopes
+                                    @endif
+                                </button>
+
                                 {{-- Status-dependent actions --}}
-                                @if($canCreateProposals && $event->status === 'draft')
+                                @if(!$isParticipatingWorkspace && $canCreateProposals && $event->status === 'draft')
                                 @if(!$event->hardcopy_submitted)
                                 <form method="POST" action="{{ route('dashboard.events.hardcopy', $event->id) }}" class="inline">
                                     @csrf
@@ -218,21 +274,23 @@
                                     @endif
                                 @endif
 
-                                @if(in_array($event->status, ['approved', 'completed']))
+                                @if(!$isParticipatingWorkspace && in_array($event->status, ['approved', 'completed']))
                                 <button type="button" @click="$dispatch('open-analytics', { id: '{{ $event->id }}', title: '{{ addslashes($event->title) }}' })" class="btn btn-sm btn-secondary" title="View Real-Time Analytics" style="background-color: var(--color-accent-subtle); color: var(--color-accent); border: 1px solid var(--color-accent-light);">
                                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
                                     Analytics
                                 </button>
-                                <form method="POST" action="{{ route('dashboard.events.scanner-link', $event->id) }}" class="inline">
-                                    @csrf
-                                    <button type="submit" class="btn btn-sm btn-secondary" title="Generate Scanner Link">
-                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101"/></svg>
-                                        Link
-                                    </button>
-                                </form>
+                                @endif
+                                @if(in_array($event->status, ['approved', 'completed']) && $approvedScopeCount > 0)
+                                <button type="button"
+                                        class="btn btn-sm btn-secondary"
+                                        title="Manage scanner assignments"
+                                        onclick="document.getElementById('scanner-session-modal-{{ $event->id }}')?.showModal()">
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m9-4.13a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
+                                    Scanners
+                                </button>
                                 @endif
 
-                                @if(($event->unprocessed_comment_count ?? 0) > 0)
+                                @if(!$isParticipatingWorkspace && ($event->unprocessed_comment_count ?? 0) > 0)
                                 <form method="POST" action="{{ route('dashboard.events.sentiments.analyze', $event->id) }}" class="inline">
                                     @csrf
                                     <button type="submit" class="btn btn-sm btn-secondary" title="Queue sentiment analysis">
@@ -249,8 +307,10 @@
                         <td colspan="7">
                             <div class="empty-state py-8">
                                 <svg class="empty-state-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
-                                <p class="empty-state-title">No events found</p>
-                                <p class="empty-state-description">Create your first event proposal to get started.</p>
+                                <p class="empty-state-title">{{ $isParticipatingWorkspace ? 'No participant invitations found' : 'No events found' }}</p>
+                                <p class="empty-state-description">
+                                    {{ $isParticipatingWorkspace ? 'Invited events appear here after the organizer submits the parent proposal.' : 'Create your first event proposal to get started.' }}
+                                </p>
                             </div>
                         </td>
                     </tr>
@@ -265,6 +325,361 @@
         </div>
         @endif
     </div>
+
+    @foreach($events as $event)
+        @php
+            $eventScopes = $event->participationScopes
+                ->sortBy([['participation_role', 'asc'], ['participant_name_snapshot', 'asc']])
+                ->values();
+            $participantScopes = $eventScopes
+                ->where('participation_role', \App\Models\EventParticipationScope::ROLE_PARTICIPANT)
+                ->values();
+        @endphp
+        <dialog id="participant-scope-modal-{{ $event->id }}"
+                class="proposal-modal modal-md"
+                aria-labelledby="participant-scope-modal-title-{{ $event->id }}"
+                onclick="if (event.target === this) this.close()">
+            <div class="proposal-modal-form" onclick="event.stopPropagation()">
+                <div class="proposal-modal-header">
+                    <div class="proposal-modal-title-row">
+                        <span class="proposal-modal-icon" aria-hidden="true">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" d="M8.25 6.75h7.5M8.25 12h7.5m-7.5 5.25h4.5M4.5 5.25A2.25 2.25 0 016.75 3h10.5a2.25 2.25 0 012.25 2.25v13.5A2.25 2.25 0 0117.25 21H6.75a2.25 2.25 0 01-2.25-2.25V5.25z"/></svg>
+                        </span>
+                        <div>
+                            <p class="proposal-modal-kicker">{{ $event->title }}</p>
+                            <h2 id="participant-scope-modal-title-{{ $event->id }}" class="proposal-modal-title">Participant Scopes</h2>
+                            <p class="proposal-modal-subtitle">Track invited participant PPAs, scanner ownership, and analytics roll-up boundaries.</p>
+                        </div>
+                    </div>
+                    <button type="button" class="btn-icon btn-ghost" aria-label="Close participant scopes" onclick="document.getElementById('participant-scope-modal-{{ $event->id }}')?.close()">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                    </button>
+                </div>
+
+                <div class="proposal-modal-body space-y-4">
+                    <section class="proposal-modal-section">
+                        <h3 class="font-semibold text-sm text-(--color-text-primary) mb-3">Scope Register</h3>
+                        <div class="space-y-3">
+                            @forelse($eventScopes as $scope)
+                                <div class="rounded-lg border border-(--color-border) bg-(--color-surface-raised) p-3">
+                                    <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                                        <div class="min-w-0">
+                                            <div class="flex flex-wrap items-center gap-2">
+                                                <p class="text-sm font-semibold text-(--color-text-primary)">{{ $scope->displayName() }}</p>
+                                                <span class="badge badge-{{ $scope->participation_role === 'organizer' ? 'approved' : 'pending' }}">{{ ucfirst($scope->participation_role) }}</span>
+                                                <span class="badge badge-{{ str_replace('_', '-', $scope->ppa_status) }}">{{ ucwords(str_replace('_', ' ', $scope->ppa_status)) }}</span>
+                                            </div>
+                                            <div class="mt-2 grid gap-1 text-xs text-(--color-text-secondary)">
+                                                <span>{{ ucwords(str_replace('_', ' ', $scope->participant_type)) }} · {{ ucwords(str_replace('_', ' ', $scope->capture_mode)) }}</span>
+                                                <span>{{ $scope->analytics_rollup_enabled ? 'Included in roll-up analytics' : 'Excluded from roll-up analytics' }}</span>
+                                                @if($scope->review_remarks)
+                                                    <span class="text-(--color-warning)">Review note: {{ $scope->review_remarks }}</span>
+                                                @endif
+                                            </div>
+                                        </div>
+
+                                        <div class="flex flex-wrap gap-2 lg:justify-end">
+                                            @if($scope->participation_role === \App\Models\EventParticipationScope::ROLE_PARTICIPANT && $scope->ppa_required && $scope->current_admin_owns_scope && !$user->hasRole('Super Admin (OSA)') && in_array($scope->ppa_status, ['draft', 'rejected'], true))
+                                                <form method="POST" action="{{ route('dashboard.events.participant-scopes.submit', [$event->id, $scope->id]) }}" enctype="multipart/form-data" class="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+                                                    @csrf
+                                                    <input type="file" name="ppa_softcopy" class="form-input text-xs" accept=".pdf,.doc,.docx" {{ $scope->ppa_softcopy_path ? '' : 'required' }}>
+                                                    <input type="hidden" name="hardcopy_submitted" value="1">
+                                                    <input type="hidden" name="org_head_signed" value="1">
+                                                    <input type="hidden" name="adviser_signed" value="1">
+                                                    <button type="submit" class="btn btn-sm btn-primary">Submit PPA</button>
+                                                </form>
+                                            @endif
+
+                                            @if($scope->participation_role === \App\Models\EventParticipationScope::ROLE_PARTICIPANT && $user->hasRole('Super Admin (OSA)'))
+                                                @if($scope->ppa_status === 'submitted')
+                                                    <form method="POST" action="{{ route('dashboard.events.participant-scopes.review', [$event->id, $scope->id]) }}">
+                                                        @csrf
+                                                        <button type="submit" class="btn btn-sm btn-secondary">Review</button>
+                                                    </form>
+                                                @endif
+                                                @if(in_array($scope->ppa_status, ['submitted', 'under_review'], true))
+                                                    <form method="POST" action="{{ route('dashboard.events.participant-scopes.approve', [$event->id, $scope->id]) }}">
+                                                        @csrf
+                                                        <button type="submit" class="btn btn-sm" style="background-color: var(--color-success); color: white;">Approve</button>
+                                                    </form>
+                                                    <form method="POST" action="{{ route('dashboard.events.participant-scopes.reject', [$event->id, $scope->id]) }}">
+                                                        @csrf
+                                                        <input type="hidden" name="review_remarks" value="Returned by OSA for revision.">
+                                                        <button type="submit" class="btn btn-sm btn-destructive">Reject</button>
+                                                    </form>
+                                                @endif
+                                            @endif
+                                        </div>
+                                    </div>
+                                </div>
+                            @empty
+                                <div class="rounded-lg border border-dashed border-(--color-border) bg-(--color-surface-muted) p-4">
+                                    <p class="text-sm font-medium text-(--color-text-primary)">No participant scopes yet</p>
+                                    <p class="mt-1 text-xs text-(--color-text-tertiary)">The organizer scope will be generated when the proposal is saved or backfilled by migration.</p>
+                                </div>
+                            @endforelse
+                        </div>
+                    </section>
+
+                    @if(!$isParticipatingWorkspace && ($canCreateProposals || $user->hasRole('Super Admin (OSA)')))
+                        <section class="proposal-modal-section">
+                            <h3 class="font-semibold text-sm text-(--color-text-primary) mb-3">Add Participant Scope</h3>
+                            <form method="POST" action="{{ route('dashboard.events.participant-scopes.store', $event->id) }}" class="grid gap-3 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)_auto]">
+                                @csrf
+                                <div>
+                                    <label for="scope-org-{{ $event->id }}" class="sr-only">Participant organization</label>
+                                    <select id="scope-org-{{ $event->id }}" name="organization_id" class="form-input form-select text-sm" required>
+                                        <option value="">Participant organization</option>
+                                        @foreach($organizations as $organization)
+                                            <option value="{{ $organization->id }}">{{ $organization->acronym }} — {{ $organization->name }}</option>
+                                        @endforeach
+                                    </select>
+                                </div>
+                                <div>
+                                    <label for="scope-capture-{{ $event->id }}" class="sr-only">Capture mode</label>
+                                    <select id="scope-capture-{{ $event->id }}" name="capture_mode" class="form-input form-select text-sm" required>
+                                        <option value="self_scanning">Self scanning</option>
+                                        <option value="parent_scanning">Parent scanning</option>
+                                        <option value="delegated_scanning">Delegated scanning</option>
+                                        <option value="central_gate">Central gate</option>
+                                    </select>
+                                </div>
+                                <div class="flex flex-wrap items-center gap-3 text-xs text-(--color-text-secondary)">
+                                    <label class="inline-flex items-center gap-2">
+                                        <input type="checkbox" name="ppa_required" value="1" checked>
+                                        PPA required
+                                    </label>
+                                    <label class="inline-flex items-center gap-2">
+                                        <input type="checkbox" name="analytics_rollup_enabled" value="1" checked>
+                                        Roll-up
+                                    </label>
+                                </div>
+                                <button type="submit" class="btn btn-sm btn-primary">Add Scope</button>
+                            </form>
+                        </section>
+                    @endif
+                </div>
+
+                <div class="proposal-modal-footer">
+                    <p class="proposal-required-note">Approved runtime scopes unlock scoped scanner access</p>
+                    <div class="proposal-footer-actions">
+                        <button type="button" class="btn btn-secondary" onclick="document.getElementById('participant-scope-modal-{{ $event->id }}')?.close()">Close</button>
+                    </div>
+                </div>
+            </div>
+        </dialog>
+
+        @if(in_array($event->status, ['approved', 'completed']))
+        @php
+            $scannerScopes = $event->participationScopes
+                ->filter(fn ($scope) => $scope->status === 'active'
+                    && (!$scope->ppa_required || in_array($scope->ppa_status, ['approved', 'not_required'], true))
+                    && $scope->current_admin_can_manage_scope)
+                ->values();
+        @endphp
+        <dialog id="scanner-session-modal-{{ $event->id }}"
+                class="proposal-modal modal-md"
+                aria-labelledby="scanner-session-modal-title-{{ $event->id }}"
+                onclick="if (event.target === this) this.close()">
+            <div class="proposal-modal-form" onclick="event.stopPropagation()">
+                <div class="proposal-modal-header">
+                    <div class="proposal-modal-title-row">
+                        <span class="proposal-modal-icon" aria-hidden="true">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" d="M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m9-4.13a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
+                        </span>
+                        <div>
+                            <p class="proposal-modal-kicker">{{ $event->title }}</p>
+                            <h2 id="scanner-session-modal-title-{{ $event->id }}" class="proposal-modal-title">Scanner Assignments</h2>
+                            <p class="proposal-modal-subtitle">Assign eligible student/officer accounts, then monitor their device-bound scanner sessions.</p>
+                        </div>
+                    </div>
+                    <button type="button" class="btn-icon btn-ghost" aria-label="Close scanner sessions" onclick="document.getElementById('scanner-session-modal-{{ $event->id }}')?.close()">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                    </button>
+                </div>
+
+                <div class="proposal-modal-body space-y-4">
+                    <section class="proposal-modal-section">
+                        <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                            <div>
+                                <h3 class="font-semibold text-sm text-(--color-text-primary)">Assigned Scanners</h3>
+                                <p class="text-xs text-(--color-text-tertiary)">Only active assignments can activate scanner mode in the mobile app.</p>
+                            </div>
+                        </div>
+
+                        @if($user->hasRole('Super Admin (OSA)') || $user->can('assign-scanners-own'))
+                            <form
+                                method="POST"
+                                action="{{ route('dashboard.events.scanner-assignments.store', $event->id) }}"
+                                class="mt-3 grid gap-3 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,1.5fr)_minmax(0,1fr)_auto]"
+                                x-data='scannerAssignmentPicker(@js($eligibleScannerUsers->map(fn ($scannerUser) => [
+                                    'id' => $scannerUser->id,
+                                    'name' => $scannerUser->name,
+                                    'email' => $scannerUser->email,
+                                    'studentId' => $scannerUser->student_id_number ?? $scannerUser->employeeRosterEntry?->employee_id,
+                                    'organization' => $scannerUser->organization?->acronym ?? $scannerUser->employeeRosterEntry?->office_department ?? 'No scope',
+                                    'label' => trim($scannerUser->name . ' · ' . ($scannerUser->student_id_number ?? $scannerUser->employeeRosterEntry?->employee_id ?? $scannerUser->email) . ' · ' . ($scannerUser->organization?->acronym ?? $scannerUser->employeeRosterEntry?->office_department ?? 'No scope')),
+                                ])->values()))'
+                                @submit="submitted = true; if (!selectedId) { open = true; $event.preventDefault(); }"
+                            >
+                                @csrf
+                                <div>
+                                    <label for="scanner-scope-{{ $event->id }}" class="sr-only">Participant scope</label>
+                                    <select id="scanner-scope-{{ $event->id }}" name="event_participation_scope_id" class="form-input form-select text-sm" required>
+                                        <option value="">Participant scope</option>
+                                        @foreach($scannerScopes as $scope)
+                                            <option value="{{ $scope->id }}">{{ $scope->displayName() }} · {{ ucwords(str_replace('_', ' ', $scope->capture_mode)) }}</option>
+                                        @endforeach
+                                    </select>
+                                </div>
+                                <div class="relative">
+                                    <label for="scanner-search-{{ $event->id }}" class="sr-only">Search eligible scanner</label>
+                                    <input
+                                        id="scanner-search-{{ $event->id }}"
+                                        type="text"
+                                        class="form-input text-sm"
+                                        placeholder="Search name, student ID, or email"
+                                        autocomplete="off"
+                                        x-model="query"
+                                        @focus="open = true"
+                                        @input="selectedId = ''; selectedLabel = ''; open = true"
+                                        @keydown.escape="open = false"
+                                    >
+                                    <input type="hidden" name="scanner_user_id" x-model="selectedId">
+                                    <div
+                                        x-show="open && filteredScanners.length > 0"
+                                        x-cloak
+                                        class="absolute z-30 mt-1 max-h-56 w-full overflow-auto rounded-lg border border-(--color-border) bg-(--color-surface) shadow-lg"
+                                    >
+                                        <template x-for="scanner in filteredScanners" :key="scanner.id">
+                                            <button
+                                                type="button"
+                                                class="block w-full px-3 py-2 text-left text-sm hover:bg-(--color-surface-muted) focus:bg-(--color-surface-muted) focus:outline-none"
+                                                @click="choose(scanner)"
+                                            >
+                                                <span class="block font-medium text-(--color-text-primary)" x-text="scanner.name"></span>
+                                                <span class="block text-xs text-(--color-text-tertiary)" x-text="`${scanner.studentId} · ${scanner.email} · ${scanner.organization}`"></span>
+                                            </button>
+                                        </template>
+                                    </div>
+                                    <p x-show="open && query.length > 0 && filteredScanners.length === 0" x-cloak class="mt-1 text-xs text-(--color-text-tertiary)">
+                                        No eligible scanner matches your search.
+                                    </p>
+                                    <p x-show="selectedLabel" x-cloak class="mt-1 text-xs text-(--color-text-secondary)">
+                                        Selected: <span class="font-medium" x-text="selectedLabel"></span>
+                                    </p>
+                                    <p x-show="submitted && !selectedId" x-cloak class="mt-1 text-xs text-red-600">
+                                        Choose a scanner from your authorized organization or college.
+                                    </p>
+                                </div>
+                                <input type="text" name="label" class="form-input text-sm" placeholder="Main Gate, Gym Entrance">
+                                <button type="submit" class="btn btn-primary btn-sm">
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                                    Assign
+                                </button>
+                            </form>
+                            @if($eligibleScannerUsers->isEmpty())
+                                <p class="mt-2 text-xs text-(--color-text-tertiary)">No completed institutional student or employee profiles are available for scanner assignment.</p>
+                            @elseif($scannerScopes->isEmpty())
+                                <p class="mt-2 text-xs text-(--color-warning)">No approved participant scope is available for scanner assignment.</p>
+                            @endif
+                        @endif
+
+                        <div class="mt-4 space-y-3">
+                            @forelse($event->scannerAssignments as $assignment)
+                                <div class="rounded-lg border border-(--color-border) bg-(--color-surface-raised) p-3">
+                                    <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                        <div>
+                                            <p class="text-sm font-semibold text-(--color-text-primary)">{{ $assignment->scannerUser?->name ?? 'Unknown scanner' }}</p>
+                                            <p class="text-xs text-(--color-text-tertiary)">
+                                                {{ $assignment->label ?: 'Event scanner' }} · {{ $assignment->scannerUser?->email }}
+                                            </p>
+                                            <div class="mt-2 grid gap-1 text-xs text-(--color-text-secondary)">
+                                                <span>Scope: {{ $assignment->participationScope?->displayName() ?? 'N/A' }}</span>
+                                                <span>Assigned by: {{ $assignment->assignedBy?->name ?? 'Unknown admin' }}</span>
+                                                <span>Last activated: {{ $assignment->last_activated_at?->diffForHumans() ?? 'Never' }}</span>
+                                                <span>Expires: {{ $assignment->expires_at?->format('M d, Y g:i A') ?? 'Not set' }}</span>
+                                            </div>
+                                        </div>
+                                        <div class="text-left sm:text-right">
+                                            <span class="badge badge-{{ str_replace('_', '-', $assignment->status) }}">{{ ucfirst($assignment->status) }}</span>
+                                            <div class="mt-2 text-xs text-(--color-text-tertiary)">
+                                                {{ $assignment->scannerSessions->where('status', 'active')->count() }} active session(s)
+                                            </div>
+                                            @if($assignment->status === 'active' && ($user->hasRole('Super Admin (OSA)') || $user->can('assign-scanners-own')))
+                                                <form method="POST" action="{{ route('dashboard.events.scanner-assignments.revoke', [$event->id, $assignment->id]) }}" class="mt-3">
+                                                    @csrf
+                                                    <input type="hidden" name="reason" value="Scanner assignment revoked from dashboard.">
+                                                    <button type="submit" class="btn btn-sm btn-destructive">Revoke assignment</button>
+                                                </form>
+                                            @elseif($assignment->status !== 'active')
+                                                <p class="mt-2 text-xs text-(--color-text-tertiary)">New activation is blocked for this assignment.</p>
+                                            @endif
+                                        </div>
+                                    </div>
+                                </div>
+                            @empty
+                                <div class="rounded-lg border border-dashed border-(--color-border) bg-(--color-surface-muted) p-4">
+                                    <p class="text-sm font-medium text-(--color-text-primary)">No assigned scanners yet</p>
+                                    <p class="mt-1 text-xs text-(--color-text-tertiary)">Assign a completed institutional student profile to let them log in and activate this event in the mobile scanner app.</p>
+                                </div>
+                            @endforelse
+                        </div>
+                    </section>
+
+                    <section class="proposal-modal-section">
+                        <h3 class="font-semibold text-sm text-(--color-text-primary) mb-3">Active Devices / Session History</h3>
+                        <div class="space-y-3">
+                            @forelse($event->scannerSessions as $session)
+                                <div class="rounded-lg border border-(--color-border) bg-(--color-surface-raised) p-3">
+                                    <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                        <div>
+                                            <p class="text-sm font-semibold text-(--color-text-primary)">{{ $session->label ?: 'Scanner Session' }}</p>
+                                            <p class="text-xs text-(--color-text-tertiary)">
+                                                {{ $session->scannerUser?->name ?? 'Unassigned scanner' }}
+                                                @if($session->assignment_id)
+                                                    · Assignment-backed
+                                                @endif
+                                            </p>
+                                            <div class="mt-2 grid gap-1 text-xs text-(--color-text-secondary)">
+                                                <span>Scope: {{ $session->participationScope?->displayName() ?? 'N/A' }}</span>
+                                                <span>Device: {{ $session->device_id ? 'Bound' : 'Not activated' }}</span>
+                                                <span>Last seen: {{ $session->last_seen_at?->diffForHumans() ?? 'Never' }}</span>
+                                                <span>Expires: {{ $session->expires_at?->format('M d, Y g:i A') ?? 'Not set' }}</span>
+                                            </div>
+                                        </div>
+                                        <div class="text-left sm:text-right">
+                                            <span class="badge badge-{{ str_replace('_', '-', $session->status) }}">{{ ucfirst($session->status) }}</span>
+                                            <div class="mt-2 text-xs text-(--color-text-tertiary)">
+                                                {{ $session->pending_scans_count }} pending · {{ $session->synced_scans_count }} synced · {{ $session->failed_scans_count }} failed
+                                            </div>
+                                            @if($session->status === 'active')
+                                                <form method="POST" action="{{ route('dashboard.events.scanner-sessions.revoke', [$event->id, $session->id]) }}" class="mt-3">
+                                                    @csrf
+                                                    <input type="hidden" name="reason" value="Revoked from dashboard.">
+                                                    <button type="submit" class="btn btn-sm btn-destructive">Revoke</button>
+                                                </form>
+                                            @endif
+                                        </div>
+                                    </div>
+                                </div>
+                            @empty
+                                <p class="text-sm text-(--color-text-tertiary)">No active device sessions yet. Assign scanners first; their sessions will appear after they log in and activate this event.</p>
+                            @endforelse
+                        </div>
+                    </section>
+                </div>
+
+                <div class="proposal-modal-footer">
+                    <p class="proposal-required-note">Existing attendance data is preserved</p>
+                    <div class="proposal-footer-actions">
+                        <button type="button" class="btn btn-secondary" onclick="document.getElementById('scanner-session-modal-{{ $event->id }}')?.close()">Close</button>
+                    </div>
+                </div>
+            </div>
+        </dialog>
+        @endif
+    @endforeach
 
     @if($canCreateProposals)
     {{-- Create Event Modal (HTML dialog) --}}
@@ -352,7 +767,7 @@
                                     </option>
                                 @endforeach
                             </select>
-                            <p class="form-helper">For sub-events under USG, LSG, or ARO permits.</p>
+                            <p class="form-helper">For sub-events under USG or LSG permits.</p>
                             @error('parent_event_id') <p class="form-error" role="alert">{{ $message }}</p> @enderror
                         </div>
                     </div>
@@ -447,10 +862,10 @@
                                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" d="M12 16v-8m0 0l-3 3m3-3l3 3M4 16.5V18a2 2 0 002 2h12a2 2 0 002-2v-1.5"/></svg>
                                 </span>
                                 <div>
-                                    <label for="proposal_document" class="form-label">Official PPA Proposal Softcopy <span class="text-(--color-destructive)">*</span></label>
+                                    <label for="proposal_document" class="form-label">Official PPA Proposal Softcopy <span class="text-(--color-text-tertiary)">(student affairs)</span></label>
                                     <input type="file" name="proposal_document" id="proposal_document"
                                            class="form-input @error('proposal_document') form-input-error @enderror"
-                                           accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" required>
+                                           accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
                                     <p class="form-helper">Accepted: PDF, DOC, DOCX up to 10 MB.</p>
                                     @error('proposal_document') <p class="form-error" role="alert">{{ $message }}</p> @enderror
                                 </div>
@@ -535,7 +950,7 @@
             </div>
 
             <div class="proposal-modal-footer">
-                <p class="proposal-required-note"><span class="text-(--color-destructive)">*</span> Required before saving the draft.</p>
+                <p class="proposal-required-note"><span class="text-(--color-destructive)">*</span> Required fields apply before saving the draft.</p>
                 <div class="proposal-footer-actions">
                     <button type="button" onclick="document.getElementById('create-event-modal').close()" class="btn btn-secondary">Cancel</button>
                     <button type="submit" class="btn btn-primary">
@@ -805,7 +1220,7 @@
                             </h3>
                             <div class="flex items-baseline gap-2 mb-1">
                                 <span class="text-2xl font-bold text-(--color-text-primary)" x-text="(attendance.attendance_rate || 0) + '%'"></span>
-                                <span class="text-xs text-(--color-text-tertiary)" x-text="'(' + (attendance.attended || 0) + ' / ' + (attendance.total_demographic || 0) + ' students)'"></span>
+                                <span class="text-xs text-(--color-text-tertiary)" x-text="'(' + (attendance.attended || 0) + ' / ' + (attendance.total_demographic || 0) + ' participants)'"></span>
                             </div>
                             <div class="w-full bg-(--color-surface-raised) h-2 rounded-full overflow-hidden">
                                 <div class="bg-(--color-accent) h-full transition-all duration-500" :style="'width: ' + (attendance.attendance_rate || 0) + '%'"></div>
@@ -823,6 +1238,33 @@
                                 <span class="text-xs text-(--color-text-tertiary)">/ 5.00 average</span>
                             </div>
                             <p class="text-xs text-(--color-text-tertiary) mt-1" x-text="'Total evaluations: ' + (evaluations.total_submitted || 0)"></p>
+                        </div>
+                    </div>
+
+                    {{-- Scope Rollups --}}
+                    <div class="proposal-modal-section">
+                        <h3 class="font-semibold text-sm text-(--color-text-primary) mb-3 flex items-center gap-2">
+                            <svg class="w-4 h-4 text-(--color-accent)" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M8.25 6.75h7.5M8.25 12h7.5m-7.5 5.25h4.5M4.5 5.25A2.25 2.25 0 016.75 3h10.5a2.25 2.25 0 012.25 2.25v13.5A2.25 2.25 0 0117.25 21H6.75a2.25 2.25 0 01-2.25-2.25V5.25z"/></svg>
+                            Participant Scope Roll-up
+                        </h3>
+                        <div class="space-y-2">
+                            <template x-for="scope in scopeRollups" :key="scope.id">
+                                <div class="rounded-lg border border-(--color-border) bg-(--color-surface-raised) px-3 py-2">
+                                    <div class="flex flex-wrap items-center justify-between gap-2">
+                                        <div class="min-w-0">
+                                            <p class="text-sm font-semibold text-(--color-text-primary) truncate" x-text="scope.name"></p>
+                                            <p class="text-xs text-(--color-text-tertiary)" x-text="scope.participant_type + ' · ' + scope.capture_mode + ' · ' + scope.ppa_status"></p>
+                                        </div>
+                                        <div class="text-right text-xs">
+                                            <p class="font-semibold text-(--color-text-primary)" x-text="scope.attendance_rate + '%'"></p>
+                                            <p class="text-(--color-text-tertiary)" x-text="scope.attended + ' / ' + scope.registered"></p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </template>
+                            <div x-show="scopeRollups.length === 0" class="text-xs text-(--color-text-tertiary) italic">
+                                No approved participant scopes are available for roll-up yet.
+                            </div>
                         </div>
                     </div>
 
@@ -1015,6 +1457,39 @@
         });
 
         document.addEventListener('alpine:init', () => {
+            Alpine.data('scannerAssignmentPicker', (scanners) => ({
+                scanners,
+                query: '',
+                selectedId: '',
+                selectedLabel: '',
+                submitted: false,
+                open: false,
+
+                get filteredScanners() {
+                    const term = this.query.trim().toLowerCase();
+
+                    if (!term) {
+                        return this.scanners.slice(0, 8);
+                    }
+
+                    return this.scanners
+                        .filter((scanner) => [
+                            scanner.name,
+                            scanner.email,
+                            scanner.studentId,
+                            scanner.organization,
+                        ].some((value) => String(value || '').toLowerCase().includes(term)))
+                        .slice(0, 8);
+                },
+
+                choose(scanner) {
+                    this.selectedId = scanner.id;
+                    this.selectedLabel = scanner.label;
+                    this.query = scanner.label;
+                    this.open = false;
+                },
+            }));
+
             Alpine.data('analyticsModal', () => ({
                 loading: false,
                 eventId: null,
@@ -1022,6 +1497,7 @@
                 attendance: { total_demographic: 0, attended: 0, attendance_rate: 0 },
                 evaluations: { total_submitted: 0, average_rating: 0, sentiments: { positive: 0, neutral: 0, negative: 0 } },
                 demographics: [],
+                scopeRollups: [],
 
                 async openModal(detail) {
                     this.eventId = detail.id;
@@ -1041,6 +1517,7 @@
                         this.attendance = data.attendance;
                         this.evaluations = data.evaluations;
                         this.demographics = data.demographics || [];
+                        this.scopeRollups = data.attendance?.participant_scopes || [];
                     } catch (e) {
                         console.error(e);
                         alert('Could not retrieve real-time analytics data. Please try again.');

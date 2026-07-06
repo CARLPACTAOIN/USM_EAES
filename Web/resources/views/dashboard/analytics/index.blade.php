@@ -16,20 +16,20 @@
 
         {{-- Scope badge --}}
         <div>
-            @if($user->hasRole('Super Admin (OSA)'))
+            @if($scope->isSuperAdmin())
                 <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-purple-500/10 text-purple-400 border border-purple-500/20">
                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064"/></svg>
                     University-Wide View
                 </span>
-            @elseif($user->hasRole('LSG Admin'))
+            @elseif($scope->isLsgAdmin())
                 <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/20">
                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>
-                    College-Level View ({{ $user->organization?->college?->code ?? 'N/A' }})
+                    College-Level View ({{ $scope->college?->code ?? 'N/A' }})
                 </span>
             @else
                 <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-green-500/10 text-green-400 border border-green-500/20">
                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-                    Organization View ({{ $user->organization?->acronym ?? 'N/A' }})
+                    Organization View ({{ $scope->organization?->acronym ?? 'N/A' }})
                 </span>
             @endif
         </div>
@@ -376,6 +376,11 @@
             <div x-data="{
                     orgSearch: '',
                     showAll: false,
+                    orgIsVisible(index, name) {
+                        const matches = !this.orgSearch || name.includes(this.orgSearch.toLowerCase());
+                        const withinList = this.showAll || index < 6;
+                        return matches && (withinList || this.orgSearch);
+                    },
                     get filteredCount() {
                         if (!this.orgSearch) return {{ $organizations->count() }};
                         return Array.from(document.querySelectorAll('[data-org-name]'))
@@ -414,10 +419,8 @@
                     @endphp
                     <div class="card space-y-0"
                          data-org-name="{{ strtolower($org->name . ' ' . $org->acronym) }}"
-                         x-show="!orgSearch || '{{ strtolower($org->name . ' ' . $org->acronym) }}'.includes(orgSearch.toLowerCase())"
-                         x-show.combined="showAll || {{ $orgIndex }} < 6"
+                         x-show="orgIsVisible({{ $orgIndex }}, '{{ strtolower($org->name . ' ' . $org->acronym) }}')"
                          x-data="{ showEvents: false, showPrograms: false }"
-                         :class="{ 'hidden': !showAll && {{ $orgIndex }} >= 6 && !orgSearch }"
                          x-transition:enter="transition ease-out duration-200"
                          x-transition:enter-start="opacity-0 translate-y-1"
                          x-transition:enter-end="opacity-100 translate-y-0">

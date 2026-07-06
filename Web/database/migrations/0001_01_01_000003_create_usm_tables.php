@@ -36,7 +36,7 @@ return new class extends Migration
             $table->uuid('college_id')->nullable();
             $table->string('name');
             $table->string('acronym');
-            $table->string('type'); // Enum: "society", "usg", "lsg", "aro"
+            $table->string('type'); // Enum: "society", "usg", "lsg"
             $table->timestamps();
 
             $table->foreign('college_id')->references('id')->on('colleges')->onDelete('cascade');

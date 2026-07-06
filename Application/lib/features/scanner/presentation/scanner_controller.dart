@@ -6,10 +6,14 @@ import '../../../config/app_config.dart';
 import '../data/scanner_api_client.dart';
 import '../data/scanner_contracts.dart';
 import '../data/scanner_local_database.dart';
+import '../domain/event_summary.dart';
 import '../domain/offline_scan.dart';
 import '../domain/roster_student.dart';
+import '../domain/scan_sync_status.dart';
 import '../domain/scan_type.dart';
+import '../domain/scanner_error_mapper.dart';
 import '../domain/scanner_session.dart';
+import '../domain/student_id_validator.dart';
 
 class ScannerController extends ChangeNotifier {
   ScannerController({
@@ -18,12 +22,18 @@ class ScannerController extends ChangeNotifier {
     required String deviceId,
     NetworkStatusChecker? networkStatusChecker,
     String Function()? dedupIdFactory,
+    DateTime Function()? nowFactory,
+    Duration? duplicateCooldown,
   }) : _localDatabase = localDatabase,
        _apiClient = apiClient,
        _deviceId = deviceId,
        _networkStatusChecker =
            networkStatusChecker ?? ConnectivityStatusChecker(),
-       _dedupIdFactory = dedupIdFactory ?? (() => const Uuid().v4());
+       _dedupIdFactory = dedupIdFactory ?? (() => const Uuid().v4()),
+       _nowFactory = nowFactory ?? DateTime.now,
+       duplicateCooldown =
+           duplicateCooldown ??
+           Duration(seconds: AppConfig.duplicateCooldownSeconds);
 
   factory ScannerController.defaultInstance() {
     return ScannerController(
@@ -38,60 +48,153 @@ class ScannerController extends ChangeNotifier {
   final String _deviceId;
   final NetworkStatusChecker _networkStatusChecker;
   final String Function() _dedupIdFactory;
+  final DateTime Function() _nowFactory;
 
   ScannerSession? session;
   ScanType scanType = ScanType.timeIn;
   bool busy = false;
   bool syncing = false;
+  bool isSavingScan = false;
   String? eventTitle;
+  String? eventStatus;
+  String? eventLifecyclePhase;
+  String? scannerSessionStatus;
+  String? participationScopeName;
+  DateTime? scanWindowStart;
+  DateTime? scanWindowEnd;
+  DateTime? syncGraceEndsAt;
   String? statusMessage;
   String? errorMessage;
+  String? errorDetails;
   int rosterCount = 0;
   int pendingCount = 0;
+  int syncedCount = 0;
+  int failedCount = 0;
   int unresolvedLastSync = 0;
+  DateTime? lastSyncAttempt;
+  DateTime? lastSuccessfulSync;
   ScanCaptureResult? lastScanResult;
+  GlobalFeedback globalFeedback = const GlobalFeedback.none();
+  int sessionActivatedSignal = 0;
+
+  final Map<String, DateTime> recentScanCache = {};
+  final Duration duplicateCooldown;
 
   bool get hasSession => session != null;
 
-  /// Whether the device currently has any network connectivity.
+  bool get canCaptureScans => hasSession && eventLifecyclePhase == 'active';
+
+  bool get syncGraceActive {
+    final graceEnd = syncGraceEndsAt;
+    return graceEnd != null && _nowFactory().toUtc().isBefore(graceEnd.toUtc());
+  }
+
   bool isOnline = false;
+
+  String get syncStatusMessage {
+    if (syncing) {
+      return 'Syncing scans…';
+    }
+    if (!isOnline) {
+      return 'Device offline. Sync will resume when network returns.';
+    }
+    if (failedCount > 0) {
+      return 'Some scans failed to sync.';
+    }
+    if (pendingCount == 0 && failedCount == 0) {
+      return 'All scans are synced.';
+    }
+    return 'Scans are waiting to sync.';
+  }
 
   void setScanType(ScanType value) {
     scanType = value;
     notifyListeners();
   }
 
-  Future<void> applySessionUri(Uri uri) async {
-    final parsed = ScannerSession.fromUri(uri);
-    if (parsed == null) {
-      errorMessage =
-          'Scanner link is invalid. Use eaes://scanner?token=...&event_id=...';
-      notifyListeners();
-      return;
-    }
+  void clearGlobalFeedback() {
+    globalFeedback = const GlobalFeedback.none();
+    notifyListeners();
+  }
 
-    await activateSession(parsed);
+  void _setError(Object error, {bool sessionActivation = false}) {
+    final mapped = sessionActivation
+        ? ScannerErrorMapper.mapSessionActivation(error)
+        : ScannerErrorMapper.map(error);
+    errorMessage = mapped.message;
+    errorDetails = mapped.technicalDetails;
+    globalFeedback = GlobalFeedback(
+      kind: FeedbackKind.error,
+      message: mapped.message,
+    );
+  }
+
+  Future<void> _refreshCounts(String eventId) async {
+    pendingCount = await _localDatabase.pendingCount(eventId);
+    syncedCount = await _localDatabase.syncedCount(eventId);
+    failedCount = await _localDatabase.failedCount(eventId);
+    rosterCount = await _localDatabase.rosterCount();
   }
 
   Future<void> activateSession(ScannerSession nextSession) async {
-    session = nextSession;
     busy = true;
     errorMessage = null;
-    statusMessage = 'Validating scanner session.';
+    errorDetails = null;
+    statusMessage = null;
+    globalFeedback = const GlobalFeedback(
+      kind: FeedbackKind.loading,
+      message: 'Activating scanner session…',
+    );
     notifyListeners();
 
     try {
       final response = await _apiClient.validateSession(nextSession);
       final event = response['event'] as Map<String, dynamic>?;
+      final scannerSession =
+          response['scanner_session'] as Map<String, dynamic>?;
+      final participationScope =
+          scannerSession?['participation_scope'] as Map<String, dynamic>?;
+      session = nextSession.copyWith(
+        eventParticipationScopeId:
+            scannerSession?['event_participation_scope_id']?.toString(),
+        participationScopeName: participationScope?['name']?.toString(),
+      );
       eventTitle = event?['title']?.toString();
-      statusMessage = 'Session ready. Hydrate roster before scanning offline.';
-      pendingCount = await _localDatabase.pendingCount(nextSession.eventId);
+      eventStatus = event?['status']?.toString();
+      eventLifecyclePhase =
+          event?['lifecycle_phase']?.toString() ?? eventStatus;
+      scannerSessionStatus = scannerSession?['status']?.toString();
+      participationScopeName =
+          participationScope?['name']?.toString() ??
+          nextSession.participationScopeName;
+      scanWindowStart = _parseDateTime(scannerSession?['scan_window_start']);
+      scanWindowEnd = _parseDateTime(scannerSession?['scan_window_end']);
+      syncGraceEndsAt = _parseDateTime(scannerSession?['sync_grace_ends_at']);
+      await _refreshCounts(nextSession.eventId);
+      statusMessage = _sessionReadyMessage();
+      globalFeedback = GlobalFeedback(
+        kind: canCaptureScans ? FeedbackKind.success : FeedbackKind.warning,
+        message: statusMessage!,
+      );
+      sessionActivatedSignal++;
     } catch (error) {
-      errorMessage = error.toString();
+      session = null;
+      eventTitle = null;
+      eventStatus = null;
+      eventLifecyclePhase = null;
+      scannerSessionStatus = null;
+      participationScopeName = null;
+      scanWindowStart = null;
+      scanWindowEnd = null;
+      syncGraceEndsAt = null;
+      _setError(error, sessionActivation: true);
       statusMessage = null;
     } finally {
       busy = false;
       notifyListeners();
+      if (session != null) {
+        await checkEventRetention();
+      }
     }
   }
 
@@ -105,17 +208,17 @@ class ScannerController extends ChangeNotifier {
 
     busy = true;
     errorMessage = null;
-    statusMessage = 'Downloading student roster.';
+    errorDetails = null;
+    statusMessage = 'Downloading participant roster.';
     notifyListeners();
 
     try {
       final roster = await _apiClient.hydrateRoster(activeSession);
       await _localDatabase.upsertRoster(roster);
-      rosterCount = roster.length;
-      pendingCount = await _localDatabase.pendingCount(activeSession.eventId);
-      statusMessage = 'Roster hydrated. Offline scanning is ready.';
+      await _refreshCounts(activeSession.eventId);
+      statusMessage = 'Participant roster hydrated. Offline scanning is ready.';
     } catch (error) {
-      errorMessage = error.toString();
+      _setError(error);
       statusMessage = null;
     } finally {
       busy = false;
@@ -123,65 +226,208 @@ class ScannerController extends ChangeNotifier {
     }
   }
 
+  String _duplicateKey({
+    required String eventId,
+    required String? eventParticipationScopeId,
+    required String? eventDayId,
+    required String value,
+    required ScanType type,
+  }) {
+    return '$eventId|${eventParticipationScopeId ?? ''}|${eventDayId ?? ''}|$value|${type.apiValue}';
+  }
+
   Future<ScanCaptureResult> recordQr(
     String rawValue, {
     bool manual = false,
   }) async {
+    if (isSavingScan) {
+      return lastScanResult ??
+          const ScanCaptureResult(
+            success: false,
+            unresolved: false,
+            isDuplicate: false,
+            kind: ScanResultKind.error,
+            title: 'Scan not saved',
+            detail: 'A scan is already being saved.',
+          );
+    }
+
     final activeSession = session;
-    final qrValue = rawValue.trim();
+    final trimmed = rawValue.trim();
 
     if (activeSession == null) {
       return _captureError('Open a scanner session before recording scans.');
     }
-    if (qrValue.isEmpty) {
+
+    if (!canCaptureScans) {
+      return _captureError(_scanBlockedMessage());
+    }
+
+    if (manual) {
+      return _recordManualEntry(trimmed, activeSession);
+    }
+
+    if (trimmed.isEmpty) {
       return _captureError('QR value is empty.');
     }
 
-    RosterStudent? student;
-    try {
-      student = await _localDatabase.findStudentByQr(qrValue);
-    } catch (error) {
-      return _captureError(error.toString());
+    return _recordScanValue(
+      activeSession: activeSession,
+      lookupValue: trimmed,
+      storedQrValue: trimmed,
+      manual: false,
+    );
+  }
+
+  Future<ScanCaptureResult> _recordManualEntry(
+    String trimmed,
+    ScannerSession activeSession,
+  ) async {
+    final validation = StudentIdValidator.validate(trimmed);
+    if (!validation.isValid) {
+      return _captureError(validation.errorMessage!);
     }
 
-    final now = DateTime.now().toUtc();
-    final dedupKey =
-        '${activeSession.eventId}-${scanType.apiValue}-${_dedupIdFactory()}';
+    final studentIdNumber = validation.value!;
+    RosterStudent? student;
+    try {
+      student = await _localDatabase.findStudentByIdNumber(studentIdNumber);
+    } catch (error) {
+      return _captureError(ScannerErrorMapper.map(error).message);
+    }
 
-    final scan = OfflineScan(
+    return _recordScanValue(
+      activeSession: activeSession,
+      lookupValue: studentIdNumber,
+      storedQrValue: student?.qrCodeValue ?? studentIdNumber,
+      manual: true,
+      student: student,
+    );
+  }
+
+  Future<ScanCaptureResult> _recordScanValue({
+    required ScannerSession activeSession,
+    required String lookupValue,
+    required String storedQrValue,
+    required bool manual,
+    RosterStudent? student,
+  }) async {
+    student ??= manual
+        ? null
+        : await _localDatabase.findStudentByQr(lookupValue);
+
+    final duplicateKey = _duplicateKey(
       eventId: activeSession.eventId,
-      studentId: student?.studentId,
-      qrCodeValue: qrValue,
-      scanType: scanType,
-      scannedAt: now,
-      deviceId: _deviceId,
-      manualEntry: manual,
-      dedupKey: dedupKey,
-      resolutionStatus: student == null
-          ? 'pending_server_lookup'
-          : 'local_roster_match',
+      eventParticipationScopeId: activeSession.eventParticipationScopeId,
+      eventDayId: null,
+      value: lookupValue,
+      type: scanType,
     );
 
-    await _localDatabase.insertScan(scan);
-    pendingCount = await _localDatabase.pendingCount(activeSession.eventId);
+    final lastScanAt = recentScanCache[duplicateKey];
+    final now = _nowFactory().toUtc();
+    if (lastScanAt != null && now.difference(lastScanAt) < duplicateCooldown) {
+      final duplicateResult = ScanCaptureResult(
+        success: false,
+        unresolved: false,
+        isDuplicate: true,
+        kind: ScanResultKind.duplicate,
+        title: 'Already scanned just now.',
+        detail: 'Please scan the next student.',
+      );
+      lastScanResult = duplicateResult;
+      notifyListeners();
+      return duplicateResult;
+    }
 
-    final result = ScanCaptureResult(
-      success: true,
-      unresolved: student == null,
-      title: student?.name ?? 'Unresolved QR saved',
-      detail: student == null
-          ? 'Pending registration lookup on sync.'
-          : '${student.programCode ?? 'Student'} captured as ${scanType.label}.',
-    );
-
-    statusMessage = result.detail;
-    errorMessage = null;
-    lastScanResult = result;
+    isSavingScan = true;
     notifyListeners();
-    return result;
+
+    try {
+      final dedupKey =
+          '${activeSession.eventId}-${scanType.apiValue}-${_dedupIdFactory()}';
+
+      final scan = OfflineScan(
+        eventId: activeSession.eventId,
+        eventParticipationScopeId: activeSession.eventParticipationScopeId,
+        studentId: student?.studentId,
+        qrCodeValue: storedQrValue,
+        scanType: scanType,
+        scannedAt: now,
+        deviceId: _deviceId,
+        manualEntry: manual,
+        dedupKey: dedupKey,
+        resolutionStatus: student == null
+            ? 'pending_server_lookup'
+            : 'local_roster_match',
+      );
+
+      final inserted = await _localDatabase.insertScan(scan);
+      if (inserted == 0) {
+        return _captureError('This scan could not be saved. Please try again.');
+      }
+
+      recentScanCache[duplicateKey] = now;
+      await _refreshCounts(activeSession.eventId);
+
+      final result = student == null
+          ? ScanCaptureResult(
+              success: true,
+              unresolved: true,
+              isDuplicate: false,
+              kind: ScanResultKind.unresolved,
+              title: 'Saved as unresolved scan.',
+              detail: 'It will be checked during sync.',
+            )
+          : ScanCaptureResult(
+              success: true,
+              unresolved: false,
+              isDuplicate: false,
+              kind: ScanResultKind.success,
+              title: student.name,
+              detail: '${student.name} captured as ${scanType.label}.',
+            );
+
+      statusMessage = result.detail;
+      errorMessage = null;
+      errorDetails = null;
+      lastScanResult = result;
+      notifyListeners();
+      return result;
+    } catch (error) {
+      return _captureError(ScannerErrorMapper.map(error).message);
+    } finally {
+      isSavingScan = false;
+      notifyListeners();
+    }
   }
 
   Future<void> syncPending() async {
+    await _syncScans(includeFailed: true);
+  }
+
+  Future<void> retryFailedScans() async {
+    final activeSession = session;
+    if (activeSession == null) {
+      errorMessage = 'Open a scanner session before syncing.';
+      notifyListeners();
+      return;
+    }
+
+    final failed = await _localDatabase.failedScans(activeSession.eventId);
+    if (failed.isEmpty) {
+      return;
+    }
+
+    await _localDatabase.resetFailedToPending(
+      failed.map((scan) => scan.dedupKey).toList(),
+    );
+    await _refreshCounts(activeSession.eventId);
+    notifyListeners();
+    await _syncScans(includeFailed: true);
+  }
+
+  Future<void> _syncScans({required bool includeFailed}) async {
     final activeSession = session;
     if (activeSession == null) {
       errorMessage = 'Open a scanner session before syncing.';
@@ -193,46 +439,174 @@ class ScannerController extends ChangeNotifier {
     if (connectivity.length == 1 &&
         connectivity.contains(ConnectivityResult.none)) {
       errorMessage =
-          'Device is offline. Sync will be available when network returns.';
+          'Device is offline. Sync will resume when network returns.';
       notifyListeners();
       return;
     }
 
     syncing = true;
     errorMessage = null;
+    errorDetails = null;
     statusMessage = 'Uploading pending scans.';
+    lastSyncAttempt = _nowFactory();
     notifyListeners();
 
+    List<OfflineScan> batch = [];
     try {
-      final scans = await _localDatabase.unsyncedScans(
+      batch = await _localDatabase.unsyncedScans(
         activeSession.eventId,
         limit: AppConfig.syncBatchSize,
       );
 
-      if (scans.isEmpty) {
+      if (batch.isEmpty) {
         statusMessage = 'No pending scans to sync.';
-        pendingCount = 0;
+        await _refreshCounts(activeSession.eventId);
         return;
       }
 
+      await _localDatabase.markSyncing(
+        batch.map((scan) => scan.dedupKey).toList(),
+      );
+
       final response = await _apiClient.syncScans(
         session: activeSession,
-        scans: scans,
+        scans: batch,
       );
-      await _localDatabase.markSynced(
-        scans.map((scan) => scan.dedupKey).toList(),
-      );
-      pendingCount = await _localDatabase.pendingCount(activeSession.eventId);
+
+      final ingested = (response['ingested_count'] as num?)?.toInt();
+      final confirmedCount = ingested ?? batch.length;
+      final confirmedKeys = batch
+          .take(confirmedCount.clamp(0, batch.length))
+          .map((scan) => scan.dedupKey)
+          .toList();
+
+      if (confirmedKeys.isNotEmpty) {
+        await _localDatabase.markSynced(confirmedKeys);
+        lastSuccessfulSync = _nowFactory();
+      }
+
+      final unconfirmed = batch
+          .where((scan) => !confirmedKeys.contains(scan.dedupKey))
+          .map((scan) => scan.dedupKey)
+          .toList();
+      if (unconfirmed.isNotEmpty) {
+        await _localDatabase.markFailed(
+          unconfirmed,
+          failureReason: 'validation_error',
+        );
+      }
+
+      await _refreshCounts(activeSession.eventId);
       unresolvedLastSync = (response['unresolved_count'] as num?)?.toInt() ?? 0;
       statusMessage =
-          'Uploaded ${scans.length} scans. '
+          'Uploaded ${confirmedKeys.length} scans. '
           '$unresolvedLastSync require server-side lookup.';
+
+      await _localDatabase.upsertEventSummary(
+        EventSummary(
+          eventId: activeSession.eventId,
+          title: eventTitle ?? 'Event',
+          totalSynced: syncedCount,
+          lastSyncedAt: lastSuccessfulSync,
+        ),
+      );
     } catch (error) {
-      errorMessage = error.toString();
+      final mapped = ScannerErrorMapper.map(error);
+      if (batch.isNotEmpty) {
+        await _localDatabase.markFailed(
+          batch.map((scan) => scan.dedupKey).toList(),
+          failureReason: mapped.categoryKey,
+        );
+        await _refreshCounts(activeSession.eventId);
+      }
+      _setError(error);
       statusMessage = null;
     } finally {
       syncing = false;
       notifyListeners();
+      await checkEventRetention();
+    }
+  }
+
+  Future<void> checkEventRetention() async {
+    final activeSession = session;
+    if (activeSession == null) {
+      return;
+    }
+
+    try {
+      final response = await _apiClient.validateSession(activeSession);
+      final event = response['event'] as Map<String, dynamic>?;
+      final scannerSession =
+          response['scanner_session'] as Map<String, dynamic>?;
+      final participationScope =
+          scannerSession?['participation_scope'] as Map<String, dynamic>?;
+      final status = event?['status']?.toString();
+      eventStatus = status;
+      eventLifecyclePhase =
+          event?['lifecycle_phase']?.toString() ?? eventStatus;
+      scannerSessionStatus = scannerSession?['status']?.toString();
+      participationScopeName =
+          participationScope?['name']?.toString() ??
+          activeSession.participationScopeName;
+      scanWindowStart = _parseDateTime(scannerSession?['scan_window_start']);
+      scanWindowEnd = _parseDateTime(scannerSession?['scan_window_end']);
+      syncGraceEndsAt = _parseDateTime(scannerSession?['sync_grace_ends_at']);
+
+      if (status != 'completed' && eventLifecyclePhase != 'completed') {
+        notifyListeners();
+        return;
+      }
+
+      await _refreshCounts(activeSession.eventId);
+
+      if (pendingCount > 0 || failedCount > 0) {
+        globalFeedback = const GlobalFeedback(
+          kind: FeedbackKind.warning,
+          message:
+              'Event completed, but this device still has unsynced scans. '
+              'Do not uninstall the app until all scans are synced.',
+        );
+        notifyListeners();
+        return;
+      }
+
+      if (lastSuccessfulSync == null) {
+        notifyListeners();
+        return;
+      }
+
+      await _localDatabase.wipeRoster();
+      rosterCount = 0;
+      final wipedAt = _nowFactory();
+      await _localDatabase.upsertEventSummary(
+        EventSummary(
+          eventId: activeSession.eventId,
+          title: eventTitle ?? 'Event',
+          totalSynced: syncedCount,
+          lastSyncedAt: lastSuccessfulSync,
+          wipedAt: wipedAt,
+        ),
+      );
+
+      session = null;
+      eventTitle = null;
+      eventStatus = null;
+      eventLifecyclePhase = null;
+      scannerSessionStatus = null;
+      participationScopeName = null;
+      scanWindowStart = null;
+      scanWindowEnd = null;
+      syncGraceEndsAt = null;
+      globalFeedback = const GlobalFeedback(
+        kind: FeedbackKind.success,
+        message:
+            'Event completed. Local roster data has been removed from this device.',
+      );
+      statusMessage = null;
+      notifyListeners();
+    } catch (_) {
+      // Retention checks are best-effort and should not block scanning.
     }
   }
 
@@ -241,6 +615,8 @@ class ScannerController extends ChangeNotifier {
     lastScanResult = ScanCaptureResult(
       success: false,
       unresolved: false,
+      isDuplicate: false,
+      kind: ScanResultKind.error,
       title: 'Scan not saved',
       detail: message,
     );
@@ -248,15 +624,67 @@ class ScannerController extends ChangeNotifier {
     return lastScanResult!;
   }
 
-  /// Returns the [limit] most-recent scans for the current event, newest first.
-  /// Returns an empty list if no session is active.
+  DateTime? _parseDateTime(Object? value) {
+    if (value == null) return null;
+    return DateTime.tryParse(value.toString());
+  }
+
+  String _sessionReadyMessage() {
+    switch (eventLifecyclePhase) {
+      case 'scheduled':
+        final start = scanWindowStart;
+        return start == null
+            ? 'Event has not started yet.'
+            : 'Event has not started yet. Scanning will be available at ${_formatTime(start)}.';
+      case 'active':
+        return 'Event active. Scanning enabled.';
+      case 'ended':
+      case 'evaluation_open':
+      case 'evaluation_closed':
+      case 'processing':
+        return 'Event has ended. New scans are disabled. Please sync all pending scans.';
+      case 'completed':
+        return 'Event completed. Local data will be removed after scans are synced.';
+      default:
+        return 'Session ready. Hydrate roster before scanning offline.';
+    }
+  }
+
+  String _scanBlockedMessage() {
+    switch (eventLifecyclePhase) {
+      case 'scheduled':
+        final start = scanWindowStart;
+        return start == null
+            ? 'Event has not started yet.'
+            : 'Event has not started yet. Scanning will be available at ${_formatTime(start)}.';
+      case 'ended':
+      case 'evaluation_open':
+      case 'evaluation_closed':
+      case 'processing':
+        return 'Event has ended. New scans are disabled. Please sync all pending scans.';
+      case 'completed':
+        return 'Event completed. New scanner activity is closed.';
+      default:
+        return 'Scanning is not available for this event phase.';
+    }
+  }
+
+  String _formatTime(DateTime value) {
+    final local = value.toLocal();
+    final hour = local.hour > 12
+        ? local.hour - 12
+        : (local.hour == 0 ? 12 : local.hour);
+    final minute = local.minute.toString().padLeft(2, '0');
+    final suffix = local.hour >= 12 ? 'PM' : 'AM';
+    return '$hour:$minute $suffix';
+  }
+
   Future<List<OfflineScan>> recentScans({int limit = 100}) async {
     final activeSession = session;
     if (activeSession == null) return [];
     return _localDatabase.recentScans(activeSession.eventId, limit: limit);
   }
 
-  /// Refreshes [isOnline] from the connectivity plugin.
   Future<void> checkConnectivity() async {
     final result = await _networkStatusChecker.checkConnectivity();
     isOnline =
@@ -265,16 +693,22 @@ class ScannerController extends ChangeNotifier {
   }
 }
 
+enum ScanResultKind { success, unresolved, duplicate, error }
+
 class ScanCaptureResult {
   const ScanCaptureResult({
     required this.success,
     required this.unresolved,
+    required this.isDuplicate,
+    required this.kind,
     required this.title,
     required this.detail,
   });
 
   final bool success;
   final bool unresolved;
+  final bool isDuplicate;
+  final ScanResultKind kind;
   final String title;
   final String detail;
 }

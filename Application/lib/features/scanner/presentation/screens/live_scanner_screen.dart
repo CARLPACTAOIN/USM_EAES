@@ -1,24 +1,17 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
+import '../../../../config/app_config.dart';
 import '../../domain/scan_type.dart';
 import '../scanner_controller.dart';
 import '../widgets/scan_result_card.dart';
 import '../widgets/scanner_viewfinder.dart';
+import '../widgets/sync_summary_strip.dart';
 
-/// Screen 2 — Live Scanner (pushed, not a tab).
-///
-/// Focused entirely on scanning:
-/// - Top AppBar: event name + mode pill + pending badge
-/// - Large camera viewfinder (~70 % of viewport)
-/// - Animated last-scan result card
-/// - Bottom row: Manual Entry | Switch Mode | Sync (when pending > 0)
 class LiveScannerScreen extends StatefulWidget {
-  const LiveScannerScreen({
-    super.key,
-    required this.controller,
-  });
+  const LiveScannerScreen({super.key, required this.controller});
 
   final ScannerController controller;
 
@@ -27,22 +20,85 @@ class LiveScannerScreen extends StatefulWidget {
 }
 
 class _LiveScannerScreenState extends State<LiveScannerScreen> {
-  bool _scanLocked = false;
+  bool _showDuplicateOverlay = false;
   bool _showManualEntry = false;
+  String? _manualError;
   final TextEditingController _manualController = TextEditingController();
+  Timer? _duplicateOverlayTimer;
+
+  /// Post-scan throttle: after a successful capture, ignore detections for a
+  /// short window so we don't rapidly read the next QR (or re-read this one).
+  bool _scanThrottled = false;
+  Timer? _scanThrottleTimer;
+
+  /// Frame-presence tracking for the "QR must leave the frame" guard.
+  /// Holds the raw value currently sitting in the camera frame; cleared once
+  /// the camera reports no detections for [AppConfig.frameClearMs].
+  String? _valueInFrame;
+  Timer? _frameClearTimer;
 
   ScannerController get _ctrl => widget.controller;
 
   @override
   void dispose() {
+    _duplicateOverlayTimer?.cancel();
+    _scanThrottleTimer?.cancel();
+    _frameClearTimer?.cancel();
     _manualController.dispose();
     super.dispose();
   }
 
-  Future<void> _handleScan(dynamic capture) async {
-    if (_scanLocked || !_ctrl.hasSession) return;
+  ViewfinderProcessingState get _processingState {
+    if (_ctrl.isSavingScan) {
+      return ViewfinderProcessingState.saving;
+    }
+    if (_showDuplicateOverlay) {
+      return ViewfinderProcessingState.duplicate;
+    }
+    if (_scanThrottled) {
+      return ViewfinderProcessingState.captured;
+    }
+    return ViewfinderProcessingState.idle;
+  }
 
-    // capture is BarcodeCapture from mobile_scanner
+  void _showDuplicateFeedback() {
+    _duplicateOverlayTimer?.cancel();
+    setState(() => _showDuplicateOverlay = true);
+    HapticFeedback.lightImpact();
+    _duplicateOverlayTimer = Timer(const Duration(milliseconds: 1800), () {
+      if (mounted) {
+        setState(() => _showDuplicateOverlay = false);
+      }
+    });
+  }
+
+  /// Begins the post-scan throttle window after a successful capture.
+  void _startScanThrottle() {
+    _scanThrottleTimer?.cancel();
+    setState(() => _scanThrottled = true);
+    HapticFeedback.mediumImpact();
+    _scanThrottleTimer = Timer(
+      Duration(milliseconds: AppConfig.postScanThrottleMs),
+      () {
+        if (mounted) setState(() => _scanThrottled = false);
+      },
+    );
+  }
+
+  /// Re-arms the timer that clears [_valueInFrame] once the QR leaves the view.
+  /// While a code stays in frame, detections keep firing and re-arm this timer,
+  /// so it only fires after the frame is empty for [AppConfig.frameClearMs].
+  void _armFrameClearTimer() {
+    _frameClearTimer?.cancel();
+    _frameClearTimer = Timer(
+      Duration(milliseconds: AppConfig.frameClearMs),
+      () => _valueInFrame = null,
+    );
+  }
+
+  Future<void> _handleScan(dynamic capture) async {
+    if (!_ctrl.hasSession) return;
+
     final barcodes = (capture as dynamic).barcodes as List<dynamic>;
     final rawValue = barcodes
         .map((b) => b.rawValue as String?)
@@ -52,21 +108,51 @@ class _LiveScannerScreenState extends State<LiveScannerScreen> {
 
     if (rawValue == null) return;
 
-    setState(() => _scanLocked = true);
-    await _ctrl.recordQr(rawValue);
+    // Keep frame-presence tracking fresh on every detection (even while saving
+    // or throttled) so the "must leave frame" guard stays accurate.
+    final sameValueStillInFrame = rawValue == _valueInFrame;
+    _valueInFrame = rawValue;
+    _armFrameClearTimer();
 
-    await Future<void>.delayed(const Duration(milliseconds: 900));
-    if (mounted) setState(() => _scanLocked = false);
+    // Guard 1: saving in progress or post-scan throttle window is active.
+    if (_ctrl.isSavingScan || _scanThrottled) return;
+
+    // Guard 2 (optional): same code has not left the frame yet.
+    if (AppConfig.requireQrExitFrame && sameValueStillInFrame) return;
+
+    final result = await _ctrl.recordQr(rawValue);
+    if (result.success) {
+      _startScanThrottle();
+    } else if (result.isDuplicate) {
+      _showDuplicateFeedback();
+    }
   }
 
   Future<void> _handleManualScan() async {
     final value = _manualController.text.trim();
-    if (value.isEmpty) return;
+    if (value.isEmpty) {
+      setState(
+        () => _manualError =
+            'Enter a valid student ID number, example: 23-72634.',
+      );
+      return;
+    }
 
     final result = await _ctrl.recordQr(value, manual: true);
-    if (result.success) _manualController.clear();
+    if (!result.success && !result.isDuplicate) {
+      setState(() => _manualError = result.detail);
+      return;
+    }
 
-    if (mounted) setState(() => _showManualEntry = false);
+    if (result.success) {
+      _manualController.clear();
+      setState(() {
+        _manualError = null;
+        _showManualEntry = false;
+      });
+    } else if (result.isDuplicate) {
+      _showDuplicateFeedback();
+    }
   }
 
   @override
@@ -82,44 +168,31 @@ class _LiveScannerScreenState extends State<LiveScannerScreen> {
         final pendingCount = _ctrl.pendingCount;
 
         return Scaffold(
-          backgroundColor: isDark ? const Color(0xFF0A0F1E) : const Color(0xFFF0F4F8),
+          backgroundColor: isDark
+              ? const Color(0xFF0A0F1E)
+              : const Color(0xFFF0F4F8),
           appBar: _ScannerAppBar(
             ctrl: _ctrl,
             scanType: scanType,
             isTimeIn: isTimeIn,
-            pendingCount: pendingCount,
+            pendingCount: pendingCount + _ctrl.failedCount,
           ),
           body: SafeArea(
             child: Column(
               children: [
-                // ---------- Camera area ----------
                 Expanded(
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
                     child: ScannerViewfinder(
                       active: _ctrl.hasSession,
-                      scanLocked: _scanLocked,
+                      processingState: _processingState,
                       onDetect: _handleScan,
                     ),
                   ),
                 ),
-
                 const SizedBox(height: 12),
-
-                // ---------- Last scan result ----------
                 AnimatedSwitcher(
                   duration: const Duration(milliseconds: 250),
-                  switchInCurve: Curves.easeOutCubic,
-                  transitionBuilder: (child, animation) => FadeTransition(
-                    opacity: animation,
-                    child: SlideTransition(
-                      position: Tween<Offset>(
-                        begin: const Offset(0, 0.3),
-                        end: Offset.zero,
-                      ).animate(animation),
-                      child: child,
-                    ),
-                  ),
                   child: _ctrl.lastScanResult != null
                       ? Padding(
                           key: ValueKey(_ctrl.lastScanResult?.title),
@@ -131,30 +204,35 @@ class _LiveScannerScreenState extends State<LiveScannerScreen> {
                         )
                       : const SizedBox.shrink(key: ValueKey('no-result')),
                 ),
-
                 const SizedBox(height: 12),
-
-                // ---------- Manual entry panel ----------
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: SyncSummaryStrip(controller: _ctrl),
+                ),
+                const SizedBox(height: 12),
                 AnimatedSize(
                   duration: const Duration(milliseconds: 250),
                   curve: Curves.easeOutCubic,
                   child: _showManualEntry
                       ? _ManualEntryPanel(
                           controller: _manualController,
+                          errorText: _manualError,
                           onSubmit: _handleManualScan,
-                          onDismiss: () =>
-                              setState(() => _showManualEntry = false),
+                          onDismiss: () => setState(() {
+                            _showManualEntry = false;
+                            _manualError = null;
+                          }),
                         )
                       : const SizedBox.shrink(),
                 ),
-
-                // ---------- Bottom action row ----------
                 _BottomActionRow(
                   ctrl: _ctrl,
                   isTimeIn: isTimeIn,
                   pendingCount: pendingCount,
-                  onManualEntry: () =>
-                      setState(() => _showManualEntry = !_showManualEntry),
+                  onManualEntry: () => setState(() {
+                    _showManualEntry = !_showManualEntry;
+                    _manualError = null;
+                  }),
                   onSwitchMode: () {
                     _ctrl.setScanType(
                       isTimeIn ? ScanType.timeOut : ScanType.timeIn,
@@ -170,10 +248,6 @@ class _LiveScannerScreenState extends State<LiveScannerScreen> {
     );
   }
 }
-
-// ---------------------------------------------------------------------------
-// Sub-widgets
-// ---------------------------------------------------------------------------
 
 class _ScannerAppBar extends StatelessWidget implements PreferredSizeWidget {
   const _ScannerAppBar({
@@ -223,7 +297,6 @@ class _ScannerAppBar extends StatelessWidget implements PreferredSizeWidget {
         ],
       ),
       actions: [
-        // Mode pill
         Container(
           margin: const EdgeInsets.only(right: 4),
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
@@ -253,7 +326,6 @@ class _ScannerAppBar extends StatelessWidget implements PreferredSizeWidget {
             ],
           ),
         ),
-        // Pending badge
         if (pendingCount > 0)
           Padding(
             padding: const EdgeInsets.only(right: 12),
@@ -327,7 +399,6 @@ class _BottomActionRow extends StatelessWidget {
       ),
       child: Row(
         children: [
-          // Manual entry
           Expanded(
             child: _ActionButton(
               icon: Icons.keyboard_rounded,
@@ -336,23 +407,19 @@ class _BottomActionRow extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 8),
-          // Switch mode
           Expanded(
             child: _ActionButton(
-              icon: isTimeIn
-                  ? Icons.logout_rounded
-                  : Icons.login_rounded,
+              icon: isTimeIn ? Icons.logout_rounded : Icons.login_rounded,
               label: isTimeIn ? 'Switch to Out' : 'Switch to In',
               onTap: onSwitchMode,
             ),
           ),
-          // Sync — only visible when there are pending scans
-          if (pendingCount > 0) ...[
+          if (pendingCount > 0 || ctrl.failedCount > 0) ...[
             const SizedBox(width: 8),
             Expanded(
               child: _ActionButton(
                 icon: Icons.cloud_upload_rounded,
-                label: 'Sync $pendingCount',
+                label: 'Sync',
                 onTap: ctrl.syncing ? null : onSync,
                 loading: ctrl.syncing,
                 primary: true,
@@ -389,14 +456,14 @@ class _ActionButton extends StatelessWidget {
     final bgColor = primary
         ? brandGreen
         : isDark
-            ? const Color(0xFF334155)
-            : const Color(0xFFF1F5F9);
+        ? const Color(0xFF334155)
+        : const Color(0xFFF1F5F9);
 
     final fgColor = primary
         ? Colors.white
         : isDark
-            ? const Color(0xFFCBD5E1)
-            : const Color(0xFF334155);
+        ? const Color(0xFFCBD5E1)
+        : const Color(0xFF334155);
 
     return Material(
       color: bgColor,
@@ -444,11 +511,13 @@ class _ManualEntryPanel extends StatelessWidget {
     required this.controller,
     required this.onSubmit,
     required this.onDismiss,
+    this.errorText,
   });
 
   final TextEditingController controller;
   final VoidCallback onSubmit;
   final VoidCallback onDismiss;
+  final String? errorText;
 
   @override
   Widget build(BuildContext context) {
@@ -461,9 +530,7 @@ class _ManualEntryPanel extends StatelessWidget {
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF1E293B) : Colors.white,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: theme.colorScheme.outlineVariant,
-        ),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -473,7 +540,7 @@ class _ManualEntryPanel extends StatelessWidget {
               const Icon(Icons.keyboard_rounded, size: 18),
               const SizedBox(width: 8),
               Text(
-                'Manual QR Entry',
+                'Manual Student ID Entry',
                 style: theme.textTheme.titleSmall,
               ),
               const Spacer(),
@@ -490,10 +557,11 @@ class _ManualEntryPanel extends StatelessWidget {
           TextField(
             controller: controller,
             autofocus: true,
-            decoration: const InputDecoration(
-              labelText: 'QR code value',
-              hintText: 'Paste or type the QR value',
-              prefixIcon: Icon(Icons.qr_code_rounded),
+            decoration: InputDecoration(
+              labelText: 'Student ID number',
+              hintText: '23-72634',
+              prefixIcon: const Icon(Icons.badge_rounded),
+              errorText: errorText,
             ),
             textInputAction: TextInputAction.done,
             onSubmitted: (_) => onSubmit(),

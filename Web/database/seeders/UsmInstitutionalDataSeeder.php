@@ -55,10 +55,5 @@ class UsmInstitutionalDataSeeder extends Seeder
             ['type' => 'usg', 'college_id' => null, 'acronym' => 'USG'],
             ['name' => 'University Student Government', 'status' => 'active']
         );
-
-        Organization::firstOrCreate(
-            ['type' => 'aro', 'college_id' => null, 'acronym' => 'ARO'],
-            ['name' => 'Admission and Records Office', 'status' => 'active']
-        );
     }
 }

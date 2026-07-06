@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import '../../../config/app_config.dart';
 import '../domain/offline_scan.dart';
 import '../domain/roster_student.dart';
 import '../domain/scanner_session.dart';
@@ -19,7 +20,10 @@ class ScannerApiClient implements ScannerRemoteApi {
     final response = await _client.post(
       _uri('/v1/scanner/validate'),
       headers: _headers(session.token),
-      body: jsonEncode({'event_id': session.eventId}),
+      body: jsonEncode({
+        'event_id': session.eventId,
+        'device_id': AppConfig.deviceId,
+      }),
     );
     return _decodeJson(response);
   }
@@ -28,7 +32,7 @@ class ScannerApiClient implements ScannerRemoteApi {
   Future<List<RosterStudent>> hydrateRoster(ScannerSession session) async {
     final response = await _client.get(
       _uri('/v1/events/${session.eventId}/hydrate'),
-      headers: _headers(session.token),
+      headers: {..._headers(session.token), 'X-Device-Id': AppConfig.deviceId},
     );
     final payload = _decodeJson(response);
     final roster = payload['roster'] as List<dynamic>? ?? [];

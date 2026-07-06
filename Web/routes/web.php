@@ -8,7 +8,6 @@ use App\Http\Controllers\Web\DashboardController;
 use App\Http\Controllers\Web\AiInsightsController;
 use App\Http\Controllers\Web\EventExportController;
 use App\Http\Controllers\Web\AnalyticsOverviewController;
-use App\Http\Controllers\Web\AdminApplicationController;
 use App\Http\Controllers\Web\AdminAccessController;
 
 // ─── Public / Guest Routes ──────────────────────────────────
@@ -28,18 +27,16 @@ Route::middleware(['auth'])->group(function () {
     Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
 
     // ─── Student Portal ─────────────────────────────────────
-    Route::prefix('portal')->group(function () {
+    Route::middleware(['role:Student'])->prefix('portal')->group(function () {
         Route::get('/', [PortalController::class, 'index'])->name('portal');
         Route::get('/profile', [PortalController::class, 'profile'])->name('portal.profile');
         Route::post('/profile', [PortalController::class, 'updateProfile'])->name('portal.profile.update');
-        Route::get('/admin-applications', [AdminApplicationController::class, 'index'])->name('portal.admin-applications');
-        Route::post('/admin-applications', [AdminApplicationController::class, 'store'])->name('portal.admin-applications.store');
         Route::get('/evaluations/{event}', [PortalController::class, 'evaluation'])->name('portal.evaluation');
         Route::post('/evaluations', [PortalController::class, 'submitEvaluation'])->name('portal.evaluation.submit');
     });
 
     // ─── Admin Dashboard ────────────────────────────────────
-    Route::middleware(['role:Super Admin (OSA)|USG Admin|LSG Admin|Society Admin|ARO Admin'])
+    Route::middleware(['role:Super Admin (OSA)|USG Admin|LSG Admin|Society Admin|Academic Unit Admin|Office Event Admin|HR Admin'])
         ->prefix('dashboard')
         ->group(function () {
             Route::get('/', [DashboardController::class, 'index'])->name('dashboard');
@@ -55,8 +52,15 @@ Route::middleware(['auth'])->group(function () {
             Route::post('/events/{event}/reject', [DashboardController::class, 'rejectEvent'])->name('dashboard.events.reject');
             Route::post('/events/{event}/link', [DashboardController::class, 'linkEvent'])->name('dashboard.events.link');
             Route::post('/events/{event}/hardcopy', [DashboardController::class, 'markHardcopy'])->name('dashboard.events.hardcopy');
+            Route::post('/events/{event}/participant-scopes', [DashboardController::class, 'storeParticipantScope'])->name('dashboard.events.participant-scopes.store');
+            Route::post('/events/{event}/participant-scopes/{participationScope}/submit', [DashboardController::class, 'submitParticipantScope'])->name('dashboard.events.participant-scopes.submit');
+            Route::post('/events/{event}/participant-scopes/{participationScope}/review', [DashboardController::class, 'reviewParticipantScope'])->name('dashboard.events.participant-scopes.review');
+            Route::post('/events/{event}/participant-scopes/{participationScope}/approve', [DashboardController::class, 'approveParticipantScope'])->name('dashboard.events.participant-scopes.approve');
+            Route::post('/events/{event}/participant-scopes/{participationScope}/reject', [DashboardController::class, 'rejectParticipantScope'])->name('dashboard.events.participant-scopes.reject');
             Route::get('/events/{event}/proposal-document', [DashboardController::class, 'downloadProposal'])->name('dashboard.events.proposal-document');
-            Route::post('/events/{event}/scanner-link', [DashboardController::class, 'generateScannerLink'])->name('dashboard.events.scanner-link');
+            Route::post('/events/{event}/scanner-assignments', [DashboardController::class, 'assignEventScanner'])->name('dashboard.events.scanner-assignments.store');
+            Route::post('/events/{event}/scanner-assignments/{assignment}/revoke', [DashboardController::class, 'revokeEventScannerAssignment'])->name('dashboard.events.scanner-assignments.revoke');
+            Route::post('/events/{event}/scanner-sessions/{scannerSession}/revoke', [DashboardController::class, 'revokeScannerSession'])->name('dashboard.events.scanner-sessions.revoke');
             Route::post('/events/{event}/sentiments/analyze', [AiInsightsController::class, 'analyzeEventSentiments'])->name('dashboard.events.sentiments.analyze');
             Route::get('/events/{event}/exports/attendance.pdf', [EventExportController::class, 'attendancePdf'])->name('dashboard.events.exports.attendance.pdf');
             Route::get('/events/{event}/exports/attendance.xlsx', [EventExportController::class, 'attendanceExcel'])->name('dashboard.events.exports.attendance.excel');
@@ -75,9 +79,10 @@ Route::middleware(['auth'])->group(function () {
             // Admin User Provisioning (Super Admin only)
             Route::get('/admin-users', [AdminAccessController::class, 'index'])->name('dashboard.admin-users');
             Route::get('/admin-access', [AdminAccessController::class, 'index'])->name('dashboard.admin-access');
+            Route::get('/admin-users/search', [AdminAccessController::class, 'searchUsers'])->name('dashboard.admin-users.search');
             Route::post('/admin-users', [AdminAccessController::class, 'store'])->name('dashboard.admin-users.create');
-            Route::post('/admin-applications/{application}/approve', [AdminAccessController::class, 'approve'])->name('dashboard.admin-applications.approve');
-            Route::post('/admin-applications/{application}/reject', [AdminAccessController::class, 'reject'])->name('dashboard.admin-applications.reject');
+            Route::post('/organizations', [AdminAccessController::class, 'storeOrganization'])->name('dashboard.organizations.store');
+            Route::put('/organizations/{organization}', [AdminAccessController::class, 'updateOrganization'])->name('dashboard.organizations.update');
             Route::post('/admin-assignments/{assignment}/revoke', [AdminAccessController::class, 'revoke'])->name('dashboard.admin-assignments.revoke');
             Route::post('/admin-assignments/{assignment}/expire', [AdminAccessController::class, 'expire'])->name('dashboard.admin-assignments.expire');
         });
@@ -87,7 +92,7 @@ Route::middleware(['auth'])->group(function () {
 Route::get('/dev/login/{role}', function (string $role) {
         abort_unless(config('app.env') === 'local' && config('services.eaes.dev_login_enabled'), 404);
 
-        $validRoles = ['Super Admin (OSA)', 'USG Admin', 'LSG Admin', 'Society Admin', 'ARO Admin', 'Student'];
+        $validRoles = ['Super Admin (OSA)', 'USG Admin', 'LSG Admin', 'Society Admin', 'Academic Unit Admin', 'Office Event Admin', 'HR Admin', 'Student'];
         if (!in_array($role, $validRoles)) {
             abort(400, 'Invalid test role.');
         }
@@ -129,21 +134,32 @@ Route::get('/dev/login/{role}', function (string $role) {
         $orgType = match ($role) {
             'USG Admin' => 'usg',
             'LSG Admin' => 'lsg',
-            'ARO Admin' => 'aro',
+            'Academic Unit Admin' => 'academic_unit',
+            'Office Event Admin' => 'administrative_office',
+            'HR Admin' => 'hr_unit',
             default => 'society',
         };
 
         $orgAcronym = match ($role) {
             'USG Admin' => 'USG',
             'LSG Admin' => 'COE LSG',
-            'ARO Admin' => 'ARO',
+            'Academic Unit Admin' => 'COE ACADEMIC',
+            'Office Event Admin' => 'OSA OFFICE',
+            'HR Admin' => 'HR',
             default => 'TESTORG',
         };
 
         $org = \App\Models\Organization::firstOrCreate(
-            ['acronym' => $orgAcronym, 'type' => $orgType, 'college_id' => $orgType === 'lsg' || $orgType === 'society' ? $college->id : null],
+            ['acronym' => $orgAcronym, 'type' => $orgType, 'college_id' => in_array($orgType, ['lsg', 'society', 'academic_unit'], true) ? $college->id : null],
             [
-                'name' => $orgType === 'lsg' ? 'College of Engineering Local Student Government' : ($orgType === 'usg' ? 'University Student Government' : ($orgType === 'aro' ? 'Admission and Records Office' : 'Test Organization')),
+                'name' => match ($orgType) {
+                    'lsg' => 'College of Engineering Local Student Government',
+                    'usg' => 'University Student Government',
+                    'academic_unit' => 'College of Engineering Academic Unit',
+                    'administrative_office' => 'Office of Student Affairs',
+                    'hr_unit' => 'Human Resource Management Office',
+                    default => 'Test Organization',
+                },
                 'status' => 'active'
             ]
         );
@@ -197,7 +213,7 @@ Route::get('/dev/login/{role}', function (string $role) {
 
         \Illuminate\Support\Facades\Auth::login($user);
 
-        if ($user->hasAnyRole(['Super Admin (OSA)', 'USG Admin', 'LSG Admin', 'Society Admin', 'ARO Admin'])) {
+        if ($user->hasAnyRole(['Super Admin (OSA)', 'USG Admin', 'LSG Admin', 'Society Admin', 'Academic Unit Admin', 'Office Event Admin', 'HR Admin'])) {
             return redirect()->route('dashboard')->with('success', "Logged in as test {$role}");
         }
 

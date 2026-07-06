@@ -10,6 +10,7 @@
                 <thead>
                     <tr>
                         <th>QR Code Value</th>
+                        <th>Source</th>
                         <th>Event</th>
                         <th>Organization</th>
                         <th>Status</th>
@@ -23,6 +24,13 @@
                             <code class="font-data text-sm px-2 py-0.5 rounded" style="background-color: var(--color-surface-overlay);">
                                 {{ Str::limit($link->qr_code_value, 24) }}
                             </code>
+                        </td>
+                        <td class="text-sm text-(--color-text-secondary)">
+                            @if($link->rawScan?->manual_entry)
+                                <span class="badge badge-pending">Manual ID</span>
+                            @else
+                                <span class="badge badge-approved">QR Scan</span>
+                            @endif
                         </td>
                         <td class="text-sm text-(--color-text-secondary)">{{ $link->event?->title ?? 'Unknown' }}</td>
                         <td class="text-sm text-(--color-text-secondary)">{{ $link->organization?->acronym ?? 'N/A' }}</td>
@@ -70,7 +78,7 @@
                     </tr>
                     @empty
                     <tr>
-                        <td colspan="5">
+                        <td colspan="6">
                             <div class="empty-state py-8">
                                 <svg class="empty-state-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                                 <p class="empty-state-title">No pending QR links</p>

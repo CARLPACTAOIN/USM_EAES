@@ -10,11 +10,16 @@ use App\Models\Event;
 use App\Models\Organization;
 use App\Models\Program;
 use App\Models\User;
+use App\Services\AdminScopeService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 class AnalyticsOverviewController extends Controller
 {
+    public function __construct(private readonly AdminScopeService $adminScopes)
+    {
+    }
+
     /**
      * Render the Organization Performance Analytics Overview page.
      */
@@ -29,21 +34,20 @@ class AnalyticsOverviewController extends Controller
         $selectedSchoolYear = $request->input('school_year');
         $selectedSemester = $request->input('semester');
         $selectedEventType = $request->input('event_type');
+        $scope = $this->adminScopes->forUser($user);
+
+        if (!$scope) {
+            abort(403, 'Access denied. No active admin assignment found.');
+        }
 
         // LSG Admin: Lock to their college
-        if ($user->hasRole('LSG Admin')) {
-            $userOrg = $user->organization;
-            if ($userOrg && $userOrg->college_id) {
-                $selectedCollegeId = $userOrg->college_id;
-            }
+        if ($scope->isLsgAdmin()) {
+            $selectedCollegeId = $scope->collegeId;
         }
         // Society Admin: Lock to their organization
-        elseif (!$user->hasRole('Super Admin (OSA)')) {
-            $selectedOrgId = $user->organization_id;
-            $userOrg = $user->organization;
-            if ($userOrg && $userOrg->college_id) {
-                $selectedCollegeId = $userOrg->college_id;
-            }
+        elseif (!$scope->isSuperAdmin()) {
+            $selectedOrgId = $scope->organizationId;
+            $selectedCollegeId = $scope->collegeId;
         }
 
         // 2. Fetch Cascading Filter Dropdown Options
@@ -205,7 +209,8 @@ class AnalyticsOverviewController extends Controller
             'selectedProgramId',
             'selectedSchoolYear',
             'selectedSemester',
-            'selectedEventType'
+            'selectedEventType',
+            'scope'
         ));
     }
 

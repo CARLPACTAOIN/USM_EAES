@@ -7,12 +7,22 @@ use App\Models\Event;
 use App\Models\User;
 use App\Models\AttendanceRecord;
 use App\Models\Evaluation;
+use App\Models\EventParticipationScope;
 use App\Models\Organization;
+use App\Services\AdminScopeService;
+use App\Services\ParticipationScopeService;
+use App\Support\EventTenantScope;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 class AnalyticsController extends Controller
 {
+    public function __construct(
+        private readonly AdminScopeService $adminScopes,
+        private readonly ParticipationScopeService $participationScopes
+    ) {
+    }
+
     /**
      * Get real-time analytics for a specific event.
      *
@@ -21,26 +31,22 @@ class AnalyticsController extends Controller
      */
     public function eventAnalytics(Request $request, $eventId)
     {
-        $event = Event::with('organization')->findOrFail($eventId);
+        $event = Event::with(['organization', 'participationScopes.organization', 'participationScopes.college', 'participationScopes.program'])->findOrFail($eventId);
 
         // Tenancy Check
-        $user = $request->user();
-        if (!$user->hasRole('Super Admin (OSA)') && $user->organization_id !== $event->organization_id) {
-            // LSG Admin checking constituent college boundary
-            if ($user->hasRole('LSG Admin')) {
-                $userOrg = $user->organization;
-                $eventOrg = $event->organization;
-                if ($userOrg && $eventOrg && $userOrg->college_id !== $eventOrg->college_id) {
-                    abort(403, 'Unauthorized.');
-                }
-            } else {
-                abort(403, 'Unauthorized.');
-            }
-        }
+        EventTenantScope::authorize($event, $request->user());
 
         // 1. Attendance Metrics
-        // Total registered students in the organizer's audience scope.
-        $totalRegistered = $this->studentAudienceQueryForEvent($event)->count();
+        $analyticsScopes = $this->runtimeAnalyticsScopes($event);
+        $globalAudienceIds = $analyticsScopes
+            ->flatMap(fn (EventParticipationScope $scope) => $this->audienceIdsForScope($scope))
+            ->unique()
+            ->values();
+
+        // Total registered participants across approved runtime scopes.
+        $totalRegistered = $globalAudienceIds->isNotEmpty()
+            ? $globalAudienceIds->count()
+            : $this->studentAudienceQueryForEvent($event)->count();
 
         // Total students who timed in at least once
         $attendedCount = AttendanceRecord::where('event_id', $eventId)
@@ -49,6 +55,39 @@ class AnalyticsController extends Controller
             ->count('student_id');
 
         $attendanceRate = $totalRegistered > 0 ? round(($attendedCount / $totalRegistered) * 100, 2) : 0;
+
+        $scopeRollups = $analyticsScopes->map(function (EventParticipationScope $scope) use ($eventId) {
+            $audienceIds = $this->audienceIdsForScope($scope);
+            $registered = $audienceIds->count();
+            $attended = AttendanceRecord::where('event_id', $eventId)
+                ->where('event_participation_scope_id', $scope->id)
+                ->whereNotNull('time_in')
+                ->distinct('student_id')
+                ->count('student_id');
+            $validRecords = AttendanceRecord::where('event_id', $eventId)
+                ->where('event_participation_scope_id', $scope->id)
+                ->where('valid', true)
+                ->count();
+            $evaluationCount = $audienceIds->isEmpty()
+                ? 0
+                : Evaluation::where('event_id', $eventId)
+                    ->whereIn('student_id', $audienceIds)
+                    ->count();
+
+            return [
+                'id' => $scope->id,
+                'name' => $scope->displayName(),
+                'participation_role' => $scope->participation_role,
+                'participant_type' => $scope->participant_type,
+                'capture_mode' => $scope->capture_mode,
+                'ppa_status' => $scope->ppa_status,
+                'registered' => $registered,
+                'attended' => $attended,
+                'attendance_rate' => $registered > 0 ? round(($attended / $registered) * 100, 2) : 0,
+                'valid_attendance_records' => $validRecords,
+                'evaluation_submissions' => $evaluationCount,
+            ];
+        })->values();
 
         // 2. Evaluation Metrics
         $totalEvaluations = Evaluation::where('event_id', $eventId)->count();
@@ -96,6 +135,7 @@ class AnalyticsController extends Controller
             'event' => [
                 'id' => $event->id,
                 'title' => $event->title,
+                'event_domain' => $event->event_domain,
                 'start_date' => $event->start_date,
                 'end_date' => $event->end_date,
             ],
@@ -103,6 +143,8 @@ class AnalyticsController extends Controller
                 'total_demographic' => $totalRegistered,
                 'attended' => $attendedCount,
                 'attendance_rate' => $attendanceRate,
+                'global_unique_attended' => $attendedCount,
+                'participant_scopes' => $scopeRollups,
             ],
             'evaluations' => [
                 'total_submitted' => $totalEvaluations,
@@ -118,6 +160,24 @@ class AnalyticsController extends Controller
         ]);
     }
 
+    private function runtimeAnalyticsScopes(Event $event)
+    {
+        return $event->participationScopes
+            ->filter(fn (EventParticipationScope $scope) => $scope->status === EventParticipationScope::STATUS_ACTIVE)
+            ->filter(fn (EventParticipationScope $scope) => $scope->analytics_rollup_enabled)
+            ->filter(fn (EventParticipationScope $scope) => !$this->participationScopes->runtimeGuard($scope))
+            ->values();
+    }
+
+    private function audienceIdsForScope(EventParticipationScope $scope)
+    {
+        return $this->participationScopes
+            ->audienceQuery($scope)
+            ->pluck('users.id')
+            ->unique()
+            ->values();
+    }
+
     /**
      * Calculate Gawad Parangal indicators for an organization.
      *
@@ -130,12 +190,9 @@ class AnalyticsController extends Controller
 
         // Tenancy Check
         $user = $request->user();
-        if (!$user->hasRole('Super Admin (OSA)') && $user->organization_id !== $org->id) {
-            if ($user->hasRole('LSG Admin') && $user->organization->college_id !== $org->college_id) {
-                abort(403, 'Unauthorized.');
-            } elseif (!$user->hasRole('LSG Admin')) {
-                abort(403, 'Unauthorized.');
-            }
+        $scope = $this->adminScopes->forUser($user);
+        if (!$scope || !$scope->canAccessOrganization($org)) {
+            abort(403, 'Unauthorized.');
         }
 
         // 1. Average Attendance Rate across all approved events
@@ -235,7 +292,7 @@ class AnalyticsController extends Controller
             });
         }
 
-        if (in_array($eventOrg->type, ['usg', 'aro'], true)) {
+        if ($eventOrg->type === 'usg') {
             return $query;
         }
 

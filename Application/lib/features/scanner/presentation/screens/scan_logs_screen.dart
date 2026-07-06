@@ -10,10 +10,7 @@ import '../scanner_controller.dart';
 /// Includes student name (or "Unresolved QR"), scan type chip, timestamp, and
 /// sync/resolution status.
 class ScanLogsScreen extends StatefulWidget {
-  const ScanLogsScreen({
-    super.key,
-    required this.controller,
-  });
+  const ScanLogsScreen({super.key, required this.controller});
 
   final ScannerController controller;
 
@@ -58,8 +55,7 @@ class _ScanLogsScreenState extends State<ScanLogsScreen> {
       return _EmptyState(
         icon: Icons.receipt_long_rounded,
         title: 'No active session',
-        subtitle:
-            'Open a scanner session to view captured attendance logs.',
+        subtitle: 'Open a scanner session to view captured attendance logs.',
       );
     }
 
@@ -80,10 +76,7 @@ class _ScanLogsScreenState extends State<ScanLogsScreen> {
                 color: theme.colorScheme.error,
               ),
               const SizedBox(height: 16),
-              Text(
-                'Could not load logs',
-                style: theme.textTheme.titleMedium,
-              ),
+              Text('Could not load logs', style: theme.textTheme.titleMedium),
               const SizedBox(height: 8),
               Text(
                 _error!,
@@ -97,9 +90,7 @@ class _ScanLogsScreenState extends State<ScanLogsScreen> {
                 onPressed: _loadScans,
                 icon: const Icon(Icons.refresh_rounded),
                 label: const Text('Retry'),
-                style: FilledButton.styleFrom(
-                  minimumSize: const Size(0, 44),
-                ),
+                style: FilledButton.styleFrom(minimumSize: const Size(0, 44)),
               ),
             ],
           ),
@@ -113,8 +104,7 @@ class _ScanLogsScreenState extends State<ScanLogsScreen> {
       return _EmptyState(
         icon: Icons.inbox_rounded,
         title: 'No scans yet',
-        subtitle:
-            'Scans captured during this event will appear here.',
+        subtitle: 'Scans captured during this event will appear here.',
         action: OutlinedButton.icon(
           onPressed: _loadScans,
           icon: const Icon(Icons.refresh_rounded, size: 18),
@@ -138,18 +128,14 @@ class _ScanLogsScreenState extends State<ScanLogsScreen> {
                   Text(
                     '${scans.length} scan${scans.length == 1 ? '' : 's'}',
                     style: theme.textTheme.titleSmall?.copyWith(
-                      color: theme.colorScheme.onSurface.withValues(
-                        alpha: 0.7,
-                      ),
+                      color: theme.colorScheme.onSurface.withValues(alpha: 0.7),
                     ),
                   ),
                   const Spacer(),
                   Text(
                     'Pull to refresh',
                     style: theme.textTheme.labelSmall?.copyWith(
-                      color: theme.colorScheme.onSurface.withValues(
-                        alpha: 0.4,
-                      ),
+                      color: theme.colorScheme.onSurface.withValues(alpha: 0.4),
                     ),
                   ),
                 ],
@@ -220,10 +206,7 @@ class _EmptyState extends StatelessWidget {
                 color: theme.colorScheme.onSurface.withValues(alpha: 0.45),
               ),
             ),
-            if (action != null) ...[
-              const SizedBox(height: 24),
-              action!,
-            ],
+            if (action != null) ...[const SizedBox(height: 24), action!],
           ],
         ),
       ),
@@ -247,7 +230,8 @@ class _ScanLogTile extends StatelessWidget {
 
     // Display name
     final displayName = scan.studentId != null
-        ? scan.qrCodeValue // Will ideally come from a joined query later
+        ? scan
+              .qrCodeValue // Will ideally come from a joined query later
         : 'Unresolved QR';
 
     // Colours
@@ -258,29 +242,27 @@ class _ScanLogTile extends StatelessWidget {
     final syncColor = isSynced
         ? const Color(0xFF16A34A)
         : isUnresolved
-            ? Colors.orange.shade700
-            : theme.colorScheme.onSurface.withValues(alpha: 0.4);
+        ? Colors.orange.shade700
+        : theme.colorScheme.onSurface.withValues(alpha: 0.4);
 
     final syncLabel = isSynced
         ? 'Synced'
         : isUnresolved
-            ? 'Unresolved'
-            : 'Pending sync';
+        ? 'Unresolved'
+        : 'Pending sync';
 
     final syncIcon = isSynced
         ? Icons.cloud_done_rounded
         : isUnresolved
-            ? Icons.manage_search_rounded
-            : Icons.cloud_off_rounded;
+        ? Icons.manage_search_rounded
+        : Icons.cloud_off_rounded;
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF1E293B) : Colors.white,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: theme.colorScheme.outlineVariant,
-        ),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
       ),
       child: Row(
         children: [
@@ -412,8 +394,18 @@ class _ScanLogTile extends StatelessWidget {
 
   String _monthAbbr(int month) {
     const months = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
     ];
     return months[month - 1];
   }

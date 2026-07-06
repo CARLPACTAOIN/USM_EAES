@@ -64,23 +64,37 @@ class GoogleAuthController extends Controller
                 'email' => $email,
                 'google_sub' => $googleUser->getId(),
                 'password' => null, // Password is null since they authenticate via Google OAuth
+                'user_type' => $this->userTypeForEmail($email),
             ]);
 
-            // Assign default Student role on onboarding
-            $user->assignRole('Student');
+            $user->assignRole($user->user_type === 'student' ? 'Student' : 'Faculty');
         } else {
             // Update Google Sub ID if not set
+            $updates = [];
             if (empty($user->google_sub)) {
-                $user->google_sub = $googleUser->getId();
-                $user->save();
+                $updates['google_sub'] = $googleUser->getId();
+            }
+            if (!$user->user_type) {
+                $updates['user_type'] = $this->userTypeForEmail($email);
+            }
+            if ($updates !== []) {
+                $user->forceFill($updates)->save();
             }
         }
 
         Auth::login($user);
 
         // Check if user has an admin role and redirect to dashboard, else student portal
-        if ($user->hasAnyRole(['Super Admin (OSA)', 'USG Admin', 'LSG Admin', 'Society Admin', 'ARO Admin'])) {
+        if ($user->hasAnyRole(['Super Admin (OSA)', 'USG Admin', 'LSG Admin', 'Society Admin', 'Academic Unit Admin', 'Office Event Admin', 'HR Admin'])) {
             return redirect('/dashboard');
+        }
+
+        if (!$user->hasRole('Student')) {
+            Auth::logout();
+            $request->session()->invalidate();
+            $request->session()->regenerateToken();
+
+            return redirect()->route('login')->with('error', 'Faculty and staff portal access is pending HR roster activation.');
         }
 
         return redirect('/portal');
@@ -89,5 +103,12 @@ class GoogleAuthController extends Controller
     private function allowedEmailDomain(): string
     {
         return Str::lower(ltrim((string) config('services.eaes.allowed_email_domain', 'usm.edu.ph'), '@'));
+    }
+
+    private function userTypeForEmail(string $email): string
+    {
+        return Str::startsWith(Str::lower($email), 's.')
+            ? 'student'
+            : 'faculty_or_staff_pending';
     }
 }

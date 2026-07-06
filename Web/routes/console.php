@@ -5,6 +5,7 @@ use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
 use App\Jobs\AnalyzeEventSentimentsJob;
 use App\Models\Event;
+use App\Services\EventLifecycleService;
 use App\Support\EvaluationWindow;
 
 Artisan::command('inspire', function () {
@@ -35,6 +36,23 @@ Artisan::command('eaes:analyze-closed-evaluations', function () {
 
     $this->info("Dispatched {$dispatched} sentiment analysis job(s).");
 })->purpose('Dispatch sentiment analysis jobs for events whose evaluation windows have closed');
+
+Artisan::command('eaes:update-event-lifecycles', function (EventLifecycleService $lifecycles) {
+    $updated = 0;
+
+    Event::query()
+        ->with('eventDays')
+        ->whereIn('status', ['approved', 'completed'])
+        ->chunkById(100, function ($events) use ($lifecycles, &$updated): void {
+            foreach ($events as $event) {
+                if ($lifecycles->update($event)) {
+                    $updated++;
+                }
+            }
+        });
+
+    $this->info("Updated {$updated} event lifecycle record(s).");
+})->purpose('Update approved event lifecycle phases from schedule, evaluation, sync, and processing state');
 
 Artisan::command('eaes:deployment-check {--profile= : demo or production}', function () {
     $profile = $this->option('profile') ?: (config('app.env') === 'production' ? 'production' : 'demo');
@@ -130,3 +148,4 @@ Artisan::command('eaes:deployment-check {--profile= : demo or production}', func
 })->purpose('Validate EAES demo/production deployment readiness');
 
 Schedule::command('eaes:analyze-closed-evaluations')->hourly();
+Schedule::command('eaes:update-event-lifecycles')->everyFifteenMinutes();

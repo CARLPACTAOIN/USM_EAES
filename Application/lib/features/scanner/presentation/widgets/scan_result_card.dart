@@ -2,20 +2,10 @@ import 'package:flutter/material.dart';
 
 import '../scanner_controller.dart';
 
-/// Animated card that shows the result of the last QR scan.
-///
-/// Fades and slides in when a result becomes available. Used on both the
-/// Session Setup screen (compact) and the Live Scanner screen (prominent).
 class ScanResultCard extends StatelessWidget {
-  const ScanResultCard({
-    super.key,
-    required this.result,
-    this.compact = false,
-  });
+  const ScanResultCard({super.key, required this.result, this.compact = false});
 
   final ScanCaptureResult result;
-
-  /// When [compact] is true a smaller padding is used (for the scanner overlay).
   final bool compact;
 
   @override
@@ -26,7 +16,11 @@ class ScanResultCard extends StatelessWidget {
     final Color backgroundColor;
     final IconData statusIcon;
 
-    if (result.success) {
+    if (result.isDuplicate || result.kind == ScanResultKind.duplicate) {
+      borderColor = Colors.amber.shade700;
+      backgroundColor = Colors.amber.shade50;
+      statusIcon = Icons.warning_amber_rounded;
+    } else if (result.success) {
       if (result.unresolved) {
         borderColor = Colors.orange.shade600;
         backgroundColor = Colors.orange.shade50;
@@ -42,7 +36,6 @@ class ScanResultCard extends StatelessWidget {
       statusIcon = Icons.error_outline_rounded;
     }
 
-    // Dark-mode overrides
     final isDark = theme.brightness == Brightness.dark;
     final effectiveBg = isDark
         ? borderColor.withValues(alpha: 0.15)
@@ -60,7 +53,10 @@ class ScanResultCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: effectiveBg,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: borderColor.withValues(alpha: 0.5), width: 1.5),
+        border: Border.all(
+          color: borderColor.withValues(alpha: 0.5),
+          width: 1.5,
+        ),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -73,13 +69,14 @@ class ScanResultCard extends StatelessWidget {
               children: [
                 Text(
                   result.title,
-                  style: (compact
-                          ? theme.textTheme.labelLarge
-                          : theme.textTheme.titleSmall)
-                      ?.copyWith(
-                        color: borderColor,
-                        fontWeight: FontWeight.w700,
-                      ),
+                  style:
+                      (compact
+                              ? theme.textTheme.labelLarge
+                              : theme.textTheme.titleSmall)
+                          ?.copyWith(
+                            color: borderColor,
+                            fontWeight: FontWeight.w700,
+                          ),
                 ),
                 const SizedBox(height: 2),
                 Text(

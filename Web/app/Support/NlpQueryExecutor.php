@@ -3,6 +3,7 @@
 namespace App\Support;
 
 use App\Models\User;
+use App\Services\AdminScopeService;
 use Illuminate\Support\Facades\DB;
 
 class NlpQueryExecutor
@@ -116,49 +117,56 @@ class NlpQueryExecutor
 
     private function applyTenantScope($query, string $targetTable, User $user): void
     {
-        if ($user->hasRole('Super Admin (OSA)')) {
+        $scope = app(AdminScopeService::class)->forUser($user);
+
+        if (!$scope) {
+            $query->whereRaw('1 = 0');
+            return;
+        }
+
+        if ($scope->isSuperAdmin()) {
             return;
         }
 
         if ($targetTable === 'events') {
-            if ($user->hasRole('LSG Admin')) {
+            if ($scope->isLsgAdmin()) {
                 $query->join('organizations as scope_orgs', 'events.organization_id', '=', 'scope_orgs.id')
-                    ->where('scope_orgs.college_id', $user->organization?->college_id);
+                    ->where('scope_orgs.college_id', $scope->collegeId);
                 return;
             }
 
-            if ($user->hasRole('USG Admin')) {
+            if ($scope->isUsgAdmin()) {
                 $query->join('organizations as scope_orgs', 'events.organization_id', '=', 'scope_orgs.id')
-                    ->where(function ($scopeQuery) use ($user): void {
+                    ->where(function ($scopeQuery) use ($scope): void {
                         $scopeQuery
                             ->where('scope_orgs.type', 'usg')
-                            ->orWhere('events.organization_id', $user->organization_id);
+                            ->orWhere('events.organization_id', $scope->organizationId);
                     });
                 return;
             }
 
-            $query->where('events.organization_id', $user->organization_id);
+            $query->where('events.organization_id', $scope->organizationId);
             return;
         }
 
         $query->join('events as scope_events', $targetTable . '.event_id', '=', 'scope_events.id');
 
-        if ($user->hasRole('LSG Admin')) {
+        if ($scope->isLsgAdmin()) {
             $query->join('organizations as scope_orgs', 'scope_events.organization_id', '=', 'scope_orgs.id')
-                ->where('scope_orgs.college_id', $user->organization?->college_id);
+                ->where('scope_orgs.college_id', $scope->collegeId);
             return;
         }
 
-        if ($user->hasRole('USG Admin')) {
+        if ($scope->isUsgAdmin()) {
             $query->join('organizations as scope_orgs', 'scope_events.organization_id', '=', 'scope_orgs.id')
-                ->where(function ($scopeQuery) use ($user): void {
+                ->where(function ($scopeQuery) use ($scope): void {
                     $scopeQuery
                         ->where('scope_orgs.type', 'usg')
-                        ->orWhere('scope_events.organization_id', $user->organization_id);
+                        ->orWhere('scope_events.organization_id', $scope->organizationId);
                 });
             return;
         }
 
-        $query->where('scope_events.organization_id', $user->organization_id);
+        $query->where('scope_events.organization_id', $scope->organizationId);
     }
 }

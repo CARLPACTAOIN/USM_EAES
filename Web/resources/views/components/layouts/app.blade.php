@@ -97,7 +97,7 @@
     @endif
     @vite(['resources/css/app.css', 'resources/js/app.js'])
     <link rel="stylesheet" href="{{ asset('css/site-refresh.css') }}">
-    @if(request()->routeIs('dashboard.events*') || request()->routeIs('dashboard.admin-users*') || request()->routeIs('dashboard.admin-access*') || request()->routeIs('dashboard.analytics*') || request()->routeIs('portal.admin-applications*'))
+    @if(request()->routeIs('dashboard.events*') || request()->routeIs('dashboard.admin-users*') || request()->routeIs('dashboard.admin-access*') || request()->routeIs('dashboard.analytics*') || request()->routeIs('portal.profile*'))
         <link rel="stylesheet" href="{{ asset('css/proposal-modal.css') }}">
     @endif
 </head>
@@ -132,7 +132,10 @@
         </div>
 
         <nav class="p-3 space-y-1">
-            @php $isAdmin = auth()->user()?->hasAnyRole(['Super Admin (OSA)', 'USG Admin', 'LSG Admin', 'Society Admin', 'ARO Admin']); @endphp
+            @php
+                $isAdmin = auth()->user()?->hasAnyRole(['Super Admin (OSA)', 'USG Admin', 'LSG Admin', 'Society Admin']);
+                $hasStudentPortal = auth()->user()?->hasRole('Student');
+            @endphp
 
             @if($isAdmin)
                 {{-- Admin Navigation --}}
@@ -175,6 +178,22 @@
                     Admin Access
                 </a>
                 @endif
+
+                @if($hasStudentPortal)
+                    <p class="px-3 pt-5 pb-1 text-xs font-semibold text-(--color-sidebar-text) uppercase">Student Portal</p>
+
+                    <a href="{{ route('portal') }}"
+                       class="sidebar-link relative {{ request()->routeIs('portal') && !request()->routeIs('portal.*') ? 'sidebar-link-active' : '' }}">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
+                        Portal Home
+                    </a>
+
+                    <a href="{{ route('portal.profile') }}"
+                       class="sidebar-link relative {{ request()->routeIs('portal.profile*') ? 'sidebar-link-active' : '' }}">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+                        My Profile
+                    </a>
+                @endif
             @else
                 {{-- Student Navigation --}}
                 <p class="px-3 pt-4 pb-1 text-xs font-semibold text-(--color-sidebar-text) uppercase">Portal</p>
@@ -189,12 +208,6 @@
                    class="sidebar-link relative {{ request()->routeIs('portal.profile*') ? 'sidebar-link-active' : '' }}">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
                     My Profile
-                </a>
-
-                <a href="{{ route('portal.admin-applications') }}"
-                   class="sidebar-link relative {{ request()->routeIs('portal.admin-applications*') ? 'sidebar-link-active' : '' }}">
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6M7 4h10a2 2 0 012 2v14l-4-2-3 2-3-2-4 2V6a2 2 0 012-2z"/></svg>
-                    Admin Application
                 </a>
             @endif
         </nav>

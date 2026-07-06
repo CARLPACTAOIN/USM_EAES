@@ -2,8 +2,11 @@
 
 namespace App\Support;
 
+use App\Models\EventScannerAssignment;
 use App\Models\Event;
+use App\Models\ScannerSession;
 use App\Models\User;
+use App\Services\AdminScopeService;
 use Laravel\Sanctum\Contracts\HasAbilities;
 
 class ScannerAccess
@@ -13,7 +16,9 @@ class ScannerAccess
         'USG Admin',
         'LSG Admin',
         'Society Admin',
-        'ARO Admin',
+        'Academic Unit Admin',
+        'Office Event Admin',
+        'HR Admin',
         'Scanner',
     ];
 
@@ -32,37 +37,29 @@ class ScannerAccess
             return false;
         }
 
-        return self::isScannerActor($user) && self::tokenCan($token, $permission);
+        return self::tokenCan($token, $permission)
+            && (self::isScannerActor($user) || self::hasScannerSessionToken($user, $token));
     }
 
     public static function canOpenScannerSession(User $user, ?HasAbilities $token = null): bool
     {
-        if (!self::isScannerActor($user)) {
-            return false;
+        if ($user->getAllPermissions()->contains(fn ($item) => $item->name === 'scan-qr-codes')) {
+            return true;
         }
 
         return self::tokenCan($token, 'scan-qr-codes')
-            || $user->getAllPermissions()->contains(fn ($item) => $item->name === 'scan-qr-codes');
+            && (self::isScannerActor($user) || self::hasScannerSessionToken($user, $token));
     }
 
     public static function canAccessEvent(User $user, Event $event): bool
     {
-        if (self::hasRole($user, 'Super Admin (OSA)')) {
+        if (self::hasActiveAssignmentForEvent($user, $event)) {
             return true;
         }
 
-        $event->loadMissing('organization');
-        $user->loadMissing('organization');
+        $scope = app(AdminScopeService::class)->forUser($user);
 
-        if (!$user->organization || !$event->organization) {
-            return false;
-        }
-
-        if (self::hasRole($user, 'LSG Admin')) {
-            return $user->organization->college_id === $event->organization->college_id;
-        }
-
-        return $event->organization_id === $user->organization_id;
+        return $scope?->canAccessEvent($event) ?? false;
     }
 
     public static function isScannerActor(User $user): bool
@@ -84,5 +81,57 @@ class ScannerAccess
     private static function tokenCan(?HasAbilities $token, string $ability): bool
     {
         return $token !== null && ($token->can($ability) || $token->can('*'));
+    }
+
+    public static function hasActiveAssignmentForEvent(User $user, Event $event): bool
+    {
+        return EventScannerAssignment::query()
+            ->where('event_id', $event->id)
+            ->where('scanner_user_id', $user->id)
+            ->active()
+            ->exists();
+    }
+
+    public static function hasAnyActiveAssignment(User $user): bool
+    {
+        return EventScannerAssignment::query()
+            ->where('scanner_user_id', $user->id)
+            ->active()
+            ->exists();
+    }
+
+    public static function hasScannerSessionForEvent(User $user, Event $event, ?HasAbilities $token): bool
+    {
+        if (!$token) {
+            return false;
+        }
+
+        $tokenId = $token->id ?? (method_exists($token, 'getKey') ? $token->getKey() : null);
+        if (!$tokenId) {
+            return false;
+        }
+
+        return ScannerSession::query()
+            ->where('event_id', $event->id)
+            ->where('scanner_user_id', $user->id)
+            ->where('token_id', (string) $tokenId)
+            ->exists();
+    }
+
+    private static function hasScannerSessionToken(User $user, ?HasAbilities $token): bool
+    {
+        if (!$token) {
+            return false;
+        }
+
+        $tokenId = $token->id ?? (method_exists($token, 'getKey') ? $token->getKey() : null);
+        if (!$tokenId) {
+            return false;
+        }
+
+        return ScannerSession::query()
+            ->where('scanner_user_id', $user->id)
+            ->where('token_id', (string) $tokenId)
+            ->exists();
     }
 }
