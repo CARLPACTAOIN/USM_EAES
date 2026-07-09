@@ -13,6 +13,7 @@
         "laravel/socialite": "^5.27",
         "laravel/tinker": "^2.10.1",
         "maatwebsite/excel": "^3.1",
+        "predis/predis": "^3.0",
         "spatie/laravel-permission": "^6.25"
     },
     "require-dev": {
@@ -47,7 +48,7 @@
         ],
         "dev": [
             "Composer\\Config::disableProcessTimeout",
-            "set \"PATH=C:\\laragon\\bin\\php\\php-8.4.5-nts-Win32-vs17-x64;%PATH%\" && npx concurrently -c \"#93c5fd,#c4b5fd,#fdba74\" \"php artisan serve\" \"php artisan queue:listen --tries=1 --timeout=0\" \"npm run dev\" --names=server,queue,vite --kill-others"
+            "set \"PATH=C:\\laragon\\bin\\php\\php-8.4.5-nts-Win32-vs17-x64;%PATH%\" && npx concurrently -c \"#93c5fd,#c4b5fd,#fdba74\" \"php artisan serve\" \"php artisan queue:work --tries=3\" \"npm run dev\" --names=server,queue,vite --kill-others"
         ],
         "test": [
             "@php artisan config:clear --ansi",

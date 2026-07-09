@@ -61,10 +61,14 @@ class DeploymentHardeningTest extends TestCase
         ]);
 
         $this->get('/dev/login/Society%20Admin')->assertNotFound();
+        $this->get('/dev/login/psits-admin')->assertNotFound();
 
         config(['services.eaes.dev_login_enabled' => true]);
 
         $this->get('/dev/login/Society%20Admin')
+            ->assertRedirect(route('dashboard'));
+
+        $this->get('/dev/login/psits-admin')
             ->assertRedirect(route('dashboard'));
     }
 
@@ -92,6 +96,21 @@ class DeploymentHardeningTest extends TestCase
         ]);
 
         $this->artisan('eaes:deployment-check', ['--profile' => 'production'])
+            ->assertExitCode(1);
+    }
+
+    public function test_deployment_check_fails_when_configured_redis_client_is_unavailable(): void
+    {
+        $this->applyDemoSafeConfig();
+
+        config([
+            'queue.default' => 'redis',
+            'cache.default' => 'redis',
+            'database.redis.client' => 'missing-client',
+        ]);
+
+        $this->artisan('eaes:deployment-check', ['--profile' => 'demo'])
+            ->expectsOutputToContain('[fail] Redis is configured but REDIS_CLIENT=missing-client is not available to PHP.')
             ->assertExitCode(1);
     }
 

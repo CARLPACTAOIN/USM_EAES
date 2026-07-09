@@ -8,12 +8,14 @@ use App\Models\College;
 use App\Models\Evaluation;
 use App\Models\Event;
 use App\Models\Organization;
+use App\Models\OrganizationMembership;
 use App\Models\Program;
 use App\Models\User;
 use App\Support\EvaluationQuestions;
 use App\Support\EvaluationWindow;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 
 class PortalController extends Controller
@@ -132,14 +134,36 @@ class PortalController extends Controller
                 ->withInput();
         }
 
-        $user->update([
-            'college_id' => $request->college_id,
-            'program_id' => $request->program_id,
-            'organization_id' => $request->organization_id,
-            'program_code' => $program->code,
-            'student_id_number' => $request->student_id_number,
-            'qr_code_value' => $request->qr_code_value,
-        ]);
+        DB::transaction(function () use ($user, $request, $program, $organization): void {
+            $user->update([
+                'college_id' => $request->college_id,
+                'program_id' => $request->program_id,
+                'organization_id' => $request->organization_id,
+                'program_code' => $program->code,
+                'student_id_number' => $request->student_id_number,
+                'qr_code_value' => $request->qr_code_value,
+            ]);
+
+            $user->organizationMemberships()
+                ->where('source', 'profile')
+                ->where('membership_type', 'primary_academic')
+                ->where('organization_id', '!=', $organization->id)
+                ->update(['status' => 'inactive']);
+
+            $user->organizationMemberships()->updateOrCreate(
+                [
+                    'organization_id' => $organization->id,
+                    'membership_type' => 'primary_academic',
+                    'source' => 'profile',
+                ],
+                [
+                    'college_id' => $request->college_id,
+                    'program_id' => $request->program_id,
+                    'status' => OrganizationMembership::STATUS_ACTIVE,
+                    'verified_at' => now(),
+                ]
+            );
+        });
 
         return redirect()->route('portal.profile')
             ->with('success', 'Profile updated successfully.');

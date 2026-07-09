@@ -11,6 +11,7 @@ use App\Models\EventDay;
 use App\Models\EventParticipationScope;
 use App\Models\EventScannerAssignment;
 use App\Models\Organization;
+use App\Models\OrganizationMembership;
 use App\Models\PendingStudentLink;
 use App\Models\Program;
 use App\Models\ScannerSession;
@@ -304,6 +305,15 @@ class WebPortalTest extends TestCase
         $this->assertEquals('BSIS', $student->program_code);
         $this->assertEquals('2023-00100', $student->student_id_number);
         $this->assertEquals('QR-UNIQUE-001', $student->qr_code_value);
+        $this->assertDatabaseHas('organization_memberships', [
+            'user_id' => $student->id,
+            'organization_id' => $h['org']->id,
+            'college_id' => $h['college']->id,
+            'program_id' => $h['program']->id,
+            'membership_type' => 'primary_academic',
+            'source' => 'profile',
+            'status' => OrganizationMembership::STATUS_ACTIVE,
+        ]);
     }
 
     public function test_duplicate_qr_code_rejected(): void
@@ -691,7 +701,12 @@ class WebPortalTest extends TestCase
             ->assertSee('PHP 2,500.00')
             ->assertSee('RES-2026-001')
             ->assertSee('metadata.docx')
-            ->assertSee('D1:');
+            ->assertSee('data-detail-start-time="8:00 AM"', false)
+            ->assertSee('data-detail-end-time="12:00 PM"', false)
+            ->assertSee('Start time')
+            ->assertSee('End time')
+            ->assertSee('D1:')
+            ->assertSee('8:00 AM - 12:00 PM');
     }
 
     public function test_event_creation_requires_proposal_document_and_tracks_hardcopy(): void
@@ -1018,6 +1033,215 @@ class WebPortalTest extends TestCase
             'event_id' => $event->id,
             'scanner_user_id' => $otherStudent->id,
         ]);
+    }
+
+    public function test_admin_can_assign_multiple_scanners_in_one_submission(): void
+    {
+        $h = $this->createHierarchy();
+        $admin = $this->createAdmin('Society Admin', $h['org']);
+        $firstScanner = $this->createStudent($h['org']);
+        $firstScanner->update([
+            'student_id_number' => '2024-04001',
+            'qr_code_value' => 'QR-MULTI-SCANNER-1',
+        ]);
+        $secondScanner = $this->createStudent($h['org']);
+        $secondScanner->update([
+            'student_id_number' => '2024-04002',
+            'qr_code_value' => 'QR-MULTI-SCANNER-2',
+        ]);
+
+        $event = Event::create([
+            'organization_id' => $h['org']->id,
+            'title' => 'Multi Scanner Assignment Event',
+            'status' => 'approved',
+            'start_date' => today(),
+            'end_date' => today(),
+        ]);
+        $scope = app(ParticipationScopeService::class)->ensureOrganizerScope($event->fresh(['organization']));
+
+        $this->actingAs($admin)
+            ->post(route('dashboard.events.scanner-assignments.store', $event->id), [
+                'event_participation_scope_id' => $scope->id,
+                'scanner_user_ids' => [$firstScanner->id, $secondScanner->id],
+                'label' => 'Entrance Team',
+            ])
+            ->assertSessionHas('success', '2 scanners are now assigned for Multi Scanner Assignment Event.');
+
+        foreach ([$firstScanner, $secondScanner] as $scanner) {
+            $this->assertDatabaseHas('event_scanner_assignments', [
+                'event_id' => $event->id,
+                'event_participation_scope_id' => $scope->id,
+                'scanner_user_id' => $scanner->id,
+                'label' => 'Entrance Team',
+                'status' => EventScannerAssignment::STATUS_ACTIVE,
+            ]);
+        }
+    }
+
+    public function test_organizer_scope_includes_owner_without_duplicate_participant_ppa(): void
+    {
+        $h = $this->createHierarchy();
+        $organizerOrg = Organization::create([
+            'college_id' => $h['college']->id,
+            'name' => 'Organizer Society',
+            'acronym' => 'ORGZ',
+            'type' => 'society',
+        ]);
+        $organizerOrg->programs()->attach($h['program']->id);
+
+        $admin = $this->createAdmin('Society Admin', $organizerOrg);
+        $student = $this->createStudent($organizerOrg);
+        $student->update([
+            'student_id_number' => '2024-03001',
+            'qr_code_value' => 'QR-ORGANIZER-AUDIENCE',
+        ]);
+
+        $event = Event::create([
+            'organization_id' => $organizerOrg->id,
+            'title' => 'Organizer Owned Event',
+            'status' => 'approved',
+            'start_date' => today(),
+            'end_date' => today(),
+        ]);
+        $scope = app(ParticipationScopeService::class)->ensureOrganizerScope($event->fresh(['organization']));
+
+        $this->assertSame(EventParticipationScope::ROLE_ORGANIZER, $scope->participation_role);
+        $this->assertTrue(app(ParticipationScopeService::class)->userBelongsToScope($student, $scope));
+
+        $this->actingAs($admin)
+            ->post(route('dashboard.events.participant-scopes.store', $event->id), [
+                'organization_id' => $organizerOrg->id,
+                'capture_mode' => 'self_scanning',
+            ])
+            ->assertSessionHas('error', 'The organizer is already included through the organizer attendance scope and does not need a participant PPA.');
+
+        $this->assertDatabaseMissing('event_participation_scopes', [
+            'event_id' => $event->id,
+            'organization_id' => $organizerOrg->id,
+            'participation_role' => EventParticipationScope::ROLE_PARTICIPANT,
+        ]);
+    }
+
+    public function test_scanner_candidate_search_includes_active_organization_memberships(): void
+    {
+        $h = $this->createHierarchy();
+        $organizerOrg = Organization::create([
+            'college_id' => $h['college']->id,
+            'name' => 'Membership Organizer Society',
+            'acronym' => 'MOS',
+            'type' => 'society',
+        ]);
+        $organizerOrg->programs()->attach($h['program']->id);
+
+        $admin = $this->createAdmin('Society Admin', $organizerOrg);
+
+        $scanner = User::create([
+            'name' => 'Membership Scanner',
+            'email' => 'scanner.membership'.uniqid().'@usm.edu.ph',
+            'password' => null,
+            'organization_id' => null,
+            'college_id' => $h['college']->id,
+            'program_id' => $h['program']->id,
+            'program_code' => $h['program']->code,
+            'student_id_number' => '23-03002',
+            'qr_code_value' => 'QR-MEMBERSHIP-SCANNER',
+        ]);
+        $scanner->assignRole('Student');
+        OrganizationMembership::create([
+            'user_id' => $scanner->id,
+            'organization_id' => $organizerOrg->id,
+            'college_id' => $h['college']->id,
+            'program_id' => $h['program']->id,
+            'membership_type' => 'secondary_org',
+            'status' => OrganizationMembership::STATUS_ACTIVE,
+            'source' => 'import',
+        ]);
+
+        $event = Event::create([
+            'organization_id' => $organizerOrg->id,
+            'title' => 'Membership Scanner Event',
+            'status' => 'approved',
+            'start_date' => today(),
+            'end_date' => today(),
+        ]);
+        $scope = app(ParticipationScopeService::class)->ensureOrganizerScope($event->fresh(['organization']));
+
+        $this->actingAs($admin)
+            ->getJson(route('dashboard.events.scanner-candidates', [
+                'event' => $event->id,
+                'q' => '23',
+                'event_participation_scope_id' => $scope->id,
+            ]))
+            ->assertOk()
+            ->assertJsonPath('data.0.id', $scanner->id)
+            ->assertJsonPath('data.0.organization', 'MOS');
+
+        $this->actingAs($admin)
+            ->post(route('dashboard.events.scanner-assignments.store', $event->id), [
+                'event_participation_scope_id' => $scope->id,
+                'scanner_user_id' => $scanner->id,
+                'label' => 'Membership Gate',
+            ])
+            ->assertSessionHas('success');
+
+        $this->assertDatabaseHas('event_scanner_assignments', [
+            'event_id' => $event->id,
+            'event_participation_scope_id' => $scope->id,
+            'scanner_user_id' => $scanner->id,
+            'status' => EventScannerAssignment::STATUS_ACTIVE,
+        ]);
+    }
+
+    public function test_dashboard_backfills_missing_organizer_scope_for_scanner_search(): void
+    {
+        $h = $this->createHierarchy();
+        $admin = $this->createAdmin('Society Admin', $h['org']);
+        $scanner = $this->createStudent($h['org']);
+        $scanner->update([
+            'student_id_number' => '2024-03003',
+            'qr_code_value' => 'QR-LEGACY-ORGANIZER-SCANNER',
+        ]);
+
+        $event = Event::create([
+            'organization_id' => $h['org']->id,
+            'title' => 'Legacy Organizer Scope Event',
+            'status' => 'approved',
+            'start_date' => today(),
+            'end_date' => today(),
+        ]);
+
+        $this->assertDatabaseMissing('event_participation_scopes', [
+            'event_id' => $event->id,
+            'participation_role' => EventParticipationScope::ROLE_ORGANIZER,
+        ]);
+
+        $this->actingAs($admin)
+            ->get(route('dashboard.events'))
+            ->assertOk()
+            ->assertSee('Legacy Organizer Scope Event')
+            ->assertSee('data-scanner-search-url', false)
+            ->assertSee('x-data="scannerAssignmentPicker()"', false)
+            ->assertSee('name="scanner_user_ids[]"', false)
+            ->assertSee('selectedScanners.length === 0', false)
+            ->assertSee('Selected scanners')
+            ->assertSee('Clear selection')
+            ->assertDontSee('scannerAssignmentPicker(@js', false);
+
+        $scope = EventParticipationScope::where('event_id', $event->id)
+            ->where('participation_role', EventParticipationScope::ROLE_ORGANIZER)
+            ->first();
+
+        $this->assertNotNull($scope);
+        $this->assertSame(EventParticipationScope::PPA_APPROVED, $scope->ppa_status);
+
+        $this->actingAs($admin)
+            ->getJson(route('dashboard.events.scanner-candidates', [
+                'event' => $event->id,
+                'q' => '2024-03003',
+                'event_participation_scope_id' => $scope->id,
+            ]))
+            ->assertOk()
+            ->assertJsonPath('data.0.id', $scanner->id);
     }
 
     public function test_scanner_assignment_session_history_renders_for_dashboard(): void

@@ -7,19 +7,17 @@ use App\Models\Event;
 use App\Models\User;
 use App\Models\AttendanceRecord;
 use App\Models\Evaluation;
-use App\Models\EventParticipationScope;
 use App\Models\Organization;
 use App\Services\AdminScopeService;
-use App\Services\ParticipationScopeService;
+use App\Services\EventAnalyticsService;
 use App\Support\EventTenantScope;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 
 class AnalyticsController extends Controller
 {
     public function __construct(
         private readonly AdminScopeService $adminScopes,
-        private readonly ParticipationScopeService $participationScopes
+        private readonly EventAnalyticsService $eventAnalytics
     ) {
     }
 
@@ -36,146 +34,10 @@ class AnalyticsController extends Controller
         // Tenancy Check
         EventTenantScope::authorize($event, $request->user());
 
-        // 1. Attendance Metrics
-        $analyticsScopes = $this->runtimeAnalyticsScopes($event);
-        $globalAudienceIds = $analyticsScopes
-            ->flatMap(fn (EventParticipationScope $scope) => $this->audienceIdsForScope($scope))
-            ->unique()
-            ->values();
-
-        // Total registered participants across approved runtime scopes.
-        $totalRegistered = $globalAudienceIds->isNotEmpty()
-            ? $globalAudienceIds->count()
-            : $this->studentAudienceQueryForEvent($event)->count();
-
-        // Total students who timed in at least once
-        $attendedCount = AttendanceRecord::where('event_id', $eventId)
-            ->whereNotNull('time_in')
-            ->distinct('student_id')
-            ->count('student_id');
-
-        $attendanceRate = $totalRegistered > 0 ? round(($attendedCount / $totalRegistered) * 100, 2) : 0;
-
-        $scopeRollups = $analyticsScopes->map(function (EventParticipationScope $scope) use ($eventId) {
-            $audienceIds = $this->audienceIdsForScope($scope);
-            $registered = $audienceIds->count();
-            $attended = AttendanceRecord::where('event_id', $eventId)
-                ->where('event_participation_scope_id', $scope->id)
-                ->whereNotNull('time_in')
-                ->distinct('student_id')
-                ->count('student_id');
-            $validRecords = AttendanceRecord::where('event_id', $eventId)
-                ->where('event_participation_scope_id', $scope->id)
-                ->where('valid', true)
-                ->count();
-            $evaluationCount = $audienceIds->isEmpty()
-                ? 0
-                : Evaluation::where('event_id', $eventId)
-                    ->whereIn('student_id', $audienceIds)
-                    ->count();
-
-            return [
-                'id' => $scope->id,
-                'name' => $scope->displayName(),
-                'participation_role' => $scope->participation_role,
-                'participant_type' => $scope->participant_type,
-                'capture_mode' => $scope->capture_mode,
-                'ppa_status' => $scope->ppa_status,
-                'registered' => $registered,
-                'attended' => $attended,
-                'attendance_rate' => $registered > 0 ? round(($attended / $registered) * 100, 2) : 0,
-                'valid_attendance_records' => $validRecords,
-                'evaluation_submissions' => $evaluationCount,
-            ];
-        })->values();
-
-        // 2. Evaluation Metrics
-        $totalEvaluations = Evaluation::where('event_id', $eventId)->count();
-
-        // Sentiment breakdown
-        $sentiments = Evaluation::where('event_id', $eventId)
-            ->select('sentiment', DB::raw('count(*) as count'))
-            ->groupBy('sentiment')
-            ->get()
-            ->pluck('count', 'sentiment')
-            ->toArray();
-
-        // Calculate average ratings from Likert scores
-        // Likert structure example: {"category1": 4, "category2": 5}
-        $evaluations = Evaluation::where('event_id', $eventId)->get();
-        $averageRating = 0;
-        if ($evaluations->isNotEmpty()) {
-            $totalScore = 0;
-            $scoreCount = 0;
-            foreach ($evaluations as $eval) {
-                if (is_array($eval->section_scores)) {
-                    foreach ($eval->section_scores as $category => $score) {
-                        $totalScore += (int) $score;
-                        $scoreCount++;
-                    }
-                }
-            }
-            $averageRating = $scoreCount > 0 ? round($totalScore / $scoreCount, 2) : 0;
-        }
-
-        // 3. Demographic breakdown of attendees by Program Code
-        $demographics = User::role('Student')
-            ->whereIn('id', function ($query) use ($eventId) {
-                $query->select('student_id')
-                    ->from('attendance_records')
-                    ->where('event_id', $eventId)
-                    ->whereNotNull('time_in');
-            })
-            ->select('program_code', DB::raw('count(*) as count'))
-            ->groupBy('program_code')
-            ->get();
-
         return response()->json([
             'success' => true,
-            'event' => [
-                'id' => $event->id,
-                'title' => $event->title,
-                'event_domain' => $event->event_domain,
-                'start_date' => $event->start_date,
-                'end_date' => $event->end_date,
-            ],
-            'attendance' => [
-                'total_demographic' => $totalRegistered,
-                'attended' => $attendedCount,
-                'attendance_rate' => $attendanceRate,
-                'global_unique_attended' => $attendedCount,
-                'participant_scopes' => $scopeRollups,
-            ],
-            'evaluations' => [
-                'total_submitted' => $totalEvaluations,
-                'average_rating' => $averageRating,
-                'sentiments' => [
-                    'positive' => $sentiments['positive'] ?? 0,
-                    'neutral' => $sentiments['neutral'] ?? 0,
-                    'negative' => $sentiments['negative'] ?? 0,
-                    'unprocessed' => $sentiments['unprocessed'] ?? 0,
-                ]
-            ],
-            'demographics' => $demographics
+            ...$this->eventAnalytics->summary($event),
         ]);
-    }
-
-    private function runtimeAnalyticsScopes(Event $event)
-    {
-        return $event->participationScopes
-            ->filter(fn (EventParticipationScope $scope) => $scope->status === EventParticipationScope::STATUS_ACTIVE)
-            ->filter(fn (EventParticipationScope $scope) => $scope->analytics_rollup_enabled)
-            ->filter(fn (EventParticipationScope $scope) => !$this->participationScopes->runtimeGuard($scope))
-            ->values();
-    }
-
-    private function audienceIdsForScope(EventParticipationScope $scope)
-    {
-        return $this->participationScopes
-            ->audienceQuery($scope)
-            ->pluck('users.id')
-            ->unique()
-            ->values();
     }
 
     /**

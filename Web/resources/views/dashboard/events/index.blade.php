@@ -81,14 +81,29 @@
                         $primaryParticipantScope = $isParticipatingWorkspace ? $participantScopes->first() : null;
                         $target = $event->target_demographics ?? [];
                         $budget = $event->budget_allocations ?? [];
-                        $eventDaysSummary = $event->eventDays
+                        $formatEventTime = function ($time): string {
+                            if (!$time) {
+                                return 'N/A';
+                            }
+
+                            try {
+                                return \Carbon\Carbon::parse($time)->format('g:i A');
+                            } catch (\Throwable) {
+                                return substr((string) $time, 0, 5);
+                            }
+                        };
+                        $eventDays = $event->eventDays
                             ->sortBy('day_number')
-                            ->map(function ($day) {
-                                $timeRange = trim(substr((string) $day->start_time, 0, 5) . ' - ' . substr((string) $day->end_time, 0, 5));
+                            ->values();
+                        $eventDaysSummary = $eventDays
+                            ->map(function ($day) use ($formatEventTime) {
+                                $timeRange = trim($formatEventTime($day->start_time) . ' - ' . $formatEventTime($day->end_time));
 
                                 return 'D' . $day->day_number . ': ' . ($day->date?->format('M d, Y') ?? 'N/A') . ' ' . $timeRange;
                             })
                             ->implode(' | ');
+                        $eventStartTime = $eventDays->first() ? $formatEventTime($eventDays->first()->start_time) : 'N/A';
+                        $eventEndTime = $eventDays->last() ? $formatEventTime($eventDays->last()->end_time) : 'N/A';
                         $scheduleSummary = ($event->start_date?->format('M d, Y') ?? 'N/A')
                             . (($event->end_date && $event->start_date && $event->end_date->ne($event->start_date)) ? ' - ' . $event->end_date->format('M d, Y') : '');
                         $budgetCost = isset($budget['budget_cost']) && $budget['budget_cost'] !== null && $budget['budget_cost'] !== ''
@@ -207,6 +222,8 @@
                                         data-detail-category="{{ ucfirst($event->proposal_category ?? 'activity') }}"
                                         data-detail-parent="{{ $event->parentEvent ? trim(($event->parentEvent->organization?->acronym ? $event->parentEvent->organization->acronym . ' - ' : '') . $event->parentEvent->title) : 'None' }}"
                                         data-detail-schedule="{{ $scheduleSummary }}"
+                                        data-detail-start-time="{{ $eventStartTime }}"
+                                        data-detail-end-time="{{ $eventEndTime }}"
                                         data-detail-days="{{ $eventDaysSummary ?: 'No event days recorded' }}"
                                         data-detail-location-type="{{ $event->location_type ? ucwords(str_replace('-', ' ', $event->location_type)) : 'N/A' }}"
                                         data-detail-location-details="{{ $event->location_details ?: 'N/A' }}"
@@ -275,10 +292,10 @@
                                 @endif
 
                                 @if(!$isParticipatingWorkspace && in_array($event->status, ['approved', 'completed']))
-                                <button type="button" @click="$dispatch('open-analytics', { id: '{{ $event->id }}', title: '{{ addslashes($event->title) }}' })" class="btn btn-sm btn-secondary" title="View Real-Time Analytics" style="background-color: var(--color-accent-subtle); color: var(--color-accent); border: 1px solid var(--color-accent-light);">
+                                <a href="{{ route('dashboard.events.analytics', $event) }}" class="btn btn-sm btn-secondary" title="View Event Analytics" style="background-color: var(--color-accent-subtle); color: var(--color-accent); border: 1px solid var(--color-accent-light);">
                                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
                                     Analytics
-                                </button>
+                                </a>
                                 @endif
                                 @if(in_array($event->status, ['approved', 'completed']) && $approvedScopeCount > 0)
                                 <button type="button"
@@ -511,41 +528,39 @@
                             <form
                                 method="POST"
                                 action="{{ route('dashboard.events.scanner-assignments.store', $event->id) }}"
-                                class="mt-3 grid gap-3 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,1.5fr)_minmax(0,1fr)_auto]"
-                                x-data='scannerAssignmentPicker(@js($eligibleScannerUsers->map(fn ($scannerUser) => [
-                                    'id' => $scannerUser->id,
-                                    'name' => $scannerUser->name,
-                                    'email' => $scannerUser->email,
-                                    'studentId' => $scannerUser->student_id_number ?? $scannerUser->employeeRosterEntry?->employee_id,
-                                    'organization' => $scannerUser->organization?->acronym ?? $scannerUser->employeeRosterEntry?->office_department ?? 'No scope',
-                                    'label' => trim($scannerUser->name . ' · ' . ($scannerUser->student_id_number ?? $scannerUser->employeeRosterEntry?->employee_id ?? $scannerUser->email) . ' · ' . ($scannerUser->organization?->acronym ?? $scannerUser->employeeRosterEntry?->office_department ?? 'No scope')),
-                                ])->values()))'
-                                @submit="submitted = true; if (!selectedId) { open = true; $event.preventDefault(); }"
+                                class="mt-3 grid items-start gap-3 xl:grid-cols-[minmax(13rem,0.95fr)_minmax(18rem,1.25fr)_minmax(13rem,0.9fr)_auto]"
+                                x-data="scannerAssignmentPicker()"
+                                x-init="initialize($el)"
+                                data-scanner-search-url="{{ route('dashboard.events.scanner-candidates', $event->id, false) }}"
+                                @submit="submitted = true; if (selectedScanners.length === 0) { open = true; $event.preventDefault(); $refs.searchInput?.focus(); }"
                             >
                                 @csrf
                                 <div>
-                                    <label for="scanner-scope-{{ $event->id }}" class="sr-only">Participant scope</label>
-                                    <select id="scanner-scope-{{ $event->id }}" name="event_participation_scope_id" class="form-input form-select text-sm" required>
-                                        <option value="">Participant scope</option>
+                                    <label for="scanner-scope-{{ $event->id }}" class="sr-only">Attendance scope</label>
+                                    <select id="scanner-scope-{{ $event->id }}" name="event_participation_scope_id" class="form-input form-select text-sm" required x-ref="scopeSelect" x-model="scopeId" @change="resetSelectionForScope()">
+                                        <option value="">Attendance scope</option>
                                         @foreach($scannerScopes as $scope)
                                             <option value="{{ $scope->id }}">{{ $scope->displayName() }} · {{ ucwords(str_replace('_', ' ', $scope->capture_mode)) }}</option>
                                         @endforeach
                                     </select>
                                 </div>
-                                <div class="relative">
+                                <div class="relative" @click.outside="open = false" @focusout="closeIfFocusLeft($el)">
                                     <label for="scanner-search-{{ $event->id }}" class="sr-only">Search eligible scanner</label>
+                                    <template x-for="scanner in selectedScanners" :key="'scanner-input-' + scanner.id">
+                                        <input type="hidden" name="scanner_user_ids[]" :value="scanner.id">
+                                    </template>
                                     <input
                                         id="scanner-search-{{ $event->id }}"
                                         type="text"
                                         class="form-input text-sm"
-                                        placeholder="Search name, student ID, or email"
+                                        placeholder="Search and add scanners"
                                         autocomplete="off"
+                                        x-ref="searchInput"
                                         x-model="query"
-                                        @focus="open = true"
-                                        @input="selectedId = ''; selectedLabel = ''; open = true"
+                                        @focus="handleSearchFocus()"
+                                        @input="open = true; queueSearch()"
                                         @keydown.escape="open = false"
                                     >
-                                    <input type="hidden" name="scanner_user_id" x-model="selectedId">
                                     <div
                                         x-show="open && filteredScanners.length > 0"
                                         x-cloak
@@ -562,26 +577,55 @@
                                             </button>
                                         </template>
                                     </div>
-                                    <p x-show="open && query.length > 0 && filteredScanners.length === 0" x-cloak class="mt-1 text-xs text-(--color-text-tertiary)">
+                                    <p x-show="loading" x-cloak class="mt-1 text-xs text-(--color-text-tertiary)">
+                                        Searching eligible scanners...
+                                    </p>
+                                    <p x-show="searchError" x-cloak class="mt-1 text-xs text-red-600" x-text="searchError"></p>
+                                    <p x-show="!loading && !searchError && open && query.length > 0 && filteredScanners.length === 0" x-cloak class="mt-1 text-xs text-(--color-text-tertiary)">
                                         No eligible scanner matches your search.
                                     </p>
-                                    <p x-show="selectedLabel" x-cloak class="mt-1 text-xs text-(--color-text-secondary)">
-                                        Selected: <span class="font-medium" x-text="selectedLabel"></span>
-                                    </p>
-                                    <p x-show="submitted && !selectedId" x-cloak class="mt-1 text-xs text-red-600">
-                                        Choose a scanner from your authorized organization or college.
+                                    <p x-show="submitted && selectedScanners.length === 0" x-cloak class="mt-1 text-xs text-red-600">
+                                        Choose at least one scanner from your authorized organization or college.
                                     </p>
                                 </div>
                                 <input type="text" name="label" class="form-input text-sm" placeholder="Main Gate, Gym Entrance">
-                                <button type="submit" class="btn btn-primary btn-sm">
+                                <button type="submit" class="btn btn-primary btn-sm self-start whitespace-nowrap">
                                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-                                    Assign
+                                    <span x-text="selectedScanners.length > 1 ? 'Assign ' + selectedScanners.length : 'Assign'">Assign</span>
                                 </button>
+                                <div
+                                    x-show="selectedScanners.length > 0"
+                                    x-cloak
+                                    class="rounded-lg border border-(--color-border) bg-(--color-surface-muted) p-3 xl:col-span-4"
+                                >
+                                    <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                                        <div>
+                                            <p class="text-xs font-semibold uppercase tracking-wide text-(--color-text-tertiary)">Selected scanners</p>
+                                            <p class="text-sm font-medium text-(--color-text-primary)" x-text="selectedScanners.length + (selectedScanners.length === 1 ? ' account ready to assign' : ' accounts ready to assign')"></p>
+                                        </div>
+                                        <button type="button" class="text-xs font-medium text-(--color-text-tertiary) hover:text-red-600 focus:outline-none" @click="clearSelected()">
+                                            Clear selection
+                                        </button>
+                                    </div>
+                                    <div class="mt-3 grid max-h-36 gap-2 overflow-auto pr-1 sm:grid-cols-2 xl:grid-cols-3">
+                                        <template x-for="scanner in selectedScanners" :key="'scanner-card-' + scanner.id">
+                                            <div class="flex min-w-0 items-center justify-between gap-3 rounded-md border border-(--color-border) bg-(--color-surface) px-3 py-2">
+                                                <div class="min-w-0">
+                                                    <p class="truncate text-sm font-medium text-(--color-text-primary)" x-text="scanner.name"></p>
+                                                    <p class="truncate text-xs text-(--color-text-tertiary)" x-text="`${scanner.studentId} · ${scanner.organization}`"></p>
+                                                </div>
+                                                <button type="button" class="grid h-7 w-7 shrink-0 place-items-center rounded-full text-(--color-text-tertiary) hover:bg-red-50 hover:text-red-600 focus:outline-none focus:ring-2 focus:ring-red-200" @click="remove(scanner.id)" :aria-label="'Remove ' + scanner.name">
+                                                    <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                                                </button>
+                                            </div>
+                                        </template>
+                                    </div>
+                                </div>
                             </form>
                             @if($eligibleScannerUsers->isEmpty())
                                 <p class="mt-2 text-xs text-(--color-text-tertiary)">No completed institutional student or employee profiles are available for scanner assignment.</p>
                             @elseif($scannerScopes->isEmpty())
-                                <p class="mt-2 text-xs text-(--color-warning)">No approved participant scope is available for scanner assignment.</p>
+                                <p class="mt-2 text-xs text-(--color-warning)">No approved attendance scope is available for scanner assignment.</p>
                             @endif
                         @endif
 
@@ -1016,6 +1060,14 @@
                             <span id="proposal-detail-schedule" class="proposal-detail-value"></span>
                         </div>
                         <div class="proposal-detail-item">
+                            <span class="proposal-detail-label">Start time</span>
+                            <span id="proposal-detail-start-time" class="proposal-detail-value"></span>
+                        </div>
+                        <div class="proposal-detail-item">
+                            <span class="proposal-detail-label">End time</span>
+                            <span id="proposal-detail-end-time" class="proposal-detail-value"></span>
+                        </div>
+                        <div class="proposal-detail-item">
                             <span class="proposal-detail-label">Location type</span>
                             <span id="proposal-detail-location-type" class="proposal-detail-value"></span>
                         </div>
@@ -1396,6 +1448,8 @@
                     category: document.getElementById('proposal-detail-category'),
                     parent: document.getElementById('proposal-detail-parent'),
                     schedule: document.getElementById('proposal-detail-schedule'),
+                    startTime: document.getElementById('proposal-detail-start-time'),
+                    endTime: document.getElementById('proposal-detail-end-time'),
                     days: document.getElementById('proposal-detail-days'),
                     locationType: document.getElementById('proposal-detail-location-type'),
                     locationDetails: document.getElementById('proposal-detail-location-details'),
@@ -1457,13 +1511,24 @@
         });
 
         document.addEventListener('alpine:init', () => {
-            Alpine.data('scannerAssignmentPicker', (scanners) => ({
-                scanners,
+            Alpine.data('scannerAssignmentPicker', () => ({
+                scanners: [],
+                selectedScanners: [],
+                searchUrl: '',
+                scopeId: '',
                 query: '',
-                selectedId: '',
-                selectedLabel: '',
                 submitted: false,
                 open: false,
+                loading: false,
+                searchError: '',
+                searchRequestId: 0,
+                searchTimer: null,
+                keepClosedOnFocus: false,
+
+                initialize(element) {
+                    this.searchUrl = element?.dataset?.scannerSearchUrl || '';
+                    this.scopeId = this.$refs.scopeSelect?.value || '';
+                },
 
                 get filteredScanners() {
                     const term = this.query.trim().toLowerCase();
@@ -1473,6 +1538,7 @@
                     }
 
                     return this.scanners
+                        .filter((scanner) => !this.isSelected(scanner.id))
                         .filter((scanner) => [
                             scanner.name,
                             scanner.email,
@@ -1482,11 +1548,115 @@
                         .slice(0, 8);
                 },
 
+                isSelected(scannerId) {
+                    return this.selectedScanners.some((scanner) => scanner.id === scannerId);
+                },
+
+                handleSearchFocus() {
+                    if (this.keepClosedOnFocus) {
+                        this.keepClosedOnFocus = false;
+                        return;
+                    }
+
+                    this.open = true;
+                    if (this.scanners.length === 0) {
+                        this.refreshScanners();
+                    }
+                },
+
+                closeIfFocusLeft(element) {
+                    setTimeout(() => {
+                        if (!element.contains(document.activeElement)) {
+                            this.open = false;
+                        }
+                    }, 0);
+                },
+
                 choose(scanner) {
-                    this.selectedId = scanner.id;
-                    this.selectedLabel = scanner.label;
-                    this.query = scanner.label;
+                    if (!this.isSelected(scanner.id)) {
+                        this.selectedScanners.push(scanner);
+                    }
+
+                    this.query = '';
                     this.open = false;
+                    this.searchError = '';
+                    this.submitted = false;
+                    this.keepClosedOnFocus = true;
+
+                    this.$nextTick(() => this.$refs.searchInput?.focus());
+                },
+
+                remove(scannerId) {
+                    this.selectedScanners = this.selectedScanners.filter((scanner) => scanner.id !== scannerId);
+                },
+
+                clearSelected() {
+                    this.selectedScanners = [];
+                    this.submitted = false;
+                },
+
+                resetSelectionForScope() {
+                    this.selectedScanners = [];
+                    this.query = '';
+                    this.open = false;
+                    this.searchError = '';
+                    this.refreshScanners();
+                },
+
+                queueSearch() {
+                    clearTimeout(this.searchTimer);
+                    this.searchTimer = setTimeout(() => this.refreshScanners(), 250);
+                },
+
+                refreshScanners() {
+                    if (!this.searchUrl) {
+                        return;
+                    }
+
+                    const requestId = ++this.searchRequestId;
+                    const params = new URLSearchParams();
+                    const term = this.query.trim();
+                    if (term) {
+                        params.set('q', term);
+                    }
+                    if (this.scopeId) {
+                        params.set('event_participation_scope_id', this.scopeId);
+                    }
+
+                    this.loading = true;
+                    this.searchError = '';
+                    fetch(`${this.searchUrl}?${params.toString()}`, {
+                        credentials: 'same-origin',
+                        headers: {
+                            Accept: 'application/json',
+                            'X-Requested-With': 'XMLHttpRequest',
+                        },
+                    })
+                        .then((response) => {
+                            if (!response.ok) {
+                                throw new Error('Search request failed');
+                            }
+
+                            return response.json();
+                        })
+                        .then((payload) => {
+                            if (requestId !== this.searchRequestId) {
+                                return;
+                            }
+
+                            this.scanners = Array.isArray(payload.data) ? payload.data : [];
+                        })
+                        .catch(() => {
+                            if (requestId === this.searchRequestId) {
+                                this.scanners = [];
+                                this.searchError = 'Scanner search failed. Refresh the page and try again.';
+                            }
+                        })
+                        .finally(() => {
+                            if (requestId === this.searchRequestId) {
+                                this.loading = false;
+                            }
+                        });
                 },
             }));
 
@@ -1510,7 +1680,7 @@
                     }
 
                     try {
-                        const response = await fetch(`/dashboard/events/${this.eventId}/analytics`);
+                        const response = await fetch(`/dashboard/events/${this.eventId}/analytics/data`);
                         if (!response.ok) throw new Error('Failed to retrieve analytics');
                         const data = await response.json();
                         

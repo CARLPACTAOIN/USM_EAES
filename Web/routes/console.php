@@ -63,6 +63,7 @@ Artisan::command('eaes:deployment-check {--profile= : demo or production}', func
     $appUrl = (string) config('app.url');
     $queueConnection = (string) config('queue.default');
     $cacheStore = (string) config('cache.default');
+    $redisClient = (string) config('database.redis.client');
     $sanctumDomains = array_filter(config('sanctum.stateful', []));
 
     if (config('app.debug')) {
@@ -103,6 +104,18 @@ Artisan::command('eaes:deployment-check {--profile= : demo or production}', func
 
     if (!$isProduction && !in_array($cacheStore, ['database', 'redis', 'file', 'array'], true)) {
         $errors[] = 'Demo cache store must be database, redis, file, or array.';
+    }
+
+    if ($queueConnection === 'redis' || $cacheStore === 'redis') {
+        $redisClientReady = match ($redisClient) {
+            'predis' => class_exists(\Predis\Client::class),
+            'phpredis' => extension_loaded('redis'),
+            default => false,
+        };
+
+        if (!$redisClientReady) {
+            $errors[] = "Redis is configured but REDIS_CLIENT={$redisClient} is not available to PHP.";
+        }
     }
 
     if (empty($sanctumDomains)) {

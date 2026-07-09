@@ -8,7 +8,9 @@ use App\Http\Controllers\Web\DashboardController;
 use App\Http\Controllers\Web\AiInsightsController;
 use App\Http\Controllers\Web\EventExportController;
 use App\Http\Controllers\Web\AnalyticsOverviewController;
+use App\Http\Controllers\Web\EventAnalyticsController;
 use App\Http\Controllers\Web\AdminAccessController;
+use App\Http\Controllers\Dev\DevLoginController;
 
 // ─── Public / Guest Routes ──────────────────────────────────
 Route::get('/', function () {
@@ -58,6 +60,7 @@ Route::middleware(['auth'])->group(function () {
             Route::post('/events/{event}/participant-scopes/{participationScope}/approve', [DashboardController::class, 'approveParticipantScope'])->name('dashboard.events.participant-scopes.approve');
             Route::post('/events/{event}/participant-scopes/{participationScope}/reject', [DashboardController::class, 'rejectParticipantScope'])->name('dashboard.events.participant-scopes.reject');
             Route::get('/events/{event}/proposal-document', [DashboardController::class, 'downloadProposal'])->name('dashboard.events.proposal-document');
+            Route::get('/events/{event}/scanner-candidates', [DashboardController::class, 'scannerCandidates'])->name('dashboard.events.scanner-candidates');
             Route::post('/events/{event}/scanner-assignments', [DashboardController::class, 'assignEventScanner'])->name('dashboard.events.scanner-assignments.store');
             Route::post('/events/{event}/scanner-assignments/{assignment}/revoke', [DashboardController::class, 'revokeEventScannerAssignment'])->name('dashboard.events.scanner-assignments.revoke');
             Route::post('/events/{event}/scanner-sessions/{scannerSession}/revoke', [DashboardController::class, 'revokeScannerSession'])->name('dashboard.events.scanner-sessions.revoke');
@@ -66,7 +69,8 @@ Route::middleware(['auth'])->group(function () {
             Route::get('/events/{event}/exports/attendance.xlsx', [EventExportController::class, 'attendanceExcel'])->name('dashboard.events.exports.attendance.excel');
             Route::get('/events/{event}/exports/evaluations.pdf', [EventExportController::class, 'evaluationsPdf'])->name('dashboard.events.exports.evaluations.pdf');
             Route::get('/events/{event}/exports/evaluations.xlsx', [EventExportController::class, 'evaluationsExcel'])->name('dashboard.events.exports.evaluations.excel');
-            Route::get('/events/{event}/analytics', [\App\Http\Controllers\Api\AnalyticsController::class, 'eventAnalytics'])->name('dashboard.events.analytics');
+            Route::get('/events/{event}/analytics/data', [EventAnalyticsController::class, 'data'])->name('dashboard.events.analytics.data');
+            Route::get('/events/{event}/analytics', [EventAnalyticsController::class, 'show'])->name('dashboard.events.analytics');
 
             // Organization Performance Analytics Overview
             Route::get('/analytics', [AnalyticsOverviewController::class, 'index'])->name('dashboard.analytics');
@@ -88,7 +92,10 @@ Route::middleware(['auth'])->group(function () {
         });
 });
 
-// Developer Login Helper (Strictly Local Env + Explicit Opt-In)
+// Developer Login Helpers (Strictly Local Env + Explicit Opt-In)
+Route::get('/dev/login/psits-admin', [DevLoginController::class, 'loginAsPsitsAdmin'])
+    ->name('dev.login.psits-admin');
+
 Route::get('/dev/login/{role}', function (string $role) {
         abort_unless(config('app.env') === 'local' && config('services.eaes.dev_login_enabled'), 404);
 

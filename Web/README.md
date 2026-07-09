@@ -47,9 +47,15 @@ APP_ENV=local
 EAES_ENABLE_DEV_LOGIN=true
 ```
 
+PSITS Society Admin (skips Google; uses seeded demo account when present):
+
+```
+http://127.0.0.1:8000/dev/login/psits-admin
+```
+
 ## Running Services
 
-For day-to-day portal development, run the combined server, queue, and Vite process:
+For day-to-day portal development, run the combined Laravel server, queue worker (`php artisan queue:work --tries=3`), and Vite process:
 
 ```powershell
 composer run dev
@@ -66,10 +72,31 @@ php artisan queue:work --tries=3
 php artisan schedule:work
 ```
 
+Redis-backed queue/cache:
+
+```powershell
+# Start any Redis-compatible server on 127.0.0.1:6379 first.
+php artisan optimize:clear
+php artisan config:show queue.default
+php artisan config:show cache.default
+php artisan queue:work --tries=3
+```
+
+Use these `.env` values when Redis is running:
+
+```env
+CACHE_STORE=redis
+QUEUE_CONNECTION=redis
+REDIS_CLIENT=predis
+REDIS_HOST=127.0.0.1
+REDIS_PORT=6379
+```
+
 Production recommendation:
 
 - `CACHE_STORE=redis`
 - `QUEUE_CONNECTION=redis`
+- `REDIS_CLIENT=predis` unless the PHP Redis extension is installed and tested.
 - Run persistent queue workers under Supervisor/systemd or the hosting equivalent.
 - Run Laravel scheduler every minute through cron.
 

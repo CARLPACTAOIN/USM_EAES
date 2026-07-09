@@ -116,6 +116,7 @@ class DashboardController extends Controller
         }
 
         $events = $query->latest()->paginate(15);
+        $this->ensureOrganizerScopesForDashboard($events->getCollection());
         $this->annotateEventsForDashboard($events->getCollection(), $user, $workspace);
 
         $organizedEventsCount = Event::query()
@@ -149,6 +150,47 @@ class DashboardController extends Controller
             'organizedEventsCount',
             'participatingEventsCount'
         ));
+    }
+
+    public function scannerCandidates(Request $request, Event $event)
+    {
+        if (!in_array($event->status, ['approved', 'completed'], true)) {
+            return response()->json([
+                'data' => [],
+                'message' => 'Scanner candidates are available only after the event is approved.',
+            ], 422);
+        }
+
+        $validated = $request->validate([
+            'q' => 'nullable|string|max:120',
+            'event_participation_scope_id' => 'nullable|uuid|exists:event_participation_scopes,id',
+        ]);
+
+        $participationScope = null;
+        if (filled($validated['event_participation_scope_id'] ?? null)) {
+            $participationScope = EventParticipationScope::findOrFail($validated['event_participation_scope_id']);
+            abort_unless($participationScope->event_id === $event->id, 404);
+            $this->authorizeScannerScopeAccess($request->user(), $participationScope);
+
+            if ($this->participationScopes->runtimeGuard($participationScope)) {
+                return response()->json(['data' => []]);
+            }
+        } else {
+            $this->authorizeScannerAssignmentAccess($event, $request->user());
+        }
+
+        $candidates = $this->scannerAssignments->eligibleUsers(
+            search: $validated['q'] ?? null,
+            limit: 12,
+            admin: $request->user(),
+            participationScope: $participationScope
+        );
+
+        return response()->json([
+            'data' => $candidates
+                ->map(fn (User $candidate) => $this->scannerAssignments->candidatePayload($candidate))
+                ->values(),
+        ]);
     }
 
     /**
@@ -468,6 +510,10 @@ class DashboardController extends Controller
             ? Organization::findOrFail($validated['organization_id'])
             : null;
 
+        if ($organization && $organization->id === $event->organization_id) {
+            return redirect()->back()->with('error', 'The organizer is already included through the organizer attendance scope and does not need a participant PPA.');
+        }
+
         if ($organization && $event->participationScopes()
             ->where('organization_id', $organization->id)
             ->where('status', EventParticipationScope::STATUS_ACTIVE)
@@ -632,34 +678,60 @@ class DashboardController extends Controller
 
         $validated = $request->validate([
             'event_participation_scope_id' => 'required|uuid|exists:event_participation_scopes,id',
-            'scanner_user_id' => 'required|uuid|exists:users,id',
+            'scanner_user_id' => 'nullable|uuid|exists:users,id',
+            'scanner_user_ids' => 'nullable|array|min:1|max:25',
+            'scanner_user_ids.*' => 'required|uuid|distinct|exists:users,id',
             'label' => 'nullable|string|max:120',
             'max_devices' => 'nullable|integer|min:1|max:10',
             'notes' => 'nullable|string|max:1000',
         ]);
 
-        $scannerUser = User::findOrFail($validated['scanner_user_id']);
+        $scannerUserIds = collect($validated['scanner_user_ids'] ?? [])
+            ->when(filled($validated['scanner_user_id'] ?? null), fn ($ids) => $ids->push($validated['scanner_user_id']))
+            ->filter()
+            ->unique()
+            ->values();
+
+        if ($scannerUserIds->isEmpty()) {
+            return redirect()->back()
+                ->with('error', 'Choose at least one scanner from your authorized organization or college.')
+                ->withInput();
+        }
+
+        $scannerUsers = User::whereKey($scannerUserIds)->get()->keyBy('id');
         $participationScope = EventParticipationScope::findOrFail($validated['event_participation_scope_id']);
         abort_unless($participationScope->event_id === $event->id, 404);
         $this->authorizeScannerScopeAccess($request->user(), $participationScope);
 
-        if (!$this->scannerAssignments->canAssignScanner($request->user(), $scannerUser, $participationScope)) {
-            return redirect()->back()
-                ->with('error', 'Select a scanner from the selected participant scope.')
-                ->withInput();
+        foreach ($scannerUserIds as $scannerUserId) {
+            $scannerUser = $scannerUsers->get($scannerUserId);
+            if (!$scannerUser || !$this->scannerAssignments->canAssignScanner($request->user(), $scannerUser, $participationScope)) {
+                return redirect()->back()
+                    ->with('error', 'Select scanners from the selected attendance scope.')
+                    ->withInput();
+            }
         }
 
-        $this->scannerAssignments->assign(
-            event: $event,
-            scannerUser: $scannerUser,
-            assignedBy: $request->user(),
-            label: $validated['label'] ?? null,
-            maxDevices: $validated['max_devices'] ?? 1,
-            notes: $validated['notes'] ?? null,
-            participationScope: $participationScope
-        );
+        DB::transaction(function () use ($event, $scannerUserIds, $scannerUsers, $request, $validated, $participationScope): void {
+            foreach ($scannerUserIds as $scannerUserId) {
+                $this->scannerAssignments->assign(
+                    event: $event,
+                    scannerUser: $scannerUsers->get($scannerUserId),
+                    assignedBy: $request->user(),
+                    label: $validated['label'] ?? null,
+                    maxDevices: $validated['max_devices'] ?? 1,
+                    notes: $validated['notes'] ?? null,
+                    participationScope: $participationScope
+                );
+            }
+        });
 
-        return redirect()->back()->with('success', "{$scannerUser->name} is now assigned as a scanner for {$event->title}.");
+        $count = $scannerUserIds->count();
+        $message = $count === 1
+            ? "{$scannerUsers->get($scannerUserIds->first())->name} is now assigned as a scanner for {$event->title}."
+            : "{$count} scanners are now assigned for {$event->title}.";
+
+        return redirect()->back()->with('success', $message);
     }
 
     public function revokeEventScannerAssignment(Request $request, Event $event, EventScannerAssignment $assignment)
@@ -978,6 +1050,25 @@ class DashboardController extends Controller
             $event->setRelation('scannerSessions', $event->scannerSessions
                 ->filter(fn ($session) => in_array($session->event_participation_scope_id, $visibleScopeIds, true))
                 ->values());
+        });
+    }
+
+    private function ensureOrganizerScopesForDashboard($events): void
+    {
+        $events->each(function (Event $event): void {
+            $hasOrganizerScope = $event->participationScopes
+                ->contains('participation_role', EventParticipationScope::ROLE_ORGANIZER);
+
+            if ($hasOrganizerScope) {
+                return;
+            }
+
+            $this->participationScopes->ensureOrganizerScope($event->fresh(['organization']));
+            $event->load([
+                'participationScopes.organization',
+                'participationScopes.college',
+                'participationScopes.delegatedOrganization',
+            ]);
         });
     }
 

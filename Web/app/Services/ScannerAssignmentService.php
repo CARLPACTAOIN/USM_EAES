@@ -37,13 +37,13 @@ class ScannerAssignmentService
 
         if ($participationScope->event_id !== $event->id) {
             throw ValidationException::withMessages([
-                'event_participation_scope_id' => 'Selected participation scope does not belong to this event.',
+                'event_participation_scope_id' => 'Selected attendance scope does not belong to this event.',
             ]);
         }
 
         if (!$this->participationScopes->canManageScope($assignedBy, $participationScope)) {
             throw ValidationException::withMessages([
-                'event_participation_scope_id' => 'You cannot assign scanners for this participant scope.',
+                'event_participation_scope_id' => 'You cannot assign scanners for this attendance scope.',
             ]);
         }
 
@@ -56,7 +56,7 @@ class ScannerAssignmentService
         $this->assertEligibleScanner($scannerUser, $participationScope);
         if (!$this->participationScopes->userBelongsToScope($scannerUser, $participationScope)) {
             throw ValidationException::withMessages([
-                'scanner_user_id' => 'Select a scanner account inside the selected participant scope.',
+                'scanner_user_id' => 'Select a scanner account inside the selected attendance scope.',
             ]);
         }
 
@@ -141,17 +141,44 @@ class ScannerAssignmentService
             ->get();
     }
 
-    public function eligibleUsers(?string $search = null, int $limit = 50, ?User $admin = null): Collection
+    public function eligibleUsers(
+        ?string $search = null,
+        int $limit = 50,
+        ?User $admin = null,
+        ?EventParticipationScope $participationScope = null
+    ): Collection
     {
-        return $this->eligibleUsersQuery($admin, $search)
+        return $this->eligibleUsersQuery($admin, $search, $participationScope)
             ->orderBy('name')
             ->limit($limit)
             ->get();
     }
 
+    public function candidatePayload(User $user): array
+    {
+        $user->loadMissing(['organization', 'activeOrganizationMemberships.organization', 'employeeRosterEntry']);
+
+        $identity = $user->student_id_number
+            ?: $user->employeeRosterEntry?->employee_id
+            ?: $user->email;
+        $scopeLabel = $this->scannerScopeLabel($user);
+
+        return [
+            'id' => $user->id,
+            'name' => $user->name,
+            'email' => $user->email,
+            'studentId' => $identity,
+            'organization' => $scopeLabel,
+            'label' => trim($user->name . ' · ' . $identity . ' · ' . $scopeLabel),
+        ];
+    }
+
     public function canAssignScanner(User $admin, User $scannerUser, ?EventParticipationScope $participationScope = null): bool
     {
-        $eligible = $this->eligibleUsersQuery($admin)
+        $eligible = $this->eligibleUsersQuery(
+            admin: $admin,
+            participationScope: $participationScope
+        )
             ->whereKey($scannerUser->id)
             ->exists();
 
@@ -162,21 +189,30 @@ class ScannerAssignmentService
         return !$participationScope || $this->participationScopes->userBelongsToScope($scannerUser, $participationScope);
     }
 
-    private function eligibleUsersQuery(?User $admin = null, ?string $search = null): Builder
+    private function eligibleUsersQuery(
+        ?User $admin = null,
+        ?string $search = null,
+        ?EventParticipationScope $participationScope = null
+    ): Builder
     {
         $domain = config('services.eaes.allowed_email_domain', 'usm.edu.ph');
 
         return User::query()
-            ->with(['organization', 'college', 'program', 'employeeRosterEntry'])
+            ->with(['organization', 'college', 'program', 'activeOrganizationMemberships.organization', 'employeeRosterEntry'])
             ->where('email', 'like', '%@' . $domain)
             ->where(function (Builder $query): void {
                 $query->where(function (Builder $studentQuery): void {
                     $studentQuery
-                        ->whereNotNull('organization_id')
                         ->whereNotNull('college_id')
                         ->whereNotNull('program_id')
                         ->whereNotNull('student_id_number')
-                        ->whereNotNull('qr_code_value');
+                        ->whereNotNull('qr_code_value')
+                        ->where(function (Builder $scopeQuery): void {
+                            $scopeQuery->whereNotNull('organization_id')
+                                ->orWhereHas('activeOrganizationMemberships', function (Builder $membershipQuery): void {
+                                    $membershipQuery->whereNotNull('organization_id');
+                                });
+                        });
                 })->orWhereHas('employeeRosterEntry', function (Builder $employeeQuery): void {
                     $employeeQuery
                         ->where('status', 'active')
@@ -191,13 +227,27 @@ class ScannerAssignmentService
                     $query->where('name', 'like', "%{$search}%")
                         ->orWhere('email', 'like', "%{$search}%")
                         ->orWhere('student_id_number', 'like', "%{$search}%")
+                        ->orWhereHas('activeOrganizationMemberships.organization', function (Builder $organizationQuery) use ($search): void {
+                            $organizationQuery->where('name', 'like', "%{$search}%")
+                                ->orWhere('acronym', 'like', "%{$search}%");
+                        })
                         ->orWhereHas('employeeRosterEntry', function (Builder $employeeQuery) use ($search): void {
                             $employeeQuery->where('employee_id', 'like', "%{$search}%")
                                 ->orWhere('office_department', 'like', "%{$search}%");
                         });
                 });
             })
+            ->when($participationScope, fn (Builder $query, EventParticipationScope $scope) => $this->applyParticipationScope($query, $scope))
             ->when($admin, fn (Builder $query, User $admin) => $this->applyAdminScope($query, $admin));
+    }
+
+    private function applyParticipationScope(Builder $query, EventParticipationScope $participationScope): void
+    {
+        $audienceQuery = $this->participationScopes
+            ->audienceQuery($participationScope, requireRuntimeApproval: false)
+            ->select('users.id');
+
+        $query->whereIn('users.id', $audienceQuery);
     }
 
     private function applyAdminScope(Builder $query, User $admin): void
@@ -216,7 +266,12 @@ class ScannerAssignmentService
         if ($scope->isUsgAdmin()) {
             $query->where(function (Builder $query) use ($scope): void {
                 $query->where('organization_id', $scope->organizationId)
-                    ->orWhereHas('organization', fn (Builder $query) => $query->where('type', 'usg'));
+                    ->orWhereHas('organization', fn (Builder $query) => $query->where('type', 'usg'))
+                    ->orWhereHas('activeOrganizationMemberships.organization', function (Builder $organizationQuery) use ($scope): void {
+                        $organizationQuery
+                            ->where('type', 'usg')
+                            ->orWhere('id', $scope->organizationId);
+                    });
             });
             return;
         }
@@ -227,7 +282,12 @@ class ScannerAssignmentService
                 return;
             }
 
-            $query->where('college_id', $scope->collegeId);
+            $query->where(function (Builder $query) use ($scope): void {
+                $query->where('college_id', $scope->collegeId)
+                    ->orWhereHas('activeOrganizationMemberships', function (Builder $membershipQuery) use ($scope): void {
+                        $membershipQuery->where('college_id', $scope->collegeId);
+                    });
+            });
             return;
         }
 
@@ -241,7 +301,12 @@ class ScannerAssignmentService
             return;
         }
 
-        $query->where('organization_id', $scope->organizationId);
+        $query->where(function (Builder $query) use ($scope): void {
+            $query->where('organization_id', $scope->organizationId)
+                ->orWhereHas('activeOrganizationMemberships', function (Builder $membershipQuery) use ($scope): void {
+                    $membershipQuery->where('organization_id', $scope->organizationId);
+                });
+        });
     }
 
     public function isEligibleScanner(User $user, ?EventParticipationScope $scope = null): bool
@@ -260,7 +325,7 @@ class ScannerAssignmentService
                 && (filled($entry->qr_code_value) || filled($entry->employee_id));
         }
 
-        return filled($user->organization_id)
+        return $this->hasActiveStudentOrganizationProfile($user)
             && filled($user->college_id)
             && filled($user->program_id)
             && filled($user->student_id_number)
@@ -282,9 +347,43 @@ class ScannerAssignmentService
 
         if (!$this->isEligibleScanner($user, $scope)) {
             throw ValidationException::withMessages([
-                'scanner_user_id' => 'Select an institutional account with a completed scanner-ready profile for this participant scope.',
+                'scanner_user_id' => 'Select an institutional account with a completed scanner-ready profile for this attendance scope.',
             ]);
         }
+    }
+
+    private function hasActiveStudentOrganizationProfile(User $user): bool
+    {
+        if (filled($user->organization_id) && filled($user->college_id) && filled($user->program_id)) {
+            return true;
+        }
+
+        $memberships = $user->relationLoaded('activeOrganizationMemberships')
+            ? $user->activeOrganizationMemberships
+            : $user->activeOrganizationMemberships()->get();
+
+        return $memberships->contains(fn ($membership) => filled($membership->organization_id)
+            && (filled($user->college_id) || filled($membership->college_id))
+            && (filled($user->program_id) || filled($membership->program_id)));
+    }
+
+    private function scannerScopeLabel(User $user): string
+    {
+        if ($user->organization) {
+            return $user->organization->acronym ?: $user->organization->name;
+        }
+
+        $membershipLabel = $user->activeOrganizationMemberships
+            ->map(fn ($membership) => $membership->organization?->acronym ?: $membership->organization?->name)
+            ->filter()
+            ->unique()
+            ->join(', ');
+
+        if ($membershipLabel !== '') {
+            return $membershipLabel;
+        }
+
+        return $user->employeeRosterEntry?->office_department ?: 'No scope';
     }
 
     private function assertNoDuplicateActiveAssignment(Event $event, User $scannerUser, ?string $label, EventParticipationScope $participationScope): void

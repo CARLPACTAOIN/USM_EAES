@@ -625,7 +625,7 @@
                                                     <td class="px-4 py-2.5 text-right font-semibold font-data {{ $ev['eval_score'] >= 4 ? 'text-emerald-400' : ($ev['eval_score'] >= 3 ? 'text-amber-400' : 'text-red-400') }}">{{ $ev['eval_score'] > 0 ? number_format($ev['eval_score'], 2) : '—' }}</td>
                                                     <td class="px-4 py-2.5 text-right">
                                                         <button type="button"
-                                                                @click="$dispatch('open-analytics', { id: '{{ $ev['id'] }}', title: '{{ addslashes($ev['title']) }}' })"
+                                                                @click="$dispatch('open-analytics', { id: '{{ $ev['id'] }}', title: '{{ addslashes($ev['title']) }}', url: '{{ route('dashboard.events.analytics', $ev['id']) }}' })"
                                                                 class="inline-flex items-center gap-0.5 text-xs text-(--color-accent) hover:underline font-semibold cursor-pointer transition-opacity hover:opacity-80">
                                                             Details →
                                                         </button>
@@ -897,6 +897,11 @@
         <div class="proposal-modal-footer">
             <p class="proposal-required-note">Real-time attendance & feedback metrics</p>
             <div class="proposal-footer-actions">
+                <a x-show="analyticsUrl"
+                   :href="analyticsUrl"
+                   class="btn btn-secondary">
+                    Open full analytics
+                </a>
                 <button type="button" @click="closeModal()" class="btn btn-secondary">Close</button>
             </div>
         </div>
@@ -946,6 +951,7 @@
             loading: false,
             eventId: null,
             eventTitle: '',
+            analyticsUrl: '',
             attendance: { total_demographic: 0, attended: 0, attendance_rate: 0 },
             evaluations: { total_submitted: 0, average_rating: 0, sentiments: { positive: 0, neutral: 0, negative: 0 } },
             demographics: [],
@@ -953,13 +959,14 @@
             async openModal(detail) {
                 this.eventId = detail.id;
                 this.eventTitle = detail.title;
+                this.analyticsUrl = detail.url || `/dashboard/events/${this.eventId}/analytics`;
                 this.loading = true;
 
                 const modal = document.getElementById('analytics-modal');
                 if (modal?.showModal && !modal.open) modal.showModal();
 
                 try {
-                    const response = await fetch(`/dashboard/events/${this.eventId}/analytics`);
+                    const response = await fetch(`/dashboard/events/${this.eventId}/analytics/data`);
                     if (!response.ok) throw new Error('Failed to retrieve analytics');
                     const data = await response.json();
                     this.attendance = data.attendance;
@@ -979,6 +986,7 @@
                 if (modal?.open) modal.close();
                 this.eventId = null;
                 this.eventTitle = '';
+                this.analyticsUrl = '';
             },
 
             getPercentage(value, total) {

@@ -2,7 +2,7 @@
 
 **Branch / snapshot:** `main` (local)  
 **PRD source:** `PRD_V1.md` (v2.0 content, filename `PRD_V1.md`)  
-**Last reviewed:** 2026-07-03  
+**Last reviewed:** 2026-07-08
 **Backend path:** `Web/` (Laravel 12 backend with UUID schemas)
 
 > This file tracks implementation status only. It does not override `PRD_V1.md`.
@@ -31,7 +31,7 @@
 | `APP_KEY` / env setup | Done | Key generated, environment configured in `Web/.env` |
 | PostgreSQL 16 (PRD §7) | Done | Laragon PHP 8.4.5 now runs with `pdo_pgsql`; `artisan migrate:fresh` and `artisan test` pass against local PostgreSQL 16 |
 | API layer + Sanctum (Epic 1) | Done | Sanctum API setup, token login, logout, session validate routes, and UUID-compatible token ownership created |
-| Redis queues (PRD §3.3) | Off-PRD | Job processing active; database queue driver used locally as Redis fallback |
+| Redis queues (PRD §3.3) | Partial | `predis/predis` installed and Redis queue/cache templates use `REDIS_CLIENT=predis`; local runtime still uses database fallback until a Redis-compatible server is installed and `.env` is switched |
 | Project `AGENTS.md` + Cursor rules | Done | Root `AGENTS.md`, `.cursor/rules/` |
 
 ---
@@ -88,7 +88,7 @@
 |---------|--------|------------------|
 | 2.1 Digital PPA submission | Done | Event proposal creation saves location details, budgets, days, official proposal softcopy, resolution number, and hardcopy/signature status before submission/approval |
 | 2.2 OSA review pipeline | Done | OSA review, approval, rejection status routes completed; OSA lists now exclude organizer-private drafts and expose proposal detail metadata for review |
-| 2.3 Participant PPAs and distributed attendance ownership | Done | `event_participation_scopes` model/migration, Organized/Participating Events dashboard tabs, participant PPA submit/review/approve/reject routes, scope-aware scanner assignment/revocation, runtime hydrate/sync gating, and roll-up analytics implemented |
+| 2.3 Participant PPAs and distributed attendance ownership | Done | `event_participation_scopes` model/migration, organizer attendance scopes, Organized/Participating Events dashboard tabs, participant PPA submit/review/approve/reject routes, scope-aware scanner assignment/revocation, runtime hydrate/sync gating, and roll-up analytics implemented |
 | 2.4 HR event domain | Done | `events.event_domain`, HR Admin role/permissions, employee roster models, non-student Google onboarding separation, HR no-PPA event creation, and HR roster hydration path implemented |
 | 4.2 Dual-threshold statuses | Done | Computes society status and general competition status against thresholds |
 | 4.3 Multi-day session management | Done | EILO groups scans by day and maps to specific `event_day_id` records |
@@ -104,7 +104,7 @@
 
 | Feature | Status | Evidence / Notes |
 |---------|--------|------------------|
-| 6.1 Aggregated analytics dashboards | Done | Two-level analytics implemented: (1) per-event modal in events dashboard with global unique attendance, participant-scope roll-ups, attendance, evaluation, sentiment, and demographic breakdowns; (2) Organization Performance Analytics page supporting program-level filtering under each organization (cascade filters: SY, Sem, College, Org, Program, Event Type), detailed late/absent/left-early indicators, and a Program Comparison Leaderboard — all scoped by Spatie RBAC. |
+| 6.1 Aggregated analytics dashboards | Done | Two-level analytics implemented: (1) full per-event analytics workspace at `/dashboard/events/{event}/analytics` backed by shared page/API metric logic, with overview, attendance drilldown, evaluations, sentiment, participant scopes, scanner/sync, and export context; quick modal previews use `/dashboard/events/{event}/analytics/data`; (2) Organization Performance Analytics page supporting program-level filtering under each organization (cascade filters: SY, Sem, College, Org, Program, Event Type), detailed late/absent/left-early indicators, and a Program Comparison Leaderboard — all scoped by Spatie RBAC. |
 | 6.2 PDF/Excel export engine | Done | Dashboard export routes generate scoped PDF/XLSX attendance and evaluation reports with event metadata, participant scope, PPA hardcopy status, validity, ratings, comments, sentiment fields, timestamp, and generated-by user |
 | 6.3 Gawad Parangal metrics | Done | Computes active membership, average attendance rate, eval score averages, and program comparison indicators |
 
@@ -175,6 +175,10 @@
 
 ## Sprint Notes
 
+- **2026-07-09 (per-event analytics workspace):**
+  - Replaced the Events table analytics modal entry point with a full per-event analytics page at `/dashboard/events/{event}/analytics`, while keeping quick preview JSON at `/dashboard/events/{event}/analytics/data` and the existing API route backward-compatible.
+  - Added shared `EventAnalyticsService` metric logic so web page, web JSON, and API analytics share participation-scope denominators via `ParticipationScopeService::audienceQuery`, including daily EILO counts, valid attendance, evaluation category distributions, sentiment summaries, participant drilldown rows, scanner/session/raw-scan health, pending QR counts, and export context.
+  - Added feature and metric coverage in `EventAnalyticsPageTest` plus the existing global analytics API denominator regression.
 - **2026-07-03 (participant PPA, distributed attendance ownership, and HR domain):**
   - Added `event_participation_scopes`, `organization_memberships`, employee profile/roster tables, and event-domain columns, with backfills from existing organizer events and linked child PPAs.
   - Scoped scanner assignment/session/hydrate/sync/runtime guards to approved participant scopes; sync now rejects out-of-scope scans and EILO resolution preserves `event_participation_scope_id`.
@@ -334,3 +338,19 @@
   - Implemented independent filter and search controls for both the Organizations and Admin Assignments tabs.
   - Added a search filter, role filter, status filter, and term filter to the Admin Assignments tab, wiring them up in the backend controller.
   - Preserved each tab's active and query state using URL parameter sync and tab-aware backend redirects.
+- **2026-07-07 (mobile aesthetic overhaul):**
+  - Overhauled the presentation layer in Flutter app with dark-themed, green+gold branded designs.
+  - Forced dark mode and customized App themes, AppBar themes, NavigationBar themes, cards, buttons, text fields, chips, and dividers with USM Gold (#D4A843), USM Green (#1B4D3E), and near-black surfaces.
+  - Implemented custom staggered entrance animations on the Assigned Events screen.
+  - Refactored 14 presentation files (screens and widgets) to align with this new premium aesthetic and cleanly pass static analyzer checks.
+- **2026-07-07 (event workflow scanner scope repair):**
+  - Clarified that the organizing organization is automatically included through the organizer attendance scope and must not submit a duplicate participant PPA for its own event.
+  - Made dashboard scanner candidate search membership-aware, added a scoped scanner-candidate lookup endpoint, auto-healed missing organizer attendance scopes for displayed legacy events, and relabeled scanner assignment selection to attendance scope to reduce organizer-vs-participant confusion.
+  - Synced student profile updates into `organization_memberships` so organizer-affiliated student registrations remain visible to participation-scope rosters and scanner assignment search.
+  - Improved the scanner assignment modal with a compact multi-select tray, outside/focus-leave dropdown closing, and one-submit bulk assignment while preserving existing scope validation.
+  - Added explicit start and end time metadata to the OSA event details modal using stored `event_days` times.
+  - Changed Flutter scanner hydration to replace the local roster for the active session instead of accumulating stale roster rows from prior event/scope hydrations.
+- **2026-07-08 (Redis queue/cache readiness):**
+  - Added `predis/predis` so Redis-backed queue/cache can run without the Windows PHP Redis extension.
+  - Switched Redis env templates to `REDIS_CLIENT=predis` and documented the local Redis server/env switch needed before replacing the database queue fallback.
+  - Hardened `eaes:deployment-check` to fail clearly when Redis is configured but the selected PHP Redis client is unavailable.
