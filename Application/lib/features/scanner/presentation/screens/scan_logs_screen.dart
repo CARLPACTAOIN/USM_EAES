@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../../config/app_colors.dart';
+
 import '../../domain/offline_scan.dart';
 import '../../domain/scan_type.dart';
 import '../scanner_controller.dart';
@@ -50,6 +52,7 @@ class _ScanLogsScreenState extends State<ScanLogsScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final c = AppColors.of(context);
 
     if (!widget.controller.hasSession) {
       return _EmptyState(
@@ -60,7 +63,7 @@ class _ScanLogsScreenState extends State<ScanLogsScreen> {
     }
 
     if (_loading) {
-      return const Center(child: CircularProgressIndicator());
+      return Center(child: CircularProgressIndicator(color: AppColors.usmGold));
     }
 
     if (_error != null) {
@@ -70,19 +73,38 @@ class _ScanLogsScreenState extends State<ScanLogsScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(
-                Icons.error_outline_rounded,
-                size: 48,
-                color: theme.colorScheme.error,
+              Container(
+                width: 64,
+                height: 64,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: theme.colorScheme.error.withValues(alpha: 0.10),
+                ),
+                child: Icon(
+                  Icons.error_outline_rounded,
+                  size: 32,
+                  color: theme.colorScheme.error,
+                ),
               ),
               const SizedBox(height: 16),
-              Text('Could not load logs', style: theme.textTheme.titleMedium),
+              Text(
+                'Could not load logs',
+                style: TextStyle(
+                  fontFamily: 'Inter',
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: c.onSurface,
+                ),
+              ),
               const SizedBox(height: 8),
               Text(
                 _error!,
                 textAlign: TextAlign.center,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+                style: TextStyle(
+                  fontFamily: 'Inter',
+                  fontSize: 12,
+                  color: c.onSurfaceMuted,
+                  height: 1.4,
                 ),
               ),
               const SizedBox(height: 20),
@@ -116,7 +138,7 @@ class _ScanLogsScreenState extends State<ScanLogsScreen> {
 
     return RefreshIndicator(
       onRefresh: _loadScans,
-      color: const Color(0xFF1B4D3E),
+      color: AppColors.usmGold,
       child: CustomScrollView(
         slivers: [
           // Summary header
@@ -127,15 +149,20 @@ class _ScanLogsScreenState extends State<ScanLogsScreen> {
                 children: [
                   Text(
                     '${scans.length} scan${scans.length == 1 ? '' : 's'}',
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      color: theme.colorScheme.onSurface.withValues(alpha: 0.7),
+                    style: TextStyle(
+                      fontFamily: 'Inter',
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.usmGold.withValues(alpha: 0.70),
                     ),
                   ),
                   const Spacer(),
                   Text(
                     'Pull to refresh',
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: theme.colorScheme.onSurface.withValues(alpha: 0.4),
+                    style: TextStyle(
+                      fontFamily: 'Inter',
+                      fontSize: 11,
+                      color: c.onSurfaceMuted.withValues(alpha: 0.7),
                     ),
                   ),
                 ],
@@ -179,31 +206,48 @@ class _EmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final c = AppColors.of(context);
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(40),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              icon,
-              size: 64,
-              color: theme.colorScheme.onSurface.withValues(alpha: 0.2),
+            Container(
+              width: 80,
+              height: 80,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: c.quietIconSurface,
+                border: Border.all(
+                  color: AppColors.usmGold.withValues(alpha: 0.12),
+                ),
+              ),
+              child: Icon(
+                icon,
+                size: 36,
+                color: AppColors.usmGold.withValues(alpha: 0.40),
+              ),
             ),
             const SizedBox(height: 20),
             Text(
               title,
-              style: theme.textTheme.titleMedium?.copyWith(
-                color: theme.colorScheme.onSurface.withValues(alpha: 0.7),
+              style: TextStyle(
+                fontFamily: 'Inter',
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: c.onSurface,
               ),
             ),
             const SizedBox(height: 8),
             Text(
               subtitle,
               textAlign: TextAlign.center,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurface.withValues(alpha: 0.45),
+              style: TextStyle(
+                fontFamily: 'Inter',
+                fontSize: 13,
+                color: c.onSurfaceMuted,
+                height: 1.5,
               ),
             ),
             if (action != null) ...[const SizedBox(height: 24), action!],
@@ -218,11 +262,13 @@ class _ScanLogTile extends StatelessWidget {
   const _ScanLogTile({required this.scan});
   final OfflineScan scan;
 
+  static const Color _accentGreen = AppColors.accentGreen;
+  static const Color _accentBlue = AppColors.accentBlue;
+  static const Color _usmGold = AppColors.usmGold;
+
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-
+    final c = AppColors.of(context);
     final isTimeIn = scan.scanType == ScanType.timeIn;
     final isSynced = scan.syncedAt != null;
     final isUnresolved = scan.resolutionStatus == 'pending_server_lookup';
@@ -230,20 +276,17 @@ class _ScanLogTile extends StatelessWidget {
 
     // Display name
     final displayName = scan.studentId != null
-        ? scan
-              .qrCodeValue // Will ideally come from a joined query later
+        ? scan.qrCodeValue
         : 'Unresolved QR';
 
     // Colours
-    final typeColor = isTimeIn
-        ? const Color(0xFF1B4D3E)
-        : const Color(0xFF2563EB);
+    final typeColor = isTimeIn ? _accentGreen : _accentBlue;
 
     final syncColor = isSynced
-        ? const Color(0xFF16A34A)
+        ? _accentGreen
         : isUnresolved
-        ? Colors.orange.shade700
-        : theme.colorScheme.onSurface.withValues(alpha: 0.4);
+        ? _usmGold
+        : c.onSurfaceMuted;
 
     final syncLabel = isSynced
         ? 'Synced'
@@ -260,9 +303,24 @@ class _ScanLogTile extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        color: c.isDark ? c.panel : null,
+        gradient: c.isDark
+            ? null
+            : LinearGradient(
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+                colors: [
+                  typeColor.withValues(alpha: 0.13),
+                  Colors.white,
+                  isUnresolved
+                      ? c.goldWash.withValues(alpha: 0.62)
+                      : c.blueWash.withValues(alpha: 0.38),
+                ],
+              ),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: theme.colorScheme.outlineVariant),
+        border: Border.all(
+          color: c.isDark ? c.panelBorder : typeColor.withValues(alpha: 0.22),
+        ),
       ),
       child: Row(
         children: [
@@ -271,7 +329,7 @@ class _ScanLogTile extends StatelessWidget {
             width: 40,
             height: 40,
             decoration: BoxDecoration(
-              color: typeColor.withValues(alpha: isDark ? 0.15 : 0.08),
+              color: typeColor.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(10),
             ),
             child: Icon(
@@ -292,8 +350,11 @@ class _ScanLogTile extends StatelessWidget {
                     Expanded(
                       child: Text(
                         displayName,
-                        style: theme.textTheme.titleSmall?.copyWith(
+                        style: TextStyle(
+                          fontFamily: 'Inter',
+                          fontSize: 14,
                           fontWeight: FontWeight.w600,
+                          color: c.onSurface,
                         ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -307,13 +368,16 @@ class _ScanLogTile extends StatelessWidget {
                           vertical: 2,
                         ),
                         decoration: BoxDecoration(
-                          color: theme.colorScheme.surfaceContainerHighest,
+                          color: _usmGold.withValues(alpha: 0.12),
                           borderRadius: BorderRadius.circular(4),
                         ),
                         child: Text(
                           'Manual',
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
+                          style: TextStyle(
+                            fontFamily: 'Inter',
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                            color: _usmGold.withValues(alpha: 0.80),
                           ),
                         ),
                       ),
@@ -329,9 +393,7 @@ class _ScanLogTile extends StatelessWidget {
                         vertical: 2,
                       ),
                       decoration: BoxDecoration(
-                        color: typeColor.withValues(
-                          alpha: isDark ? 0.15 : 0.08,
-                        ),
+                        color: typeColor.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(4),
                       ),
                       child: Text(
@@ -348,10 +410,10 @@ class _ScanLogTile extends StatelessWidget {
                     // Timestamp
                     Text(
                       _formatTime(scan.scannedAt),
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurface.withValues(
-                          alpha: 0.5,
-                        ),
+                      style: TextStyle(
+                        fontFamily: 'Inter',
+                        fontSize: 11,
+                        color: c.onSurfaceMuted,
                       ),
                     ),
                   ],

@@ -11,6 +11,7 @@ use App\Models\Organization;
 use App\Models\Program;
 use App\Models\User;
 use App\Services\AdminScopeService;
+use App\Support\YearLevels;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -31,6 +32,7 @@ class AnalyticsOverviewController extends Controller
         $selectedCollegeId = $request->input('college_id');
         $selectedOrgId = $request->input('organization_id');
         $selectedProgramId = $request->input('program_id');
+        $selectedYearLevel = $request->input('year_level');
         $selectedSchoolYear = $request->input('school_year');
         $selectedSemester = $request->input('semester');
         $selectedEventType = $request->input('event_type');
@@ -110,7 +112,7 @@ class AnalyticsOverviewController extends Controller
         $globalEvalCount = 0;
 
         foreach ($organizations as $org) {
-            $metrics = $this->computeOrgMetrics($org, $selectedProgramId, $selectedSchoolYear, $selectedSemester, $selectedEventType);
+            $metrics = $this->computeOrgMetrics($org, $selectedProgramId, $selectedSchoolYear, $selectedSemester, $selectedEventType, $selectedYearLevel);
             $orgMetrics[$org->id] = $metrics;
 
             $globalAttendanceSum += $metrics['avg_attendance_rate'];
@@ -148,7 +150,7 @@ class AnalyticsOverviewController extends Controller
         $programComparison = [];
 
         foreach ($programsForComparison as $program) {
-            $programComparison[] = $this->computeProgramMetrics($program, $selectedSchoolYear, $selectedSemester, $selectedEventType);
+            $programComparison[] = $this->computeProgramMetrics($program, $selectedSchoolYear, $selectedSemester, $selectedEventType, $selectedYearLevel);
         }
 
         // Sort programs by composite score
@@ -190,6 +192,8 @@ class AnalyticsOverviewController extends Controller
             }
         }
 
+        $yearLevelOptions = YearLevels::options();
+
         return view('dashboard.analytics.index', compact(
             'organizations',
             'orgMetrics',
@@ -207,9 +211,11 @@ class AnalyticsOverviewController extends Controller
             'selectedCollegeId',
             'selectedOrgId',
             'selectedProgramId',
+            'selectedYearLevel',
             'selectedSchoolYear',
             'selectedSemester',
             'selectedEventType',
+            'yearLevelOptions',
             'scope'
         ));
     }
@@ -217,7 +223,7 @@ class AnalyticsOverviewController extends Controller
     /**
      * Compute aggregated performance metrics for a single organization.
      */
-    private function computeOrgMetrics(Organization $org, $programId = null, $schoolYear = null, $semester = null, $eventType = null): array
+    private function computeOrgMetrics(Organization $org, $programId = null, $schoolYear = null, $semester = null, $eventType = null, $yearLevel = null): array
     {
         // Fetch completed events hosted by organization
         $eventsQuery = Event::where('organization_id', $org->id)
@@ -229,9 +235,7 @@ class AnalyticsOverviewController extends Controller
 
         // Get total organization students (optionally filtered by program)
         $studentsQuery = User::role('Student')->where('organization_id', $org->id);
-        if ($programId) {
-            $studentsQuery->where('program_id', $programId);
-        }
+        $this->applyStudentFilters($studentsQuery, $programId, $yearLevel);
         $totalMembers = $studentsQuery->count();
 
         $totalEvents = $completedEvents->count();
@@ -258,11 +262,9 @@ class AnalyticsOverviewController extends Controller
                 // Attendance count for this event scoped by student filter
                 $attendedCount = AttendanceRecord::where('event_id', $event->id)
                     ->whereNotNull('time_in')
-                    ->whereIn('student_id', function ($q) use ($org, $programId) {
+                    ->whereIn('student_id', function ($q) use ($org, $programId, $yearLevel) {
                         $q->select('id')->from('users')->where('organization_id', $org->id);
-                        if ($programId) {
-                            $q->where('program_id', $programId);
-                        }
+                        $this->applyStudentFilters($q, $programId, $yearLevel);
                     })
                     ->distinct('student_id')
                     ->count('student_id');
@@ -275,11 +277,9 @@ class AnalyticsOverviewController extends Controller
                 // Valid attendance records (passed evaluation gate)
                 $validCount = AttendanceRecord::where('event_id', $event->id)
                     ->where('valid', true)
-                    ->whereIn('student_id', function ($q) use ($org, $programId) {
+                    ->whereIn('student_id', function ($q) use ($org, $programId, $yearLevel) {
                         $q->select('id')->from('users')->where('organization_id', $org->id);
-                        if ($programId) {
-                            $q->where('program_id', $programId);
-                        }
+                        $this->applyStudentFilters($q, $programId, $yearLevel);
                     })
                     ->distinct('student_id')
                     ->count('student_id');
@@ -292,44 +292,36 @@ class AnalyticsOverviewController extends Controller
                 // Late, Absent, Left Early aggregates
                 $lateCount = AttendanceRecord::where('event_id', $event->id)
                     ->whereIn('society_status', ['late', 'late_cutoff'])
-                    ->whereIn('student_id', function ($q) use ($org, $programId) {
+                    ->whereIn('student_id', function ($q) use ($org, $programId, $yearLevel) {
                         $q->select('id')->from('users')->where('organization_id', $org->id);
-                        if ($programId) {
-                            $q->where('program_id', $programId);
-                        }
+                        $this->applyStudentFilters($q, $programId, $yearLevel);
                     })
                     ->count();
                 $totalLateCount += $lateCount;
 
                 $absentCount = AttendanceRecord::where('event_id', $event->id)
                     ->where('society_status', 'absent')
-                    ->whereIn('student_id', function ($q) use ($org, $programId) {
+                    ->whereIn('student_id', function ($q) use ($org, $programId, $yearLevel) {
                         $q->select('id')->from('users')->where('organization_id', $org->id);
-                        if ($programId) {
-                            $q->where('program_id', $programId);
-                        }
+                        $this->applyStudentFilters($q, $programId, $yearLevel);
                     })
                     ->count();
                 $totalAbsentCount += $absentCount;
 
                 $leftEarlyCount = AttendanceRecord::where('event_id', $event->id)
                     ->where('left_early', true)
-                    ->whereIn('student_id', function ($q) use ($org, $programId) {
+                    ->whereIn('student_id', function ($q) use ($org, $programId, $yearLevel) {
                         $q->select('id')->from('users')->where('organization_id', $org->id);
-                        if ($programId) {
-                            $q->where('program_id', $programId);
-                        }
+                        $this->applyStudentFilters($q, $programId, $yearLevel);
                     })
                     ->count();
                 $totalLeftEarlyCount += $leftEarlyCount;
 
                 // Evaluations for this event
                 $evaluations = Evaluation::where('event_id', $event->id)
-                    ->whereIn('student_id', function ($q) use ($org, $programId) {
+                    ->whereIn('student_id', function ($q) use ($org, $programId, $yearLevel) {
                         $q->select('id')->from('users')->where('organization_id', $org->id);
-                        if ($programId) {
-                            $q->where('program_id', $programId);
-                        }
+                        $this->applyStudentFilters($q, $programId, $yearLevel);
                     })
                     ->get();
 
@@ -380,7 +372,8 @@ class AnalyticsOverviewController extends Controller
         $activeMembersCount = User::role('Student')
             ->where('organization_id', $org->id)
             ->when($programId, fn($q) => $q->where('program_id', $programId))
-            ->whereIn('id', function ($query) use ($org, $programId, $completedEvents) {
+            ->when($yearLevel, fn($q) => $q->where('year_level', $yearLevel))
+            ->whereIn('id', function ($query) use ($completedEvents) {
                 $query->select('student_id')
                     ->from('attendance_records')
                     ->whereIn('event_id', $completedEvents->pluck('id'))
@@ -409,7 +402,7 @@ class AnalyticsOverviewController extends Controller
         if (!$programId) {
             $linkedPrograms = $org->programs()->get();
             foreach ($linkedPrograms as $prog) {
-                $progMetrics = $this->computeOrgMetrics($org, $prog->id, $schoolYear, $semester, $eventType);
+                $progMetrics = $this->computeOrgMetrics($org, $prog->id, $schoolYear, $semester, $eventType, $yearLevel);
                 $linkedProgramsMetrics[] = [
                     'program' => $prog,
                     'avg_attendance_rate' => $progMetrics['avg_attendance_rate'],
@@ -440,7 +433,7 @@ class AnalyticsOverviewController extends Controller
     /**
      * Compute aggregated metrics for an academic program (across all matched events).
      */
-    private function computeProgramMetrics(Program $program, $schoolYear = null, $semester = null, $eventType = null): array
+    private function computeProgramMetrics(Program $program, $schoolYear = null, $semester = null, $eventType = null, $yearLevel = null): array
     {
         // Get all completed events
         $eventsQuery = Event::where('status', 'completed');
@@ -450,6 +443,9 @@ class AnalyticsOverviewController extends Controller
 
         // Total registered students in program
         $studentsQuery = User::role('Student')->where('program_id', $program->id);
+        if ($yearLevel) {
+            $studentsQuery->where('year_level', $yearLevel);
+        }
         $totalMembers = $studentsQuery->count();
         $studentIds = $studentsQuery->pluck('id');
 
@@ -578,6 +574,17 @@ class AnalyticsOverviewController extends Controller
     /**
      * Helper to apply school year, semester, and event type queries to event builder.
      */
+    private function applyStudentFilters($query, $programId = null, $yearLevel = null): void
+    {
+        if ($programId) {
+            $query->where('program_id', $programId);
+        }
+
+        if ($yearLevel) {
+            $query->where('year_level', $yearLevel);
+        }
+    }
+
     private function applyEventFilters($query, $schoolYear = null, $semester = null, $eventType = null): void
     {
         if ($schoolYear) {

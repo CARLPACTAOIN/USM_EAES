@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../../../config/app_colors.dart';
 import '../../../../config/app_config.dart';
 
 class TechnicalDetailsPanel extends StatefulWidget {
@@ -20,8 +21,7 @@ class _TechnicalDetailsPanelState extends State<TechnicalDetailsPanel> {
     if (!AppConfig.debugDetails || widget.details.isEmpty) {
       return const SizedBox.shrink();
     }
-
-    final theme = Theme.of(context);
+    final c = AppColors.of(context);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -31,8 +31,12 @@ class _TechnicalDetailsPanelState extends State<TechnicalDetailsPanel> {
           icon: Icon(
             _expanded ? Icons.expand_less_rounded : Icons.expand_more_rounded,
             size: 18,
+            color: AppColors.usmGold.withValues(alpha: 0.70),
           ),
-          label: const Text('Technical details'),
+          label: Text(
+            'Technical details',
+            style: TextStyle(color: AppColors.usmGold.withValues(alpha: 0.70)),
+          ),
           style: TextButton.styleFrom(
             alignment: Alignment.centerLeft,
             padding: EdgeInsets.zero,
@@ -43,14 +47,20 @@ class _TechnicalDetailsPanelState extends State<TechnicalDetailsPanel> {
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: theme.colorScheme.surfaceContainerHighest,
+              color: c.isDark
+                  ? Colors.white.withValues(alpha: 0.04)
+                  : const Color(0xFFF3F6F4),
               borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: c.panelBorder),
             ),
             child: SelectableText(
               widget.details,
-              style: theme.textTheme.bodySmall?.copyWith(
+              style: TextStyle(
                 fontFamily: 'monospace',
                 fontSize: 11,
+                color: c.isDark
+                    ? Colors.white.withValues(alpha: 0.55)
+                    : c.onSurfaceMuted,
               ),
             ),
           ),
@@ -60,11 +70,23 @@ class _TechnicalDetailsPanelState extends State<TechnicalDetailsPanel> {
               onPressed: () {
                 Clipboard.setData(ClipboardData(text: widget.details));
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Technical details copied')),
+                  SnackBar(
+                    content: const Text('Technical details copied'),
+                    backgroundColor: c.cardElevated,
+                  ),
                 );
               },
-              icon: const Icon(Icons.copy_rounded, size: 16),
-              label: const Text('Copy'),
+              icon: Icon(
+                Icons.copy_rounded,
+                size: 16,
+                color: AppColors.usmGold.withValues(alpha: 0.60),
+              ),
+              label: Text(
+                'Copy',
+                style: TextStyle(
+                  color: AppColors.usmGold.withValues(alpha: 0.60),
+                ),
+              ),
             ),
           ),
         ],

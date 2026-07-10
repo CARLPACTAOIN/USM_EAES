@@ -29,6 +29,7 @@ class AppConfig {
     'EAES_DEVICE_ID',
     defaultValue: 'scanner-dev-device',
   );
+  static const bool hasDeviceIdOverride = bool.hasEnvironment('EAES_DEVICE_ID');
   static const int syncBatchSize = int.fromEnvironment(
     'EAES_SYNC_BATCH_SIZE',
     defaultValue: 200,

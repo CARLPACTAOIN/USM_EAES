@@ -48,7 +48,7 @@
             </div>
 
             <form method="GET" action="{{ route('dashboard.analytics') }}">
-                <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
+                <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-7 gap-4">
                     {{-- School Year --}}
                     <div>
                         <label for="school_year" class="block text-xs font-semibold text-(--color-text-secondary) mb-1.5 uppercase tracking-wider">School Year</label>
@@ -112,6 +112,17 @@
                         </select>
                     </div>
 
+                    {{-- Year Level --}}
+                    <div>
+                        <label for="year_level" class="block text-xs font-semibold text-(--color-text-secondary) mb-1.5 uppercase tracking-wider">Year Level</label>
+                        <select name="year_level" id="year_level" class="form-input form-select text-sm w-full">
+                            <option value="">All Years</option>
+                            @foreach($yearLevelOptions as $value => $label)
+                                <option value="{{ $value }}" {{ $selectedYearLevel == $value ? 'selected' : '' }}>{{ $label }}</option>
+                            @endforeach
+                        </select>
+                    </div>
+
                     {{-- Event Type --}}
                     <div>
                         <label for="event_type" class="block text-xs font-semibold text-(--color-text-secondary) mb-1.5 uppercase tracking-wider">Event Type</label>
@@ -125,7 +136,7 @@
                 </div>
 
                 <div class="flex items-center justify-end gap-3 mt-4 pt-4 border-t border-(--color-border)">
-                    @if($selectedSchoolYear || $selectedSemester || $selectedCollegeId || $selectedOrgId || $selectedProgramId || $selectedEventType)
+                    @if($selectedSchoolYear || $selectedSemester || $selectedCollegeId || $selectedOrgId || $selectedProgramId || $selectedYearLevel || $selectedEventType)
                         <a href="{{ route('dashboard.analytics') }}" class="btn btn-secondary btn-sm">
                             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>

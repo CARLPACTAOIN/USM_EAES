@@ -22,7 +22,7 @@ class EventAnalyticsController extends Controller
         $participantRows = $this->analytics
             ->participantRows(
                 $event,
-                $request->only(['scope_id', 'day_id', 'status', 'validation', 'q']),
+                $request->only(['scope_id', 'day_id', 'status', 'validation', 'year_level', 'q']),
                 (int) $request->integer('per_page', 25)
             )
             ->appends($request->query());
@@ -36,6 +36,7 @@ class EventAnalyticsController extends Controller
                 'day_id' => $request->query('day_id'),
                 'status' => $request->query('status', 'all'),
                 'validation' => $request->query('validation', 'all'),
+                'year_level' => $request->query('year_level', ''),
                 'q' => $request->query('q', ''),
                 'per_page' => (int) $request->query('per_page', 25),
             ],

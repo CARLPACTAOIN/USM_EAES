@@ -13,10 +13,12 @@ use App\Models\Program;
 use App\Models\User;
 use App\Support\EvaluationQuestions;
 use App\Support\EvaluationWindow;
+use App\Support\YearLevels;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\Rule;
 
 class PortalController extends Controller
 {
@@ -30,6 +32,7 @@ class PortalController extends Controller
         // Profile completion check
         $profileComplete = $user->student_id_number
             && $user->qr_code_value
+            && $user->year_level
             && $user->organization_id;
 
         // Events needing evaluation (attended but not yet evaluated)
@@ -82,7 +85,9 @@ class PortalController extends Controller
             $programsByCollege[$prog->college_id][] = ['id' => $prog->id, 'name' => $prog->name, 'code' => $prog->code];
         }
 
-        return view('portal.profile', compact('user', 'colleges', 'orgsByCollege', 'programsByCollege'));
+        $yearLevelOptions = YearLevels::options();
+
+        return view('portal.profile', compact('user', 'colleges', 'orgsByCollege', 'programsByCollege', 'yearLevelOptions'));
     }
 
     /**
@@ -96,6 +101,7 @@ class PortalController extends Controller
             'college_id' => 'required|uuid|exists:colleges,id',
             'program_id' => 'required|uuid|exists:programs,id',
             'organization_id' => 'required|uuid|exists:organizations,id',
+            'year_level' => ['required', Rule::in(YearLevels::values())],
             'student_id_number' => [
                 'required', 'string', 'max:20',
                 'unique:users,student_id_number,' . $user->id,
@@ -140,6 +146,7 @@ class PortalController extends Controller
                 'program_id' => $request->program_id,
                 'organization_id' => $request->organization_id,
                 'program_code' => $program->code,
+                'year_level' => $request->year_level,
                 'student_id_number' => $request->student_id_number,
                 'qr_code_value' => $request->qr_code_value,
             ]);
@@ -159,6 +166,7 @@ class PortalController extends Controller
                 [
                     'college_id' => $request->college_id,
                     'program_id' => $request->program_id,
+                    'year_level' => $request->year_level,
                     'status' => OrganizationMembership::STATUS_ACTIVE,
                     'verified_at' => now(),
                 ]

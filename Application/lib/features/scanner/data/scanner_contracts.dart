@@ -19,6 +19,8 @@ abstract class ScannerRemoteApi {
 abstract class ScannerLocalStore {
   Future<void> upsertRoster(List<RosterStudent> students);
 
+  Future<void> replaceRoster(List<RosterStudent> students);
+
   Future<RosterStudent?> findStudentByQr(String qrCodeValue);
 
   Future<RosterStudent?> findStudentByIdNumber(String studentIdNumber);

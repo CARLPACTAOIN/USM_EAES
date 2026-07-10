@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 
+import '../../../../config/app_colors.dart';
+
 import '../../domain/scan_type.dart';
 import '../scanner_controller.dart';
 import '../widgets/event_ready_card.dart';
@@ -122,9 +124,7 @@ class _NoSessionContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-
+    final c = AppColors.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -133,13 +133,24 @@ class _NoSessionContent extends StatelessWidget {
             width: 120,
             height: 120,
             decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF0F2E25) : const Color(0xFFECFDF5),
+              color: c.quietIconSurface,
               shape: BoxShape.circle,
+              border: Border.all(
+                color: AppColors.usmGold.withValues(alpha: 0.15),
+                width: 1.5,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: AppColors.usmGold.withValues(alpha: 0.08),
+                  blurRadius: 40,
+                  spreadRadius: 4,
+                ),
+              ],
             ),
-            child: const Icon(
+            child: Icon(
               Icons.qr_code_scanner_rounded,
               size: 56,
-              color: Color(0xFF1B4D3E),
+              color: AppColors.usmGold.withValues(alpha: 0.60),
             ),
           ),
         ),
@@ -147,16 +158,22 @@ class _NoSessionContent extends StatelessWidget {
         Text(
           'No Active Session',
           textAlign: TextAlign.center,
-          style: theme.textTheme.headlineMedium?.copyWith(
+          style: TextStyle(
+            fontFamily: 'Inter',
+            fontSize: 22,
             fontWeight: FontWeight.w800,
+            color: c.onSurface,
           ),
         ),
         const SizedBox(height: 8),
         Text(
           'Activate one of your assigned events before capturing attendance offline.',
           textAlign: TextAlign.center,
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+          style: TextStyle(
+            fontFamily: 'Inter',
+            fontSize: 13,
+            color: c.onSurfaceMuted,
+            height: 1.5,
           ),
         ),
         const SizedBox(height: 24),
@@ -205,10 +222,22 @@ class _SessionActiveContent extends StatelessWidget {
             icon: controller.busy
                 ? const SizedBox.square(
                     dimension: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: AppColors.usmGold,
+                    ),
                   )
-                : const Icon(Icons.refresh_rounded, size: 18),
-            label: Text(controller.busy ? 'Refreshing...' : 'Refresh roster'),
+                : Icon(
+                    Icons.refresh_rounded,
+                    size: 18,
+                    color: AppColors.usmGold.withValues(alpha: 0.70),
+                  ),
+            label: Text(
+              controller.busy ? 'Refreshing...' : 'Refresh roster',
+              style: TextStyle(
+                color: AppColors.usmGold.withValues(alpha: 0.70),
+              ),
+            ),
           ),
       ],
     );
@@ -226,26 +255,18 @@ class _HydrateRosterPrompt extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-
+    final c = AppColors.of(context);
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: isDark
-            ? Colors.orange.withValues(alpha: 0.1)
-            : Colors.orange.shade50,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.orange.withValues(alpha: 0.4)),
+        color: Colors.orange.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.orange.withValues(alpha: 0.25)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(
-            Icons.warning_amber_rounded,
-            color: Colors.orange.shade700,
-            size: 22,
-          ),
+          Icon(Icons.warning_amber_rounded, color: AppColors.usmGold, size: 22),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -253,17 +274,22 @@ class _HydrateRosterPrompt extends StatelessWidget {
               children: [
                 Text(
                   'Roster not downloaded',
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    color: Colors.orange.shade800,
+                  style: TextStyle(
+                    fontFamily: 'Inter',
+                    fontSize: 14,
                     fontWeight: FontWeight.w700,
+                    color: AppColors.usmGold,
                   ),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   'Download the student roster before scanning offline so the '
                   'app can identify students without a network connection.',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: Colors.orange.shade900,
+                  style: TextStyle(
+                    fontFamily: 'Inter',
+                    fontSize: 12,
+                    color: c.onSurfaceMuted,
+                    height: 1.5,
                   ),
                 ),
                 const SizedBox(height: 12),

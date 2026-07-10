@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 
+import '../../../../config/app_colors.dart';
+
 import '../scanner_controller.dart';
 import '../widgets/sync_status_panel.dart';
 import '../widgets/technical_details_panel.dart';
@@ -119,31 +121,48 @@ class _OfflineToolsScreenState extends State<OfflineToolsScreen> {
 class _NoSessionPlaceholder extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final c = AppColors.of(context);
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              Icons.cloud_off_rounded,
-              size: 64,
-              color: theme.colorScheme.onSurface.withValues(alpha: 0.2),
+            Container(
+              width: 80,
+              height: 80,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: c.quietIconSurface,
+                border: Border.all(
+                  color: AppColors.usmGold.withValues(alpha: 0.12),
+                ),
+              ),
+              child: Icon(
+                Icons.cloud_off_rounded,
+                size: 36,
+                color: AppColors.usmGold.withValues(alpha: 0.40),
+              ),
             ),
             const SizedBox(height: 20),
             Text(
               'Open a session first',
-              style: theme.textTheme.titleMedium?.copyWith(
-                color: theme.colorScheme.onSurface.withValues(alpha: 0.5),
+              style: TextStyle(
+                fontFamily: 'Inter',
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: c.onSurface,
               ),
             ),
             const SizedBox(height: 8),
             Text(
               'Offline tools become available once a scanner session is active.',
               textAlign: TextAlign.center,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurface.withValues(alpha: 0.4),
+              style: TextStyle(
+                fontFamily: 'Inter',
+                fontSize: 13,
+                color: c.onSurfaceMuted,
+                height: 1.5,
               ),
             ),
           ],
@@ -167,41 +186,66 @@ class _SectionCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
+    final c = AppColors.of(context);
 
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E293B) : Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: theme.colorScheme.outlineVariant),
-        boxShadow: isDark
+        color: c.isDark ? c.panel : null,
+        gradient: c.isDark
             ? null
-            : [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.04),
-                  blurRadius: 8,
-                  offset: const Offset(0, 2),
-                ),
-              ],
+            : LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  c.goldWash.withValues(alpha: 0.64),
+                  Colors.white,
+                  c.brandWash.withValues(alpha: 0.72),
+                ],
+              ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: c.isDark
+              ? c.panelBorder
+              : AppColors.usmGold.withValues(alpha: 0.28),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: c.softShadow,
+            blurRadius: 12,
+            offset: const Offset(0, 3),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
             children: [
-              Icon(icon, size: 20, color: const Color(0xFF1B4D3E)),
+              Icon(icon, size: 20, color: AppColors.usmGold),
               const SizedBox(width: 10),
               Text(
                 title,
                 style: theme.textTheme.titleSmall?.copyWith(
                   fontWeight: FontWeight.w700,
+                  color: c.onSurface,
                 ),
               ),
             ],
           ),
           const SizedBox(height: 14),
-          Divider(color: theme.colorScheme.outlineVariant, height: 1),
+          Container(
+            height: 1,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  Colors.transparent,
+                  AppColors.usmGold.withValues(alpha: 0.15),
+                  Colors.transparent,
+                ],
+              ),
+            ),
+          ),
           const SizedBox(height: 14),
           ...children,
         ],
@@ -223,8 +267,7 @@ class _InfoRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final color = positive ? const Color(0xFF1B4D3E) : Colors.orange.shade700;
+    final color = positive ? AppColors.accentGreen : AppColors.usmGold;
 
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -234,7 +277,12 @@ class _InfoRow extends StatelessWidget {
         Expanded(
           child: Text(
             text,
-            style: theme.textTheme.bodySmall?.copyWith(color: color),
+            style: TextStyle(
+              fontFamily: 'Inter',
+              fontSize: 12,
+              color: color.withValues(alpha: 0.85),
+              height: 1.4,
+            ),
           ),
         ),
       ],
@@ -251,18 +299,14 @@ class _ErrorCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
+    final errorColor = theme.colorScheme.error;
 
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: isDark
-            ? theme.colorScheme.error.withValues(alpha: 0.15)
-            : theme.colorScheme.errorContainer.withValues(alpha: 0.4),
+        color: errorColor.withValues(alpha: 0.10),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: theme.colorScheme.error.withValues(alpha: 0.4),
-        ),
+        border: Border.all(color: errorColor.withValues(alpha: 0.30)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -270,11 +314,7 @@ class _ErrorCard extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(
-                Icons.error_outline_rounded,
-                color: theme.colorScheme.error,
-                size: 20,
-              ),
+              Icon(Icons.error_outline_rounded, color: errorColor, size: 20),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -283,17 +323,18 @@ class _ErrorCard extends StatelessWidget {
                     Text(
                       'Something went wrong',
                       style: theme.textTheme.titleSmall?.copyWith(
-                        color: theme.colorScheme.error,
+                        color: errorColor,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
                     const SizedBox(height: 4),
                     Text(
                       message,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurface.withValues(
-                          alpha: 0.7,
-                        ),
+                      style: TextStyle(
+                        fontFamily: 'Inter',
+                        fontSize: 12,
+                        color: AppColors.of(context).onSurfaceMuted,
+                        height: 1.4,
                       ),
                     ),
                   ],
@@ -314,31 +355,30 @@ class _StatusMessage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF0F2E25) : const Color(0xFFECFDF5),
+        color: AppColors.accentGreen.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: const Color(0xFF1B4D3E).withValues(alpha: 0.3),
+          color: AppColors.accentGreen.withValues(alpha: 0.20),
         ),
       ),
       child: Row(
         children: [
-          const Icon(
+          Icon(
             Icons.check_circle_outline_rounded,
             size: 16,
-            color: Color(0xFF1B4D3E),
+            color: AppColors.accentGreen,
           ),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
               message,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: const Color(0xFF1B4D3E),
+              style: TextStyle(
+                fontFamily: 'Inter',
+                fontSize: 12,
+                color: AppColors.accentGreen.withValues(alpha: 0.90),
               ),
             ),
           ),

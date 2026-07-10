@@ -141,6 +141,9 @@
                             <div class="space-y-1 text-xs">
                                 @if($isParticipatingWorkspace && $primaryParticipantScope)
                                     <div class="font-medium text-(--color-text-primary)">Your participant PPA</div>
+                                    <div class="{{ $primaryParticipantScope->invitation_acknowledged_at ? 'text-(--color-success)' : 'text-(--color-warning)' }}">
+                                        {{ $primaryParticipantScope->invitation_acknowledged_at ? 'Invitation acknowledged' : 'Invitation needs acknowledgement' }}
+                                    </div>
                                     <span class="badge badge-{{ str_replace('_', '-', $primaryParticipantScope->ppa_status) }}">
                                         {{ ucwords(str_replace('_', ' ', $primaryParticipantScope->ppa_status)) }}
                                     </span>
@@ -243,6 +246,16 @@
                                 </button>
                                 @endif
 
+                                @if($isParticipatingWorkspace && $primaryParticipantScope && !$primaryParticipantScope->invitation_acknowledged_at)
+                                <form method="POST" action="{{ route('dashboard.events.participant-scopes.acknowledge', [$event->id, $primaryParticipantScope->id]) }}" class="inline">
+                                    @csrf
+                                    <button type="submit" class="btn btn-sm btn-primary" title="Acknowledge participant invitation">
+                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M9 12.75l2.25 2.25L15.75 9M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                                        Acknowledge
+                                    </button>
+                                </form>
+                                @endif
+
                                 <button type="button"
                                         class="btn btn-sm btn-secondary"
                                         title="{{ $isParticipatingWorkspace ? 'Open your participant PPA scope' : 'Manage participant scopes' }}"
@@ -297,7 +310,7 @@
                                     Analytics
                                 </a>
                                 @endif
-                                @if(in_array($event->status, ['approved', 'completed']) && $approvedScopeCount > 0)
+                                @if(!$user->hasRole('Super Admin (OSA)') && $user->can('assign-scanners-own') && in_array($event->status, ['approved', 'completed']) && $approvedScopeCount > 0)
                                 <button type="button"
                                         class="btn btn-sm btn-secondary"
                                         title="Manage scanner assignments"
@@ -389,6 +402,11 @@
                                             <div class="mt-2 grid gap-1 text-xs text-(--color-text-secondary)">
                                                 <span>{{ ucwords(str_replace('_', ' ', $scope->participant_type)) }} · {{ ucwords(str_replace('_', ' ', $scope->capture_mode)) }}</span>
                                                 <span>{{ $scope->analytics_rollup_enabled ? 'Included in roll-up analytics' : 'Excluded from roll-up analytics' }}</span>
+                                                @if($scope->participation_role === \App\Models\EventParticipationScope::ROLE_PARTICIPANT)
+                                                    <span class="{{ $scope->invitation_acknowledged_at ? 'text-(--color-success)' : 'text-(--color-warning)' }}">
+                                                        {{ $scope->invitation_acknowledged_at ? 'Invitation acknowledged ' . $scope->invitation_acknowledged_at->diffForHumans() : 'Invitation not acknowledged' }}
+                                                    </span>
+                                                @endif
                                                 @if($scope->review_remarks)
                                                     <span class="text-(--color-warning)">Review note: {{ $scope->review_remarks }}</span>
                                                 @endif
@@ -396,6 +414,13 @@
                                         </div>
 
                                         <div class="flex flex-wrap gap-2 lg:justify-end">
+                                            @if($scope->participation_role === \App\Models\EventParticipationScope::ROLE_PARTICIPANT && $scope->current_admin_owns_scope && !$user->hasRole('Super Admin (OSA)') && !$scope->invitation_acknowledged_at)
+                                                <form method="POST" action="{{ route('dashboard.events.participant-scopes.acknowledge', [$event->id, $scope->id]) }}">
+                                                    @csrf
+                                                    <button type="submit" class="btn btn-sm btn-primary">Acknowledge Invitation</button>
+                                                </form>
+                                            @endif
+
                                             @if($scope->participation_role === \App\Models\EventParticipationScope::ROLE_PARTICIPANT && $scope->ppa_required && $scope->current_admin_owns_scope && !$user->hasRole('Super Admin (OSA)') && in_array($scope->ppa_status, ['draft', 'rejected'], true))
                                                 <form method="POST" action="{{ route('dashboard.events.participant-scopes.submit', [$event->id, $scope->id]) }}" enctype="multipart/form-data" class="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
                                                     @csrf
@@ -438,40 +463,137 @@
                         </div>
                     </section>
 
-                    @if(!$isParticipatingWorkspace && ($canCreateProposals || $user->hasRole('Super Admin (OSA)')))
-                        <section class="proposal-modal-section">
-                            <h3 class="font-semibold text-sm text-(--color-text-primary) mb-3">Add Participant Scope</h3>
-                            <form method="POST" action="{{ route('dashboard.events.participant-scopes.store', $event->id) }}" class="grid gap-3 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)_auto]">
+                    @if(!$isParticipatingWorkspace && $canCreateProposals)
+                        <section class="proposal-modal-section participant-audience-builder"
+                                 x-data="participantAudienceBuilder({ collegeCount: {{ $colleges->count() }} })">
+                            <div class="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+                                <div>
+                                    <h3 class="font-semibold text-sm text-(--color-text-primary)">Add Participant Scope</h3>
+                                    <p class="text-xs text-(--color-text-tertiary)">Choose who can participate; each selected College or org becomes its own scope.</p>
+                                </div>
+                                <p class="participant-audience-count" aria-live="polite" x-text="selectionSummary()"></p>
+                            </div>
+
+                            <form method="POST" action="{{ route('dashboard.events.participant-scopes.store', $event->id) }}" class="mt-4 grid gap-4">
                                 @csrf
-                                <div>
-                                    <label for="scope-org-{{ $event->id }}" class="sr-only">Participant organization</label>
-                                    <select id="scope-org-{{ $event->id }}" name="organization_id" class="form-input form-select text-sm" required>
-                                        <option value="">Participant organization</option>
-                                        @foreach($organizations as $organization)
-                                            <option value="{{ $organization->id }}">{{ $organization->acronym }} — {{ $organization->name }}</option>
+                                <input type="hidden" name="audience_mode" :value="audienceMode">
+
+                                <div class="participant-audience-segments" role="group" aria-label="Audience mode">
+                                    <button type="button"
+                                            class="participant-audience-segment"
+                                            :class="{ 'is-active': audienceMode === 'all' }"
+                                            :aria-pressed="audienceMode === 'all'"
+                                            @click="setMode('all')">
+                                        All can participate
+                                    </button>
+                                    <button type="button"
+                                            class="participant-audience-segment"
+                                            :class="{ 'is-active': audienceMode === 'college' }"
+                                            :aria-pressed="audienceMode === 'college'"
+                                            @click="setMode('college')">
+                                        College
+                                    </button>
+                                    <button type="button"
+                                            class="participant-audience-segment"
+                                            :class="{ 'is-active': audienceMode === 'organization' }"
+                                            :aria-pressed="audienceMode === 'organization'"
+                                            @click="setMode('organization')">
+                                        Specific org
+                                    </button>
+                                </div>
+
+                                <div class="participant-audience-panel" x-show="audienceMode === 'all'" x-cloak>
+                                    <p class="text-sm font-medium text-(--color-text-primary)">Every College audience will be invited.</p>
+                                    <p class="mt-1 text-xs text-(--color-text-secondary)">This creates one College participant scope per College so scanner access, PPAs, acknowledgements, and analytics stay separate.</p>
+                                </div>
+
+                                <div class="participant-audience-panel" x-show="audienceMode === 'college'" x-cloak>
+                                    <label for="scope-college-search-{{ $event->id }}" class="text-xs font-semibold text-(--color-text-secondary)">Find Colleges</label>
+                                    <input id="scope-college-search-{{ $event->id }}"
+                                           type="search"
+                                           class="form-input text-sm mt-1"
+                                           placeholder="Search College name or code"
+                                           x-model="collegeQuery">
+                                    <div class="participant-audience-list mt-3">
+                                        @foreach($colleges as $college)
+                                            @php
+                                                $collegeSearch = strtolower(trim($college->name . ' ' . $college->code));
+                                            @endphp
+                                            <label class="participant-audience-option"
+                                                   x-show="matches(@js($collegeSearch), collegeQuery)">
+                                                <input type="checkbox"
+                                                       name="college_ids[]"
+                                                       value="{{ $college->id }}"
+                                                       x-model="selectedColleges"
+                                                       :disabled="audienceMode !== 'college'">
+                                                <span>
+                                                    <strong>{{ $college->code }}</strong>
+                                                    <small>{{ $college->name }}</small>
+                                                </span>
+                                            </label>
                                         @endforeach
-                                    </select>
+                                    </div>
                                 </div>
-                                <div>
-                                    <label for="scope-capture-{{ $event->id }}" class="sr-only">Capture mode</label>
-                                    <select id="scope-capture-{{ $event->id }}" name="capture_mode" class="form-input form-select text-sm" required>
-                                        <option value="self_scanning">Self scanning</option>
-                                        <option value="parent_scanning">Parent scanning</option>
-                                        <option value="delegated_scanning">Delegated scanning</option>
-                                        <option value="central_gate">Central gate</option>
-                                    </select>
+
+                                <div class="participant-audience-panel" x-show="audienceMode === 'organization'" x-cloak>
+                                    <label for="scope-org-search-{{ $event->id }}" class="text-xs font-semibold text-(--color-text-secondary)">Find Organizations</label>
+                                    <input id="scope-org-search-{{ $event->id }}"
+                                           type="search"
+                                           class="form-input text-sm mt-1"
+                                           placeholder="Search org acronym, name, or College"
+                                           x-model="organizationQuery">
+                                    <div class="participant-audience-list mt-3">
+                                        @foreach($organizations as $organization)
+                                            @php
+                                                $organizationSearch = strtolower(trim(
+                                                    $organization->acronym . ' '
+                                                    . $organization->name . ' '
+                                                    . ($organization->college?->code ?? '') . ' '
+                                                    . ($organization->college?->name ?? '')
+                                                ));
+                                            @endphp
+                                            <label class="participant-audience-option"
+                                                   x-show="matches(@js($organizationSearch), organizationQuery)">
+                                                <input type="checkbox"
+                                                       name="organization_ids[]"
+                                                       value="{{ $organization->id }}"
+                                                       x-model="selectedOrganizations"
+                                                       :disabled="audienceMode !== 'organization'">
+                                                <span>
+                                                    <strong>{{ $organization->acronym ?: $organization->name }}</strong>
+                                                    <small>{{ $organization->name }}{{ $organization->college?->code ? ' · ' . $organization->college->code : '' }}</small>
+                                                </span>
+                                            </label>
+                                        @endforeach
+                                    </div>
                                 </div>
-                                <div class="flex flex-wrap items-center gap-3 text-xs text-(--color-text-secondary)">
-                                    <label class="inline-flex items-center gap-2">
-                                        <input type="checkbox" name="ppa_required" value="1" checked>
-                                        PPA required
-                                    </label>
-                                    <label class="inline-flex items-center gap-2">
-                                        <input type="checkbox" name="analytics_rollup_enabled" value="1" checked>
-                                        Roll-up
-                                    </label>
+
+                                <div class="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] lg:items-end">
+                                    <div>
+                                        <label for="scope-capture-{{ $event->id }}" class="text-xs font-semibold text-(--color-text-secondary)">Capture mode</label>
+                                        <select id="scope-capture-{{ $event->id }}" name="capture_mode" class="form-input form-select text-sm mt-1" required>
+                                            <option value="self_scanning">Self scanning</option>
+                                            <option value="parent_scanning">Parent scanning</option>
+                                            <option value="delegated_scanning">Delegated scanning</option>
+                                            <option value="central_gate">Central gate</option>
+                                        </select>
+                                    </div>
+                                    <div class="participant-audience-flags">
+                                        <input type="hidden" name="ppa_required" value="0">
+                                        <input type="hidden" name="analytics_rollup_enabled" value="0">
+                                        <label class="inline-flex items-center gap-2">
+                                            <input type="checkbox" name="ppa_required" value="1" checked>
+                                            PPA required
+                                        </label>
+                                        <label class="inline-flex items-center gap-2">
+                                            <input type="checkbox" name="analytics_rollup_enabled" value="1" checked>
+                                            Roll-up
+                                        </label>
+                                    </div>
+                                    <button type="submit" class="btn btn-sm btn-primary">
+                                        <span x-text="submitLabel()">Add Scope</span>
+                                    </button>
                                 </div>
-                                <button type="submit" class="btn btn-sm btn-primary">Add Scope</button>
                             </form>
                         </section>
                     @endif
@@ -524,7 +646,7 @@
                             </div>
                         </div>
 
-                        @if($user->hasRole('Super Admin (OSA)') || $user->can('assign-scanners-own'))
+                        @if($user->can('assign-scanners-own'))
                             <form
                                 method="POST"
                                 action="{{ route('dashboard.events.scanner-assignments.store', $event->id) }}"
@@ -650,7 +772,7 @@
                                             <div class="mt-2 text-xs text-(--color-text-tertiary)">
                                                 {{ $assignment->scannerSessions->where('status', 'active')->count() }} active session(s)
                                             </div>
-                                            @if($assignment->status === 'active' && ($user->hasRole('Super Admin (OSA)') || $user->can('assign-scanners-own')))
+                                            @if($assignment->status === 'active' && $user->can('assign-scanners-own'))
                                                 <form method="POST" action="{{ route('dashboard.events.scanner-assignments.revoke', [$event->id, $assignment->id]) }}" class="mt-3">
                                                     @csrf
                                                     <input type="hidden" name="reason" value="Scanner assignment revoked from dashboard.">
@@ -697,7 +819,7 @@
                                             <div class="mt-2 text-xs text-(--color-text-tertiary)">
                                                 {{ $session->pending_scans_count }} pending · {{ $session->synced_scans_count }} synced · {{ $session->failed_scans_count }} failed
                                             </div>
-                                            @if($session->status === 'active')
+                                            @if($session->status === 'active' && $user->can('assign-scanners-own'))
                                                 <form method="POST" action="{{ route('dashboard.events.scanner-sessions.revoke', [$event->id, $session->id]) }}" class="mt-3">
                                                     @csrf
                                                     <input type="hidden" name="reason" value="Revoked from dashboard.">
@@ -1511,6 +1633,55 @@
         });
 
         document.addEventListener('alpine:init', () => {
+            Alpine.data('participantAudienceBuilder', ({ collegeCount = 0 } = {}) => ({
+                audienceMode: 'organization',
+                selectedColleges: [],
+                selectedOrganizations: [],
+                collegeQuery: '',
+                organizationQuery: '',
+                collegeCount,
+
+                setMode(mode) {
+                    this.audienceMode = mode;
+                },
+
+                matches(searchText, query) {
+                    const term = String(query || '').trim().toLowerCase();
+                    return !term || String(searchText || '').includes(term);
+                },
+
+                selectionCount() {
+                    if (this.audienceMode === 'all') {
+                        return this.collegeCount;
+                    }
+
+                    if (this.audienceMode === 'college') {
+                        return this.selectedColleges.length;
+                    }
+
+                    return this.selectedOrganizations.length;
+                },
+
+                selectionSummary() {
+                    const count = this.selectionCount();
+
+                    if (this.audienceMode === 'all') {
+                        return `${count} College scope${count === 1 ? '' : 's'}`;
+                    }
+
+                    if (count === 0) {
+                        return 'No audience selected';
+                    }
+
+                    return `${count} selected`;
+                },
+
+                submitLabel() {
+                    const count = this.selectionCount();
+                    return count > 1 ? `Add ${count} scopes` : 'Add Scope';
+                },
+            }));
+
             Alpine.data('scannerAssignmentPicker', () => ({
                 scanners: [],
                 selectedScanners: [],

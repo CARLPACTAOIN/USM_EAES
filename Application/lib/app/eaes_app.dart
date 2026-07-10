@@ -1,20 +1,36 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../config/app_colors.dart';
 import '../config/app_config.dart';
+import '../config/theme_provider.dart';
 import '../features/auth/presentation/auth_gate.dart';
 
-class EaesApp extends StatelessWidget {
+class EaesApp extends StatefulWidget {
   const EaesApp({super.key});
 
-  // --- Brand colour tokens --------------------------------------------------
-  static const Color _brandGreen = Color(0xFF1B4D3E);
-  static const Color _brandGreenDark = Color(0xFF0F2E25);
-  static const Color _accentBlue = Color(0xFF2563EB);
-  static const Color _surfaceLight = Color(0xFFF8FAFC);
-  static const Color _surfaceDark = Color(0xFF0F172A);
+  @override
+  State<EaesApp> createState() => _EaesAppState();
+}
 
-  // -------------------------------------------------------------------------
+class _EaesAppState extends State<EaesApp> {
+  final _themeProvider = ThemeProvider.instance;
+
+  @override
+  void initState() {
+    super.initState();
+    _themeProvider.addListener(_onThemeChanged);
+  }
+
+  void _onThemeChanged() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    _themeProvider.removeListener(_onThemeChanged);
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -23,31 +39,31 @@ class EaesApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: _buildTheme(Brightness.light),
       darkTheme: _buildTheme(Brightness.dark),
-      themeMode: ThemeMode.light,
+      themeMode: _themeProvider.themeMode,
       home: const AuthGate(),
     );
   }
 
+  // ---------------------------------------------------------------------------
+  // Theme builder
+  // ---------------------------------------------------------------------------
+
   static ThemeData _buildTheme(Brightness brightness) {
     final isDark = brightness == Brightness.dark;
+    final c = isDark ? AppColors.dark : AppColors.light;
 
     final colorScheme = ColorScheme.fromSeed(
-      seedColor: _brandGreen,
+      seedColor: AppColors.brandGreen,
       brightness: brightness,
-      primary: _brandGreen,
+      primary: AppColors.brandGreen,
       onPrimary: Colors.white,
-      secondary: _accentBlue,
+      secondary: AppColors.accentBlue,
       onSecondary: Colors.white,
-      surface: isDark ? _surfaceDark : _surfaceLight,
-      onSurface: isDark ? const Color(0xFFE2E8F0) : const Color(0xFF0F172A),
-      error: const Color(0xFFDC2626),
+      surface: c.surface,
+      onSurface: c.onSurface,
+      error: AppColors.errorRed,
       onError: Colors.white,
     );
-
-    // Preferred system UI overlay for the status bar
-    final systemUiOverlayStyle = isDark
-        ? SystemUiOverlayStyle.light
-        : SystemUiOverlayStyle.dark;
 
     const borderRadius12 = BorderRadius.all(Radius.circular(12));
     const borderRadius8 = BorderRadius.all(Radius.circular(8));
@@ -57,31 +73,29 @@ class EaesApp extends StatelessWidget {
       colorScheme: colorScheme,
 
       // Background
-      scaffoldBackgroundColor: isDark ? const Color(0xFF0A0F1E) : _surfaceLight,
+      scaffoldBackgroundColor: c.surface,
 
-      // AppBar
+      // AppBar — deep green with white text in both modes
       appBarTheme: AppBarTheme(
-        backgroundColor: isDark ? _brandGreenDark : _brandGreen,
+        backgroundColor: c.appBarBg,
         foregroundColor: Colors.white,
         elevation: 0,
         centerTitle: false,
-        systemOverlayStyle: systemUiOverlayStyle,
+        systemOverlayStyle: SystemUiOverlayStyle.light,
         titleTextStyle: const TextStyle(
           fontFamily: 'Inter',
           fontSize: 18,
           fontWeight: FontWeight.w700,
           color: Colors.white,
-          letterSpacing: -0.3,
+          letterSpacing: 0,
         ),
       ),
 
-      // Bottom navigation bar
+      // Bottom navigation bar (legacy — for BottomNavigationBar)
       bottomNavigationBarTheme: BottomNavigationBarThemeData(
-        backgroundColor: isDark ? const Color(0xFF111827) : Colors.white,
-        selectedItemColor: _brandGreen,
-        unselectedItemColor: isDark
-            ? const Color(0xFF6B7280)
-            : const Color(0xFF9CA3AF),
+        backgroundColor: c.navBarBg,
+        selectedItemColor: isDark ? AppColors.usmGold : AppColors.brandGreen,
+        unselectedItemColor: c.onSurfaceMuted,
         type: BottomNavigationBarType.fixed,
         elevation: 12,
         selectedLabelStyle: const TextStyle(
@@ -96,10 +110,42 @@ class EaesApp extends StatelessWidget {
         ),
       ),
 
+      // NavigationBar (Material 3)
+      navigationBarTheme: NavigationBarThemeData(
+        backgroundColor: c.navBarBg,
+        indicatorColor: AppColors.usmGold.withValues(alpha: 0.15),
+        labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+        iconTheme: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) {
+            return IconThemeData(
+              color: isDark ? AppColors.usmGold : AppColors.brandGreen,
+              size: 24,
+            );
+          }
+          return IconThemeData(color: c.onSurfaceMuted, size: 24);
+        }),
+        labelTextStyle: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) {
+            return TextStyle(
+              fontFamily: 'Inter',
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              color: isDark ? AppColors.usmGold : AppColors.brandGreen,
+            );
+          }
+          return TextStyle(
+            fontFamily: 'Inter',
+            fontSize: 11,
+            fontWeight: FontWeight.w400,
+            color: c.onSurfaceMuted,
+          );
+        }),
+      ),
+
       // Filled button — primary CTA
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
-          backgroundColor: _brandGreen,
+          backgroundColor: AppColors.brandGreen,
           foregroundColor: Colors.white,
           minimumSize: const Size(double.infinity, 52),
           shape: const RoundedRectangleBorder(borderRadius: borderRadius12),
@@ -115,8 +161,13 @@ class EaesApp extends StatelessWidget {
       // Outlined button — secondary action
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
-          foregroundColor: _brandGreen,
-          side: const BorderSide(color: _brandGreen, width: 1.5),
+          foregroundColor: isDark ? AppColors.usmGold : AppColors.brandGreen,
+          side: BorderSide(
+            color: isDark
+                ? AppColors.usmGold.withValues(alpha: 0.5)
+                : AppColors.brandGreen,
+            width: 1.5,
+          ),
           minimumSize: const Size(double.infinity, 48),
           shape: const RoundedRectangleBorder(borderRadius: borderRadius12),
           textStyle: const TextStyle(
@@ -130,7 +181,7 @@ class EaesApp extends StatelessWidget {
       // Text button
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
-          foregroundColor: _brandGreen,
+          foregroundColor: isDark ? AppColors.usmGold : AppColors.brandGreen,
           minimumSize: const Size(44, 44),
           textStyle: const TextStyle(
             fontFamily: 'Inter',
@@ -145,28 +196,28 @@ class EaesApp extends StatelessWidget {
         margin: EdgeInsets.zero,
         elevation: 0,
         shape: const RoundedRectangleBorder(borderRadius: borderRadius12),
-        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        color: isDark ? c.cardElevated : c.card,
       ),
 
       // Input decoration
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+        fillColor: c.inputFill,
         border: OutlineInputBorder(
           borderRadius: borderRadius8,
-          borderSide: BorderSide(
-            color: isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1),
-          ),
+          borderSide: BorderSide(color: c.inputBorder),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: borderRadius8,
           borderSide: BorderSide(
-            color: isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1),
+            color: isDark
+                ? AppColors.usmGold.withValues(alpha: 0.20)
+                : c.inputBorder,
           ),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: borderRadius8,
-          borderSide: const BorderSide(color: _brandGreen, width: 2),
+          borderSide: BorderSide(color: c.inputBorderFocused, width: 2),
         ),
         contentPadding: const EdgeInsets.symmetric(
           horizontal: 16,
@@ -175,7 +226,7 @@ class EaesApp extends StatelessWidget {
         labelStyle: TextStyle(
           fontFamily: 'Inter',
           fontSize: 14,
-          color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+          color: c.onSurfaceMuted,
         ),
         hintStyle: TextStyle(
           fontFamily: 'Inter',
@@ -185,19 +236,18 @@ class EaesApp extends StatelessWidget {
       ),
 
       // Divider
-      dividerTheme: DividerThemeData(
-        color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0),
-        thickness: 1,
-        space: 1,
-      ),
+      dividerTheme: DividerThemeData(color: c.divider, thickness: 1, space: 1),
 
       // Chip
       chipTheme: ChipThemeData(
         shape: RoundedRectangleBorder(borderRadius: borderRadius8),
-        labelStyle: const TextStyle(
+        backgroundColor: isDark ? c.cardElevated : null,
+        side: isDark ? BorderSide(color: c.chipBorder) : null,
+        labelStyle: TextStyle(
           fontFamily: 'Inter',
           fontSize: 12,
           fontWeight: FontWeight.w500,
+          color: isDark ? c.onSurface : null,
         ),
       ),
 
@@ -213,13 +263,13 @@ class EaesApp extends StatelessWidget {
           fontFamily: 'Inter',
           fontSize: 32,
           fontWeight: FontWeight.w800,
-          letterSpacing: -0.5,
+          letterSpacing: 0,
         ),
         headlineMedium: TextStyle(
           fontFamily: 'Inter',
           fontSize: 24,
           fontWeight: FontWeight.w700,
-          letterSpacing: -0.3,
+          letterSpacing: 0,
         ),
         headlineSmall: TextStyle(
           fontFamily: 'Inter',
@@ -230,7 +280,7 @@ class EaesApp extends StatelessWidget {
           fontFamily: 'Inter',
           fontSize: 18,
           fontWeight: FontWeight.w700,
-          letterSpacing: -0.2,
+          letterSpacing: 0,
         ),
         titleMedium: TextStyle(
           fontFamily: 'Inter',

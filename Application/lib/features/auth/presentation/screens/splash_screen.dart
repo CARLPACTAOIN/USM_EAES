@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../../../config/app_colors.dart';
+
 /// Full-screen branded splash shown while the app initialises (token restore,
 /// network probing, etc.).  Animates in the logo, app title, and a pulsing
 /// progress indicator using the EAES brand palette.
@@ -14,9 +16,9 @@ class SplashScreen extends StatefulWidget {
 class _SplashScreenState extends State<SplashScreen>
     with TickerProviderStateMixin {
   // --- Brand tokens ---------------------------------------------------------
-  static const Color _accentGreen = Color(0xFF34D399); // emerald-400
-  static const Color _usmGold = Color(0xFFD4A843); // USM institutional gold
-  static const Color _usmGoldLight = Color(0xFFF0D078); // lighter gold for glows
+  static const Color _accentGreen = AppColors.accentGreen;
+  static const Color _usmGold = AppColors.usmGold;
+  static const Color _usmGoldLight = AppColors.usmGoldLight;
 
   // --- Controllers ----------------------------------------------------------
   late final AnimationController _entranceController;
@@ -126,14 +128,14 @@ class _SplashScreenState extends State<SplashScreen>
       body: Container(
         width: double.infinity,
         height: double.infinity,
-        decoration: const BoxDecoration(
+        decoration: BoxDecoration(
           gradient: RadialGradient(
             center: Alignment(0.0, -0.3),
             radius: 1.2,
             colors: [
-              Color(0xFF1B4D3E), // brand green
-              Color(0xFF0F2E25), // brand green dark
-              Color(0xFF071A14), // near black
+              AppColors.brandGreen,
+              AppColors.brandGreenDark,
+              AppColors.dark.gradientEnd,
             ],
             stops: [0.0, 0.55, 1.0],
           ),

@@ -122,6 +122,7 @@ class EventExportData
             'Student name',
             'Student ID',
             'Program',
+            'Year Level',
             'Organization',
             'Time in',
             'Time out',
@@ -149,6 +150,7 @@ class EventExportData
                     $student?->name ?? 'N/A',
                     $student?->student_id_number ?? 'N/A',
                     $student?->program_code ?? 'N/A',
+                    YearLevels::label($student?->year_level),
                     $student?->organization?->acronym ?? 'N/A',
                     self::formatDateTime($record->time_in),
                     self::formatDateTime($record->time_out),
@@ -163,7 +165,7 @@ class EventExportData
             });
 
         if ($records->isEmpty()) {
-            $rows[] = ['No attendance records found for this event.', '', '', '', '', '', '', '', '', '', '', '', '', '', ''];
+            $rows[] = ['No attendance records found for this event.', '', '', '', '', '', '', '', '', '', '', '', '', '', '', ''];
         }
 
         return $rows;
@@ -181,6 +183,7 @@ class EventExportData
             'Student name',
             'Student ID',
             'Program',
+            'Year Level',
             'Organization',
             'Attendance valid',
             'Submitted at',
@@ -205,6 +208,7 @@ class EventExportData
                 $student?->name ?? 'N/A',
                 $student?->student_id_number ?? 'N/A',
                 $student?->program_code ?? 'N/A',
+                YearLevels::label($student?->year_level),
                 $student?->organization?->acronym ?? 'N/A',
                 self::yesNo($studentAttendance->contains('valid', true)),
                 self::formatDateTime($evaluation->submitted_at),
@@ -217,7 +221,7 @@ class EventExportData
         });
 
         if ($evaluations->isEmpty()) {
-            $rows[] = ['No evaluation submissions found for this event.', '', '', '', '', '', ...array_fill(0, count($questions), ''), '', '', '', ''];
+            $rows[] = ['No evaluation submissions found for this event.', '', '', '', '', '', '', ...array_fill(0, count($questions), ''), '', '', '', ''];
         }
 
         return $rows;

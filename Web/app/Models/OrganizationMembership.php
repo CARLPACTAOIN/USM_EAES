@@ -17,6 +17,7 @@ class OrganizationMembership extends Model
         'organization_id',
         'college_id',
         'program_id',
+        'year_level',
         'membership_type',
         'status',
         'academic_year',

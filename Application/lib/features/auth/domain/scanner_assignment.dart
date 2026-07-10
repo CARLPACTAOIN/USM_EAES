@@ -8,6 +8,9 @@ class ScannerAssignment {
     required this.eventTitle,
     required this.eventStatus,
     required this.eventPhase,
+    this.activationState = 'activate',
+    this.activeSessionDeviceMatches,
+    this.activationMessage,
     this.eventParticipationScopeId,
     this.participationScopeName,
     this.participationScopeType,
@@ -28,6 +31,9 @@ class ScannerAssignment {
   final String eventTitle;
   final String eventStatus;
   final String eventPhase;
+  final String activationState;
+  final bool? activeSessionDeviceMatches;
+  final String? activationMessage;
   final String? eventParticipationScopeId;
   final String? participationScopeName;
   final String? participationScopeType;
@@ -55,6 +61,10 @@ class ScannerAssignment {
       eventTitle: event['title']?.toString() ?? 'Assigned event',
       eventStatus: event['status']?.toString() ?? 'unknown',
       eventPhase: event['lifecycle_phase']?.toString() ?? 'scheduled',
+      activationState: json['activation_state']?.toString() ?? 'activate',
+      activeSessionDeviceMatches:
+          json['active_session_device_matches'] as bool?,
+      activationMessage: json['activation_message']?.toString(),
       eventParticipationScopeId: participationScope['id']?.toString(),
       participationScopeName: participationScope['name']?.toString(),
       participationScopeType: participationScope['participant_type']
@@ -86,6 +96,9 @@ class ScannerAssignment {
           'acronym': organizationAcronym,
         },
       },
+      'activation_state': activationState,
+      'active_session_device_matches': activeSessionDeviceMatches,
+      'activation_message': activationMessage,
       'participation_scope': {
         'id': eventParticipationScopeId,
         'name': participationScopeName,

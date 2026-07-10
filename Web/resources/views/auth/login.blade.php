@@ -4,12 +4,12 @@
             <div class="auth-overview-kicker">University of Southern Mindanao</div>
             <h1 id="auth-overview-title" class="auth-overview-title font-display">Event Attendance & Evaluation System</h1>
             <p class="auth-overview-copy">
-                Institutional gateway for verified event attendance, proposal workflows, scanner assignments, and student evaluations.
+                One institutional login for attendance, proposals, scanning, and evaluations.
             </p>
 
             <div class="auth-access-list" aria-label="EAES access areas">
                 <div class="auth-access-row">
-                    <span class="auth-access-icon" aria-hidden="true">
+                    <span class="auth-access-icon icon-student" aria-hidden="true">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M16 14a4 4 0 10-8 0m8 0a6 6 0 00-8 0m8 0v1a2 2 0 01-2 2h-4a2 2 0 01-2-2v-1m10 5H6a2 2 0 01-2-2V9a2 2 0 012-2h2m8 0h2a2 2 0 012 2v8a2 2 0 01-2 2z"/></svg>
                     </span>
                     <span>
@@ -18,7 +18,7 @@
                     </span>
                 </div>
                 <div class="auth-access-row">
-                    <span class="auth-access-icon" aria-hidden="true">
+                    <span class="auth-access-icon icon-admin" aria-hidden="true">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M8 7V3m8 4V3M5 11h14M6 21h12a2 2 0 002-2V7a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
                     </span>
                     <span>
@@ -27,7 +27,7 @@
                     </span>
                 </div>
                 <div class="auth-access-row">
-                    <span class="auth-access-icon" aria-hidden="true">
+                    <span class="auth-access-icon icon-hr" aria-hidden="true">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M9 12l2 2 4-4m5.5-4.5A12 12 0 0112 3 12 12 0 013.5 5.5 12.5 12.5 0 003 9c0 5.4 3.7 10.1 9 11.5 5.3-1.4 9-6.1 9-11.5 0-1.2-.2-2.3-.5-3.5z"/></svg>
                     </span>
                     <span>
@@ -37,8 +37,13 @@
                 </div>
             </div>
 
-            <p class="auth-scanner-note">
-                Scanner access is granted only through assigned mobile scanner sessions.
+            <div class="auth-scanner-note">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+                <span>Scanner access is granted only through assigned mobile scanner sessions.</span>
+            </div>
+
+            <p class="auth-footer text-xs mt-12 text-left">
+                &copy; {{ date('Y') }} USM EAES - Office of Student Affairs
             </p>
         </section>
 
@@ -46,11 +51,11 @@
             {{-- Header / Branding --}}
             <div class="card-body text-center pb-2">
                 <div class="auth-brand-mark">
-                    <svg class="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+                    <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
                 </div>
                 <h2 id="auth-title" class="auth-title font-display">USM EAES</h2>
-                <p class="auth-subtitle">Secure institutional sign in</p>
-                <p class="auth-school">Use your official USM Google account</p>
+                <p class="auth-subtitle font-semibold text-slate-800">Secure institutional sign in</p>
+                <p class="auth-school text-slate-500">Use your official USM Google account</p>
             </div>
 
             <div class="px-6 pb-6">
@@ -88,8 +93,4 @@
             </div>
         </section>
     </div>
-
-    <p class="auth-footer text-center text-xs mt-6">
-        &copy; {{ date('Y') }} USM EAES - Office of Student Affairs
-    </p>
 </x-layouts.guest>

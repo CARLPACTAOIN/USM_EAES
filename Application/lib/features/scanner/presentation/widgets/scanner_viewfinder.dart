@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
+import '../../../../config/app_colors.dart';
+
 enum ViewfinderProcessingState { idle, saving, captured, duplicate }
 
 class ScannerViewfinder extends StatelessWidget {
@@ -18,6 +20,7 @@ class ScannerViewfinder extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final c = AppColors.of(context);
     final isSaving = processingState == ViewfinderProcessingState.saving;
     final isCaptured = processingState == ViewfinderProcessingState.captured;
     final isDuplicate = processingState == ViewfinderProcessingState.duplicate;
@@ -25,10 +28,10 @@ class ScannerViewfinder extends StatelessWidget {
     final borderColor = isSaving
         ? Colors.orange.shade500
         : isCaptured
-        ? const Color(0xFF16A34A)
+        ? AppColors.accentGreen
         : isDuplicate
-        ? Colors.amber.shade600
-        : const Color(0xFF1B4D3E);
+        ? AppColors.usmGold
+        : AppColors.usmGold.withValues(alpha: 0.70); // Idle → gold frame
 
     return AspectRatio(
       aspectRatio: 1,
@@ -36,7 +39,7 @@ class ScannerViewfinder extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         child: DecoratedBox(
           decoration: BoxDecoration(
-            color: theme.colorScheme.surfaceContainerHighest,
+            color: c.isDark ? AppColors.dark.card : c.cardElevated,
           ),
           child: active
               ? Stack(
@@ -57,7 +60,7 @@ class ScannerViewfinder extends StatelessWidget {
                         right: 16,
                         bottom: 72,
                         child: _ProcessingCard(
-                          color: const Color(0xFF16A34A),
+                          color: AppColors.accentGreen,
                           icon: Icons.check_circle_rounded,
                           title: 'Captured — ready for next',
                           subtitle: 'Move the next QR into the frame.',
@@ -81,7 +84,7 @@ class ScannerViewfinder extends StatelessWidget {
                         right: 16,
                         bottom: 72,
                         child: _ProcessingCard(
-                          color: Colors.amber.shade800,
+                          color: AppColors.usmGold,
                           icon: Icons.warning_amber_rounded,
                           title: 'Already scanned just now.',
                           subtitle: 'Please scan the next student.',
@@ -142,16 +145,16 @@ class ScannerViewfinder extends StatelessWidget {
                     Icon(
                       Icons.qr_code_2_rounded,
                       size: 72,
-                      color: theme.colorScheme.onSurface.withValues(alpha: 0.2),
+                      color: AppColors.usmGold.withValues(alpha: 0.20),
                     ),
                     const SizedBox(height: 16),
                     Text(
                       'Camera preview will appear\nonce a session is active.',
                       textAlign: TextAlign.center,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: theme.colorScheme.onSurface.withValues(
-                          alpha: 0.4,
-                        ),
+                      style: TextStyle(
+                        fontFamily: 'Inter',
+                        fontSize: 13,
+                        color: c.onSurfaceMuted,
                       ),
                     ),
                   ],

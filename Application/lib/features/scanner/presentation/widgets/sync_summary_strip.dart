@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../../config/app_colors.dart';
+
 import '../scanner_controller.dart';
 
 /// Compact, glanceable sync status used on the Scanner and Live Scanner
@@ -12,16 +14,20 @@ class SyncSummaryStrip extends StatelessWidget {
   final ScannerController controller;
   final VoidCallback? onTap;
 
+  static const Color _usmGold = AppColors.usmGold;
+  static const Color _accentGreen = AppColors.accentGreen;
+  static const Color _accentBlue = AppColors.accentBlue;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
     final ctrl = controller;
+    final c = AppColors.of(context);
 
     final (Color accent, IconData icon) = _statusVisual(ctrl, theme);
 
     return Material(
-      color: isDark ? const Color(0xFF1E293B) : Colors.white,
+      color: c.isDark ? c.panel : Colors.transparent,
       borderRadius: BorderRadius.circular(14),
       child: InkWell(
         onTap: onTap,
@@ -29,7 +35,18 @@ class SyncSummaryStrip extends StatelessWidget {
         child: Ink(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: theme.colorScheme.outlineVariant),
+            gradient: c.isDark
+                ? null
+                : LinearGradient(
+                    colors: [
+                      accent.withValues(alpha: 0.14),
+                      Colors.white,
+                      c.goldWash.withValues(alpha: 0.42),
+                    ],
+                  ),
+            border: Border.all(
+              color: c.isDark ? c.panelBorder : accent.withValues(alpha: 0.24),
+            ),
           ),
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           child: Row(
@@ -49,7 +66,7 @@ class SyncSummaryStrip extends StatelessWidget {
               ),
               _Count(
                 value: ctrl.pendingCount,
-                color: Colors.orange.shade700,
+                color: _usmGold,
                 tooltip: 'Pending',
               ),
               if (ctrl.failedCount > 0)
@@ -63,7 +80,7 @@ class SyncSummaryStrip extends StatelessWidget {
                 Icon(
                   Icons.chevron_right_rounded,
                   size: 18,
-                  color: theme.colorScheme.onSurface.withValues(alpha: 0.35),
+                  color: c.onSurfaceMuted.withValues(alpha: 0.65),
                 ),
               ],
             ],
@@ -75,18 +92,18 @@ class SyncSummaryStrip extends StatelessWidget {
 
   (Color, IconData) _statusVisual(ScannerController ctrl, ThemeData theme) {
     if (ctrl.syncing) {
-      return (const Color(0xFF2563EB), Icons.cloud_sync_rounded);
+      return (_accentBlue, Icons.cloud_sync_rounded);
     }
     if (!ctrl.isOnline) {
-      return (Colors.orange.shade700, Icons.cloud_off_rounded);
+      return (_usmGold, Icons.cloud_off_rounded);
     }
     if (ctrl.failedCount > 0) {
       return (theme.colorScheme.error, Icons.error_outline_rounded);
     }
     if (ctrl.pendingCount == 0) {
-      return (const Color(0xFF16A34A), Icons.cloud_done_rounded);
+      return (_accentGreen, Icons.cloud_done_rounded);
     }
-    return (Colors.orange.shade700, Icons.cloud_upload_rounded);
+    return (_usmGold, Icons.cloud_upload_rounded);
   }
 }
 
@@ -106,7 +123,6 @@ class _Count extends StatelessWidget {
     if (value == 0) {
       return const SizedBox.shrink();
     }
-    final theme = Theme.of(context);
     return Tooltip(
       message: tooltip,
       child: Container(
@@ -115,12 +131,15 @@ class _Count extends StatelessWidget {
         decoration: BoxDecoration(
           color: color.withValues(alpha: 0.12),
           borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: color.withValues(alpha: 0.20)),
         ),
         child: Text(
           '$value',
-          style: theme.textTheme.labelMedium?.copyWith(
-            color: color,
+          style: TextStyle(
+            fontFamily: 'Inter',
+            fontSize: 12,
             fontWeight: FontWeight.w700,
+            color: color,
           ),
         ),
       ),

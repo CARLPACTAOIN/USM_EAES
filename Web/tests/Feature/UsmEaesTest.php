@@ -805,7 +805,7 @@ class UsmEaesTest extends TestCase
             ->assertJsonFragment(['ingested_count' => 1]);
     }
 
-    public function test_assignment_activation_replaces_prior_session_for_same_scanner()
+    public function test_assignment_activation_resumes_prior_session_for_same_device()
     {
         [$org, $admin, $college] = $this->createOrganizationWithScanner();
         $program = Program::create([
@@ -848,29 +848,225 @@ class UsmEaesTest extends TestCase
 
         Auth::forgetGuards();
 
-        $secondActivation = $this->withHeaders(['Authorization' => 'Bearer ' . $mobileToken])
-            ->postJson("/api/v1/scanner/assignments/{$assignment->id}/activate", [
-                'device_id' => 'gate-1-replacement',
-            ])
-            ->assertStatus(200);
-
-        $firstSession->refresh();
-        $this->assertSame(ScannerSession::STATUS_REVOKED, $firstSession->status);
-        $this->assertSame(1, ScannerSession::where('event_id', $event->id)->where('status', ScannerSession::STATUS_ACTIVE)->count());
+        $this->withHeaders([
+            'Authorization' => 'Bearer ' . $mobileToken,
+            'X-Device-Id' => 'gate-1-device',
+        ])
+            ->getJson('/api/v1/scanner/assignments')
+            ->assertStatus(200)
+            ->assertJsonPath('assignments.0.activation_state', 'resume')
+            ->assertJsonPath('assignments.0.active_session_device_matches', true);
 
         Auth::forgetGuards();
 
-        $this->withHeaders(['Authorization' => 'Bearer ' . $firstToken])
-            ->postJson('/api/v1/scanner/validate', ['event_id' => $event->id])
-            ->assertStatus(401)
-            ->assertJsonFragment(['reason' => 'revoked']);
+        $secondActivation = $this->withHeaders(['Authorization' => 'Bearer ' . $mobileToken])
+            ->postJson("/api/v1/scanner/assignments/{$assignment->id}/activate", [
+                'device_id' => 'gate-1-device',
+            ])
+            ->assertStatus(200)
+            ->assertJsonPath('resumed', true)
+            ->assertJsonPath('message', 'Scanner assignment resumed.')
+            ->assertJsonPath('scanner_session.id', $firstSession->id);
+
+        $firstSession->refresh();
+        $this->assertSame(ScannerSession::STATUS_ACTIVE, $firstSession->status);
+        $this->assertSame(1, ScannerSession::where('event_id', $event->id)->where('status', ScannerSession::STATUS_ACTIVE)->count());
+        $this->assertSame(0, ScannerSession::where('event_id', $event->id)->where('status', ScannerSession::STATUS_REVOKED)->count());
 
         $secondToken = $secondActivation->json('token');
         Auth::forgetGuards();
 
         $this->withHeaders(['Authorization' => 'Bearer ' . $secondToken])
-            ->postJson('/api/v1/scanner/validate', ['event_id' => $event->id, 'device_id' => 'gate-1-replacement'])
+            ->postJson('/api/v1/scanner/validate', ['event_id' => $event->id, 'device_id' => 'gate-1-device'])
             ->assertStatus(200);
+    }
+
+    public function test_assignment_activation_blocks_different_device_without_revoking_old_session()
+    {
+        [$org, $admin, $college] = $this->createOrganizationWithScanner();
+        $program = Program::create([
+            'college_id' => $college->id,
+            'name' => 'BS Information Systems',
+            'code' => 'BSIS',
+        ]);
+        $org->programs()->attach($program->id);
+
+        $student = User::create([
+            'name' => 'Device Transfer Scanner Student',
+            'email' => 'device.transfer.scanner.student@usm.edu.ph',
+            'organization_id' => $org->id,
+            'college_id' => $college->id,
+            'program_id' => $program->id,
+            'student_id_number' => '24-3311',
+            'qr_code_value' => 'QR_DEVICE_TRANSFER_STUDENT',
+            'program_code' => 'BSIS',
+        ]);
+        $student->assignRole('Student');
+
+        $event = $this->createApprovedEvent($org);
+        $assignment = app(ScannerAssignmentService::class)->assign(
+            event: $event,
+            scannerUser: $student,
+            assignedBy: $admin,
+            label: 'Gate 1'
+        );
+        $mobileToken = $student->createToken('scanner-phone', ['scanner-assignments'])->plainTextToken;
+
+        $firstActivation = $this->withHeaders(['Authorization' => 'Bearer ' . $mobileToken])
+            ->postJson("/api/v1/scanner/assignments/{$assignment->id}/activate", [
+                'device_id' => 'gate-1-device',
+            ])
+            ->assertStatus(200);
+
+        $firstToken = $firstActivation->json('token');
+        $firstSession = ScannerSession::findOrFail($firstActivation->json('scanner_session.id'));
+
+        Auth::forgetGuards();
+
+        $this->withHeaders([
+            'Authorization' => 'Bearer ' . $mobileToken,
+            'X-Device-Id' => 'gate-1-replacement',
+        ])
+            ->getJson('/api/v1/scanner/assignments')
+            ->assertStatus(200)
+            ->assertJsonPath('assignments.0.activation_state', 'blocked_active_session')
+            ->assertJsonPath('assignments.0.active_session_device_matches', false);
+
+        Auth::forgetGuards();
+
+        $this->withHeaders(['Authorization' => 'Bearer ' . $mobileToken])
+            ->postJson("/api/v1/scanner/assignments/{$assignment->id}/activate", [
+                'device_id' => 'gate-1-replacement',
+            ])
+            ->assertStatus(409)
+            ->assertJsonFragment(['reason' => 'active_session_exists']);
+
+        $firstSession->refresh();
+        $this->assertSame(ScannerSession::STATUS_ACTIVE, $firstSession->status);
+        $this->assertSame(1, ScannerSession::where('event_id', $event->id)->where('status', ScannerSession::STATUS_ACTIVE)->count());
+        $this->assertSame(0, ScannerSession::where('event_id', $event->id)->where('status', ScannerSession::STATUS_REVOKED)->count());
+
+        Auth::forgetGuards();
+
+        $this->withHeaders(['Authorization' => 'Bearer ' . $firstToken])
+            ->postJson('/api/v1/scanner/validate', ['event_id' => $event->id, 'device_id' => 'gate-1-device'])
+            ->assertStatus(200);
+    }
+
+    public function test_admin_revoke_allows_assignment_activation_on_another_device()
+    {
+        [$org, $admin, $college] = $this->createOrganizationWithScanner();
+        $program = Program::create([
+            'college_id' => $college->id,
+            'name' => 'BS Information Systems',
+            'code' => 'BSIS',
+        ]);
+        $org->programs()->attach($program->id);
+
+        $student = User::create([
+            'name' => 'Admin Transfer Scanner Student',
+            'email' => 'admin.transfer.scanner.student@usm.edu.ph',
+            'organization_id' => $org->id,
+            'college_id' => $college->id,
+            'program_id' => $program->id,
+            'student_id_number' => '24-3312',
+            'qr_code_value' => 'QR_ADMIN_TRANSFER_STUDENT',
+            'program_code' => 'BSIS',
+        ]);
+        $student->assignRole('Student');
+
+        $event = $this->createApprovedEvent($org);
+        $assignment = app(ScannerAssignmentService::class)->assign(
+            event: $event,
+            scannerUser: $student,
+            assignedBy: $admin,
+            label: 'Gate 1'
+        );
+        $mobileToken = $student->createToken('scanner-phone', ['scanner-assignments'])->plainTextToken;
+
+        $firstActivation = $this->withHeaders(['Authorization' => 'Bearer ' . $mobileToken])
+            ->postJson("/api/v1/scanner/assignments/{$assignment->id}/activate", [
+                'device_id' => 'gate-1-device',
+            ])
+            ->assertStatus(200);
+
+        $firstSession = ScannerSession::findOrFail($firstActivation->json('scanner_session.id'));
+        app(ScannerSessionService::class)->revoke($firstSession, $admin, 'Admin approved scanner device transfer.');
+
+        Auth::forgetGuards();
+
+        $secondActivation = $this->withHeaders(['Authorization' => 'Bearer ' . $mobileToken])
+            ->postJson("/api/v1/scanner/assignments/{$assignment->id}/activate", [
+                'device_id' => 'gate-1-replacement',
+            ])
+            ->assertStatus(200)
+            ->assertJsonPath('resumed', false);
+
+        $this->assertNotSame($firstSession->id, $secondActivation->json('scanner_session.id'));
+        $this->assertSame(1, ScannerSession::where('event_id', $event->id)->where('status', ScannerSession::STATUS_ACTIVE)->count());
+        $this->assertSame(1, ScannerSession::where('event_id', $event->id)->where('status', ScannerSession::STATUS_REVOKED)->count());
+    }
+
+    public function test_assignment_activation_blocks_other_active_assignment_without_revoking()
+    {
+        [$org, $admin, $college] = $this->createOrganizationWithScanner();
+        $program = Program::create([
+            'college_id' => $college->id,
+            'name' => 'BS Information Systems',
+            'code' => 'BSIS',
+        ]);
+        $org->programs()->attach($program->id);
+
+        $student = User::create([
+            'name' => 'Multi Assignment Scanner Student',
+            'email' => 'multi.assignment.scanner.student@usm.edu.ph',
+            'organization_id' => $org->id,
+            'college_id' => $college->id,
+            'program_id' => $program->id,
+            'student_id_number' => '24-3313',
+            'qr_code_value' => 'QR_MULTI_ASSIGNMENT_STUDENT',
+            'program_code' => 'BSIS',
+        ]);
+        $student->assignRole('Student');
+
+        $firstEvent = $this->createApprovedEvent($org);
+        $secondEvent = $this->createApprovedEvent($org);
+        $secondEvent->update(['title' => 'Second Scanner Event']);
+        $firstAssignment = app(ScannerAssignmentService::class)->assign(
+            event: $firstEvent,
+            scannerUser: $student,
+            assignedBy: $admin,
+            label: 'Gate 1'
+        );
+        $secondAssignment = app(ScannerAssignmentService::class)->assign(
+            event: $secondEvent,
+            scannerUser: $student,
+            assignedBy: $admin,
+            label: 'Gate 2'
+        );
+        $mobileToken = $student->createToken('scanner-phone', ['scanner-assignments'])->plainTextToken;
+
+        $firstActivation = $this->withHeaders(['Authorization' => 'Bearer ' . $mobileToken])
+            ->postJson("/api/v1/scanner/assignments/{$firstAssignment->id}/activate", [
+                'device_id' => 'gate-1-device',
+            ])
+            ->assertStatus(200);
+
+        $firstSession = ScannerSession::findOrFail($firstActivation->json('scanner_session.id'));
+
+        Auth::forgetGuards();
+
+        $this->withHeaders(['Authorization' => 'Bearer ' . $mobileToken])
+            ->postJson("/api/v1/scanner/assignments/{$secondAssignment->id}/activate", [
+                'device_id' => 'gate-2-device',
+            ])
+            ->assertStatus(409)
+            ->assertJsonFragment(['reason' => 'active_session_exists']);
+
+        $firstSession->refresh();
+        $this->assertSame(ScannerSession::STATUS_ACTIVE, $firstSession->status);
+        $this->assertSame(0, ScannerSession::where('event_id', $firstEvent->id)->where('status', ScannerSession::STATUS_REVOKED)->count());
+        $this->assertSame(0, ScannerSession::where('event_id', $secondEvent->id)->count());
     }
 
     public function test_device_bound_scanner_session_rejects_different_device()

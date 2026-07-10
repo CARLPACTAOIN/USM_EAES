@@ -105,6 +105,7 @@ class AdminAccessController extends Controller
 
         $colleges = College::with('programs')->orderBy('name')->get();
         $adminRoles = AdminAssignmentService::ADMIN_ROLES;
+        $assignableRoles = AdminAssignmentService::OSA_ASSIGNABLE_ROLES;
         $stats = [
             'active_assignments' => AdminAssignment::where('status', AdminAssignment::STATUS_ACTIVE)->count(),
             'total_assignments' => AdminAssignment::count(),
@@ -118,6 +119,7 @@ class AdminAccessController extends Controller
             'activeOrganizations',
             'colleges',
             'adminRoles',
+            'assignableRoles',
             'stats',
             'activeTab'
         ));
@@ -156,7 +158,7 @@ class AdminAccessController extends Controller
             'email' => ['required_without:student_id_number', 'nullable', 'email', 'max:255'],
             'student_id_number' => ['nullable', 'string', 'max:20'],
             'password' => ['nullable', 'string', 'min:8'],
-            'role' => ['required', Rule::in(AdminAssignmentService::ADMIN_ROLES)],
+            'role' => ['required', Rule::in(AdminAssignmentService::OSA_ASSIGNABLE_ROLES)],
             'organization_id' => ['nullable', 'uuid', 'exists:organizations,id'],
             'college_id' => ['nullable', 'uuid', 'exists:colleges,id'],
             'academic_year' => ['nullable', 'string', 'max:20'],
@@ -286,14 +288,6 @@ class AdminAccessController extends Controller
             $validator->errors()->add('organization_id', 'Select an active recognized organization.');
         }
 
-        if ($role === 'Super Admin (OSA)') {
-            if ($request->filled('organization_id') || $request->filled('college_id')) {
-                $validator->errors()->add('role', 'Super Admin assignments do not use organization or college scope.');
-            }
-
-            return;
-        }
-
         if ($role === 'Society Admin' && (!$organization || !in_array($organization->type, ['society', 'non_academic_org'], true))) {
             $validator->errors()->add('organization_id', 'Select a society or recognized non-academic organization for Society Admin assignments.');
         }
@@ -331,16 +325,6 @@ class AdminAccessController extends Controller
 
             if ($request->filled('college_id')) {
                 $validator->errors()->add('college_id', 'Office Event Admin assignments are office-scoped, not college-scoped.');
-            }
-        }
-
-        if ($role === 'HR Admin') {
-            if (!$organization || $organization->type !== 'hr_unit') {
-                $validator->errors()->add('organization_id', 'Select an HR unit organization for HR Admin assignments.');
-            }
-
-            if ($request->filled('college_id')) {
-                $validator->errors()->add('college_id', 'HR Admin assignments are university-wide HR scopes.');
             }
         }
 

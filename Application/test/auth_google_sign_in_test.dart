@@ -1,9 +1,20 @@
+import 'dart:convert';
+
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:eaes_scanner/features/auth/data/auth_api_client.dart';
+import 'package:eaes_scanner/features/auth/data/device_identity_provider.dart';
 import 'package:eaes_scanner/features/auth/data/google_auth_gateway.dart';
 import 'package:eaes_scanner/features/auth/domain/mobile_user.dart';
 import 'package:eaes_scanner/features/auth/domain/scanner_assignment.dart';
 import 'package:eaes_scanner/features/auth/presentation/auth_controller.dart';
+import 'package:eaes_scanner/features/scanner/data/scanner_api_client.dart';
+import 'package:eaes_scanner/features/scanner/data/scanner_contracts.dart';
+import 'package:eaes_scanner/features/scanner/domain/event_summary.dart';
+import 'package:eaes_scanner/features/scanner/domain/offline_scan.dart';
+import 'package:eaes_scanner/features/scanner/domain/roster_student.dart';
+import 'package:eaes_scanner/features/scanner/domain/scan_sync_status.dart';
 import 'package:eaes_scanner/features/scanner/domain/scanner_session.dart';
+import 'package:eaes_scanner/features/scanner/presentation/scanner_controller.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -110,6 +121,7 @@ void main() {
         secureStorage: const FlutterSecureStorage(),
         preferences: preferences,
         googleAuthGateway: gateway,
+        deviceIdentityProvider: const FakeDeviceIdentityProvider('test-device'),
       );
 
       await controller.initialize();
@@ -117,6 +129,8 @@ void main() {
 
       expect(gateway.initialized, isTrue);
       expect(api.loginIdToken, 'google-id-token');
+      expect(api.loginDeviceName, 'test-device');
+      expect(api.assignmentsDeviceId, 'test-device');
       expect(controller.authToken, 'sanctum-token');
       expect(controller.user?.email, 's.scanner@usm.edu.ph');
       expect(controller.assignments, hasLength(1));
@@ -150,6 +164,7 @@ void main() {
             'Google sign in is not configured for this scanner build.',
           ),
         ),
+        deviceIdentityProvider: const FakeDeviceIdentityProvider('test-device'),
       );
 
       await controller.initialize();
@@ -182,6 +197,7 @@ void main() {
         googleAuthGateway: FakeGoogleAuthGateway(
           error: const GoogleAuthCancelledException(),
         ),
+        deviceIdentityProvider: const FakeDeviceIdentityProvider('test-device'),
       );
 
       await controller.initialize();
@@ -192,6 +208,213 @@ void main() {
       expect(controller.statusMessage, isNull);
       expect(controller.busy, isFalse);
     });
+
+    test('activation persists enriched scanner session snapshot', () async {
+      SharedPreferences.setMockInitialValues({});
+      FlutterSecureStorage.setMockInitialValues({});
+
+      final preferences = await SharedPreferences.getInstance();
+      final secureStorage = const FlutterSecureStorage();
+      final assignment = ScannerAssignment(
+        id: 'assignment-1',
+        status: 'active',
+        activationAllowed: true,
+        sessionAvailable: true,
+        eventId: 'event-1',
+        eventTitle: 'Foundation Day',
+        eventStatus: 'approved',
+        eventPhase: 'active',
+      );
+      final authApi = FakeAuthRemoteApi(
+        loginResult: const AuthLoginResult(
+          token: 'mobile-token',
+          user: MobileUser(
+            id: 'user-1',
+            name: 'Scanner',
+            email: 's@usm.edu.ph',
+          ),
+        ),
+        assignmentList: [assignment],
+        activatedSession: const ScannerSession(
+          token: 'scanner-token',
+          eventId: 'event-1',
+          assignmentId: 'assignment-1',
+        ),
+      );
+      final scannerController = ScannerController(
+        localDatabase: AuthFakeScannerLocalStore(),
+        apiClient: AuthFakeScannerRemoteApi(),
+        deviceId: 'test-device',
+        networkStatusChecker: const AuthFakeNetworkStatus(),
+        nowFactory: () => DateTime.utc(2026, 7, 10, 9),
+      );
+      final controller = AuthController(
+        apiClient: authApi,
+        secureStorage: secureStorage,
+        preferences: preferences,
+        googleAuthGateway: FakeGoogleAuthGateway(),
+        deviceIdentityProvider: const FakeDeviceIdentityProvider('test-device'),
+      );
+      controller.authToken = 'mobile-token';
+      controller.user = const MobileUser(
+        id: 'user-1',
+        name: 'Scanner',
+        email: 's@usm.edu.ph',
+      );
+
+      final activated = await controller.activateAssignment(
+        assignment,
+        scannerController,
+      );
+      final raw = await secureStorage.read(key: 'eaes.active_scanner_session');
+      final snapshot = jsonDecode(raw!) as Map<String, dynamic>;
+
+      expect(activated, isTrue);
+      expect(authApi.activateDeviceId, 'test-device');
+      expect(snapshot['token'], 'scanner-token');
+      expect(snapshot['event_title'], 'Test Event');
+      expect(snapshot['event_lifecycle_phase'], 'active');
+      expect(snapshot['scan_window_end'], '2026-07-10T12:00:00.000Z');
+    });
+
+    test(
+      'offline restore keeps saved session after server/network failure',
+      () async {
+        SharedPreferences.setMockInitialValues({
+          'eaes.mobile_user': jsonEncode(
+            const MobileUser(
+              id: 'user-1',
+              name: 'Scanner',
+              email: 's@usm.edu.ph',
+            ).toJson(),
+          ),
+        });
+        FlutterSecureStorage.setMockInitialValues({
+          'eaes.mobile_auth_token': 'mobile-token',
+          'eaes.active_scanner_session': jsonEncode({
+            'token': 'scanner-token',
+            'event_id': 'event-1',
+            'assignment_id': 'assignment-1',
+            'event_title': 'Cached Event',
+            'event_lifecycle_phase': 'active',
+            'scan_window_start': '2026-07-10T08:00:00Z',
+            'scan_window_end': '2026-07-10T12:00:00Z',
+            'saved_at': '2026-07-10T08:30:00Z',
+          }),
+        });
+
+        final preferences = await SharedPreferences.getInstance();
+        final secureStorage = const FlutterSecureStorage();
+        final scannerController = ScannerController(
+          localDatabase: AuthFakeScannerLocalStore(),
+          apiClient: AuthFakeScannerRemoteApi(
+            validateError: const ScannerApiException(
+              'Server error',
+              statusCode: 500,
+            ),
+          ),
+          deviceId: 'test-device',
+          networkStatusChecker: const AuthFakeNetworkStatus([
+            ConnectivityResult.none,
+          ]),
+          nowFactory: () => DateTime.utc(2026, 7, 10, 9),
+        );
+        final controller = AuthController(
+          apiClient: FakeAuthRemoteApi(
+            loginResult: const AuthLoginResult(
+              token: 'mobile-token',
+              user: MobileUser(
+                id: 'user-1',
+                name: 'Scanner',
+                email: 's@usm.edu.ph',
+              ),
+            ),
+          ),
+          secureStorage: secureStorage,
+          preferences: preferences,
+          googleAuthGateway: FakeGoogleAuthGateway(),
+          deviceIdentityProvider: const FakeDeviceIdentityProvider(
+            'test-device',
+          ),
+        );
+
+        await controller.initialize();
+        await controller.restoreScannerSession(scannerController);
+
+        expect(scannerController.hasSession, isTrue);
+        expect(scannerController.canCaptureScans, isTrue);
+        expect(scannerController.statusMessage, contains('Offline mode'));
+        expect(
+          await secureStorage.read(key: 'eaes.active_scanner_session'),
+          isNotNull,
+        );
+      },
+    );
+
+    test(
+      'restore clears saved session after definitive invalid response',
+      () async {
+        SharedPreferences.setMockInitialValues({
+          'eaes.mobile_user': jsonEncode(
+            const MobileUser(
+              id: 'user-1',
+              name: 'Scanner',
+              email: 's@usm.edu.ph',
+            ).toJson(),
+          ),
+        });
+        FlutterSecureStorage.setMockInitialValues({
+          'eaes.mobile_auth_token': 'mobile-token',
+          'eaes.active_scanner_session': jsonEncode({
+            'token': 'scanner-token',
+            'event_id': 'event-1',
+            'event_lifecycle_phase': 'active',
+            'saved_at': '2026-07-10T08:30:00Z',
+          }),
+        });
+
+        final preferences = await SharedPreferences.getInstance();
+        final secureStorage = const FlutterSecureStorage();
+        final scannerController = ScannerController(
+          localDatabase: AuthFakeScannerLocalStore(),
+          apiClient: AuthFakeScannerRemoteApi(
+            validateError: const ScannerApiException(
+              'Unauthorized',
+              statusCode: 401,
+            ),
+          ),
+          deviceId: 'test-device',
+          networkStatusChecker: const AuthFakeNetworkStatus(),
+        );
+        final controller = AuthController(
+          apiClient: FakeAuthRemoteApi(
+            loginResult: const AuthLoginResult(
+              token: 'mobile-token',
+              user: MobileUser(
+                id: 'user-1',
+                name: 'Scanner',
+                email: 's@usm.edu.ph',
+              ),
+            ),
+          ),
+          secureStorage: secureStorage,
+          preferences: preferences,
+          googleAuthGateway: FakeGoogleAuthGateway(),
+          deviceIdentityProvider: const FakeDeviceIdentityProvider(
+            'test-device',
+          ),
+        );
+
+        await controller.initialize();
+        await controller.restoreScannerSession(scannerController);
+
+        expect(scannerController.hasSession, isFalse);
+        expect(
+          await secureStorage.read(key: 'eaes.active_scanner_session'),
+          isNull,
+        );
+      },
+    );
   });
 }
 
@@ -272,11 +495,16 @@ class FakeAuthRemoteApi implements AuthRemoteApi {
   FakeAuthRemoteApi({
     required this.loginResult,
     this.assignmentList = const [],
+    this.activatedSession,
   });
 
   final AuthLoginResult loginResult;
   final List<ScannerAssignment> assignmentList;
+  final ScannerSession? activatedSession;
   String? loginIdToken;
+  String? loginDeviceName;
+  String? assignmentsDeviceId;
+  String? activateDeviceId;
 
   @override
   Future<AuthLoginResult> loginWithGoogle({
@@ -284,11 +512,16 @@ class FakeAuthRemoteApi implements AuthRemoteApi {
     required String deviceName,
   }) async {
     loginIdToken = idToken;
+    loginDeviceName = deviceName;
     return loginResult;
   }
 
   @override
-  Future<List<ScannerAssignment>> assignments(String token) async {
+  Future<List<ScannerAssignment>> assignments({
+    required String token,
+    required String deviceId,
+  }) async {
+    assignmentsDeviceId = deviceId;
     return assignmentList;
   }
 
@@ -301,6 +534,196 @@ class FakeAuthRemoteApi implements AuthRemoteApi {
     required ScannerAssignment assignment,
     required String deviceId,
   }) {
-    throw UnimplementedError();
+    activateDeviceId = deviceId;
+    final session = activatedSession;
+    if (session == null) {
+      throw UnimplementedError();
+    }
+    return Future.value(session);
   }
+}
+
+class FakeDeviceIdentityProvider implements DeviceIdentityProvider {
+  const FakeDeviceIdentityProvider(this.value);
+
+  final String value;
+
+  @override
+  Future<String> deviceId() async {
+    return value;
+  }
+}
+
+class AuthFakeScannerRemoteApi implements ScannerRemoteApi {
+  AuthFakeScannerRemoteApi({this.validateError});
+
+  final Object? validateError;
+
+  @override
+  Future<Map<String, dynamic>> validateSession(ScannerSession session) async {
+    final error = validateError;
+    if (error != null) {
+      throw error;
+    }
+
+    return {
+      'event': {
+        'id': session.eventId,
+        'title': 'Test Event',
+        'status': 'approved',
+        'lifecycle_phase': 'active',
+      },
+      'scanner_session': {
+        'id': 'scanner-session-1',
+        'assignment_id': session.assignmentId,
+        'event_participation_scope_id': 'scope-1',
+        'status': 'active',
+        'participation_scope': {'name': 'PSITS'},
+        'scan_window_start': '2026-07-10T08:00:00Z',
+        'scan_window_end': '2026-07-10T12:00:00Z',
+        'sync_grace_ends_at': '2026-07-13T12:00:00Z',
+      },
+    };
+  }
+
+  @override
+  Future<List<RosterStudent>> hydrateRoster(ScannerSession session) async {
+    return const [
+      RosterStudent(
+        studentId: 'student-1',
+        qrCodeValue: 'QR-1',
+        name: 'Scanner Student',
+        programCode: 'BSIS',
+        studentIdNumber: '23-72634',
+      ),
+    ];
+  }
+
+  @override
+  Future<Map<String, dynamic>> syncScans({
+    required ScannerSession session,
+    required List<OfflineScan> scans,
+  }) async {
+    return {'ingested_count': scans.length, 'unresolved_count': 0};
+  }
+}
+
+class AuthFakeScannerLocalStore implements ScannerLocalStore {
+  final List<RosterStudent> _roster = [];
+  final List<OfflineScan> _scans = [];
+  final Map<String, ScanSyncStatus> _statuses = {};
+
+  @override
+  Future<void> upsertRoster(List<RosterStudent> students) async {
+    _roster.addAll(students);
+  }
+
+  @override
+  Future<void> replaceRoster(List<RosterStudent> students) async {
+    _roster
+      ..clear()
+      ..addAll(students);
+  }
+
+  @override
+  Future<RosterStudent?> findStudentByQr(String qrCodeValue) async {
+    for (final student in _roster) {
+      if (student.qrCodeValue == qrCodeValue) {
+        return student;
+      }
+    }
+    return null;
+  }
+
+  @override
+  Future<RosterStudent?> findStudentByIdNumber(String studentIdNumber) async {
+    for (final student in _roster) {
+      if (student.studentIdNumber == studentIdNumber) {
+        return student;
+      }
+    }
+    return null;
+  }
+
+  @override
+  Future<int> insertScan(OfflineScan scan) async {
+    _scans.add(scan);
+    _statuses[scan.dedupKey] = ScanSyncStatus.pending;
+    return 1;
+  }
+
+  @override
+  Future<List<OfflineScan>> unsyncedScans(
+    String eventId, {
+    int limit = 200,
+  }) async {
+    return _scans.take(limit).toList();
+  }
+
+  @override
+  Future<List<OfflineScan>> failedScans(
+    String eventId, {
+    int limit = 200,
+  }) async {
+    return const [];
+  }
+
+  @override
+  Future<int> pendingCount(String eventId) async {
+    return _scans
+        .where((scan) => _statuses[scan.dedupKey] == ScanSyncStatus.pending)
+        .length;
+  }
+
+  @override
+  Future<int> syncedCount(String eventId) async => 0;
+
+  @override
+  Future<int> failedCount(String eventId) async => 0;
+
+  @override
+  Future<void> markSyncing(List<String> dedupKeys) async {}
+
+  @override
+  Future<void> markSynced(List<String> dedupKeys) async {}
+
+  @override
+  Future<void> markFailed(
+    List<String> dedupKeys, {
+    required String failureReason,
+  }) async {}
+
+  @override
+  Future<void> resetFailedToPending(List<String> dedupKeys) async {}
+
+  @override
+  Future<List<OfflineScan>> recentScans(
+    String eventId, {
+    int limit = 100,
+  }) async {
+    return _scans.take(limit).toList();
+  }
+
+  @override
+  Future<int> rosterCount() async => _roster.length;
+
+  @override
+  Future<void> wipeRoster() async {
+    _roster.clear();
+  }
+
+  @override
+  Future<void> upsertEventSummary(EventSummary summary) async {}
+
+  @override
+  Future<EventSummary?> eventSummary(String eventId) async => null;
+}
+
+class AuthFakeNetworkStatus implements NetworkStatusChecker {
+  const AuthFakeNetworkStatus([this.results = const [ConnectivityResult.wifi]]);
+
+  final List<ConnectivityResult> results;
+
+  @override
+  Future<List<ConnectivityResult>> checkConnectivity() async => results;
 }

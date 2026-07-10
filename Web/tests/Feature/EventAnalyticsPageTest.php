@@ -19,6 +19,7 @@ use App\Models\ScannerSession;
 use App\Models\University;
 use App\Models\User;
 use App\Services\AdminAssignmentService;
+use App\Services\EventAnalyticsService;
 use App\Services\ParticipationScopeService;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -49,7 +50,9 @@ class EventAnalyticsPageTest extends TestCase
             ->assertSee('Participant Scopes')
             ->assertSee('Scanner &amp; Sync', false)
             ->assertSee('Attainment of objectives')
-            ->assertSee('Participant Drilldown');
+            ->assertSee('Participant Drilldown')
+            ->assertSee('Year Level Mix')
+            ->assertSee('All year levels');
     }
 
     public function test_students_and_cross_tenant_admins_are_denied_event_analytics(): void
@@ -86,6 +89,8 @@ class EventAnalyticsPageTest extends TestCase
             ->assertJsonPath('evaluations.sentiments.negative', 1)
             ->assertJsonPath('scanner_sync.pending_links.pending', 1)
             ->assertJsonPath('scanner_sync.raw_scans.manual_entries', 1)
+            ->assertJsonPath('year_levels.0.label', '2nd Year')
+            ->assertJsonPath('year_levels.0.count', 1)
             ->assertJsonPath('evaluations.category_averages.0.label', 'Attainment of objectives');
 
         Sanctum::actingAs($fixture['admin']);
@@ -101,7 +106,22 @@ class EventAnalyticsPageTest extends TestCase
                 'evaluations' => ['sentiments', 'category_averages'],
                 'scanner_sync',
                 'demographics',
+                'year_levels',
             ]);
+    }
+
+    public function test_participant_drilldown_can_filter_by_year_level(): void
+    {
+        $fixture = $this->createAnalyticsFixture();
+
+        $rows = app(EventAnalyticsService::class)
+            ->participantRows($fixture['event'], ['year_level' => '2nd_year'], 25)
+            ->getCollection();
+
+        $this->assertSame(
+            ['Participant Attendee', 'Participant Missing'],
+            $rows->pluck('name')->values()->all()
+        );
     }
 
     public function test_participation_scope_denominators_daily_eilo_evaluations_and_sync_counts_are_correct(): void
@@ -162,9 +182,9 @@ class EventAnalyticsPageTest extends TestCase
         $participant = $this->createHierarchy('College of Business', 'COB', 'Junior Managers Society', 'JMS');
         $admin = $this->createAdmin('Society Admin', $organizer['org']);
 
-        $organizerStudent = $this->createStudent($organizer['org'], $organizer['program'], 'Organizer Attendee', '24-0001');
-        $participantAttended = $this->createStudent($participant['org'], $participant['program'], 'Participant Attendee', '24-0002');
-        $participantMissing = $this->createStudent($participant['org'], $participant['program'], 'Participant Missing', '24-0003');
+        $organizerStudent = $this->createStudent($organizer['org'], $organizer['program'], 'Organizer Attendee', '24-0001', '3rd_year');
+        $participantAttended = $this->createStudent($participant['org'], $participant['program'], 'Participant Attendee', '24-0002', '2nd_year');
+        $participantMissing = $this->createStudent($participant['org'], $participant['program'], 'Participant Missing', '24-0003', '2nd_year');
 
         $event = Event::create([
             'organization_id' => $organizer['org']->id,
@@ -376,7 +396,7 @@ class EventAnalyticsPageTest extends TestCase
         return compact('uni', 'college', 'org', 'program');
     }
 
-    private function createStudent(Organization $org, Program $program, string $name, string $studentIdNumber): User
+    private function createStudent(Organization $org, Program $program, string $name, string $studentIdNumber, string $yearLevel = '3rd_year'): User
     {
         $user = User::create([
             'name' => $name,
@@ -388,6 +408,7 @@ class EventAnalyticsPageTest extends TestCase
             'student_id_number' => $studentIdNumber,
             'qr_code_value' => 'QR-'.$studentIdNumber,
             'program_code' => $program->code,
+            'year_level' => $yearLevel,
             'user_type' => 'student',
         ]);
         $user->assignRole('Student');
@@ -397,6 +418,7 @@ class EventAnalyticsPageTest extends TestCase
             'organization_id' => $org->id,
             'college_id' => $org->college_id,
             'program_id' => $program->id,
+            'year_level' => $yearLevel,
             'membership_type' => 'primary_academic',
             'status' => OrganizationMembership::STATUS_ACTIVE,
             'source' => 'test',

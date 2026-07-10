@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../../../config/app_colors.dart';
+
 import '../auth_controller.dart';
 
 /// Premium login screen that visually extends the splash-screen aesthetic:
@@ -18,9 +20,9 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen>
     with TickerProviderStateMixin {
   // --- Brand tokens ---------------------------------------------------------
-  static const Color _accentGreen = Color(0xFF34D399); // emerald-400
-  static const Color _usmGold = Color(0xFFD4A843); // USM institutional gold
-  static const Color _usmGoldLight = Color(0xFFF0D078); // lighter gold for glows
+  static const Color _accentGreen = AppColors.accentGreen;
+  static const Color _usmGold = AppColors.usmGold;
+  static const Color _usmGoldLight = AppColors.usmGoldLight;
 
   // --- Animation controllers ------------------------------------------------
   late final AnimationController _entranceController;
@@ -105,14 +107,14 @@ class _LoginScreenState extends State<LoginScreen>
       body: Container(
         width: double.infinity,
         height: double.infinity,
-        decoration: const BoxDecoration(
+        decoration: BoxDecoration(
           gradient: RadialGradient(
             center: Alignment(0.0, -0.45),
             radius: 1.3,
             colors: [
-              Color(0xFF1B4D3E), // brand green
-              Color(0xFF0F2E25), // brand green dark
-              Color(0xFF071A14), // near black
+              AppColors.brandGreen,
+              AppColors.brandGreenDark,
+              AppColors.dark.gradientEnd,
             ],
             stops: [0.0, 0.50, 1.0],
           ),

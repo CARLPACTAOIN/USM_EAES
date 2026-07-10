@@ -260,6 +260,7 @@ class AuthController extends Controller
             'organization_id' => $user->organization_id,
             'college_id' => $user->college_id,
             'program_id' => $user->program_id,
+            'year_level' => $user->year_level,
             'user_type' => $user->user_type,
             'roles' => $user->getRoleNames(),
         ];

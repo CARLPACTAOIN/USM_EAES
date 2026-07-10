@@ -2,7 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../../config/app_colors.dart';
 import '../../../config/app_config.dart';
+import '../../../config/theme_provider.dart';
 import '../domain/scan_sync_status.dart';
 import 'scanner_controller.dart';
 import 'screens/offline_tools_screen.dart';
@@ -87,46 +89,62 @@ class _ScannerHomeScreenState extends State<ScannerHomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final c = AppColors.of(context);
+
     return AnimatedBuilder(
       animation: _controller,
       builder: (context, _) {
-        return Scaffold(
-          body: Column(
-            children: [
-              GlobalFeedbackBanner(
-                feedback: _controller.globalFeedback,
-                onDismiss: _controller.clearGlobalFeedback,
-              ),
-              Expanded(
-                child: IndexedStack(
-                  index: _selectedTab,
-                  children: [
-                    _TabScaffold(
-                      title: AppConfig.appName,
-                      child: SessionSetupScreen(
-                        controller: _controller,
-                        onReturnToAssignments: () =>
-                            Navigator.of(context).maybePop(),
-                        onHydrate: _controller.hydrateRoster,
-                      ),
-                    ),
-                    _TabScaffold(
-                      title: 'Offline Tools',
-                      child: OfflineToolsScreen(controller: _controller),
-                    ),
-                    _TabScaffold(
-                      title: 'Scan Logs',
-                      child: ScanLogsScreen(controller: _controller),
-                    ),
-                  ],
-                ),
-              ),
-            ],
+        return Container(
+          decoration: BoxDecoration(
+            gradient: RadialGradient(
+              center: const Alignment(0.0, -0.6),
+              radius: 1.4,
+              colors: isDark
+                  ? [c.gradientStart, c.gradientMid, c.gradientEnd]
+                  : [c.gradientStart, c.gradientMid, c.gradientEnd],
+              stops: const [0.0, 0.45, 1.0],
+            ),
           ),
-          bottomNavigationBar: _BottomNav(
-            selectedIndex: _selectedTab,
-            pendingCount: _controller.pendingCount + _controller.failedCount,
-            onTabSelected: (index) => setState(() => _selectedTab = index),
+          child: Scaffold(
+            backgroundColor: Colors.transparent,
+            body: Column(
+              children: [
+                GlobalFeedbackBanner(
+                  feedback: _controller.globalFeedback,
+                  onDismiss: _controller.clearGlobalFeedback,
+                ),
+                Expanded(
+                  child: IndexedStack(
+                    index: _selectedTab,
+                    children: [
+                      _TabScaffold(
+                        title: AppConfig.appName,
+                        child: SessionSetupScreen(
+                          controller: _controller,
+                          onReturnToAssignments: () =>
+                              Navigator.of(context).maybePop(),
+                          onHydrate: _controller.hydrateRoster,
+                        ),
+                      ),
+                      _TabScaffold(
+                        title: 'Offline Tools',
+                        child: OfflineToolsScreen(controller: _controller),
+                      ),
+                      _TabScaffold(
+                        title: 'Scan Logs',
+                        child: ScanLogsScreen(controller: _controller),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            bottomNavigationBar: _BottomNav(
+              selectedIndex: _selectedTab,
+              pendingCount: _controller.pendingCount + _controller.failedCount,
+              onTabSelected: (index) => setState(() => _selectedTab = index),
+            ),
           ),
         );
       },
@@ -142,9 +160,50 @@ class _TabScaffold extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
-      appBar: AppBar(title: Text(title)),
+      backgroundColor: Colors.transparent,
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        foregroundColor: isDark ? Colors.white : AppColors.brandGreenDark,
+        titleTextStyle: TextStyle(
+          fontFamily: 'Inter',
+          fontSize: 18,
+          fontWeight: FontWeight.w700,
+          color: isDark ? Colors.white : AppColors.brandGreenDark,
+        ),
+        title: Text(title),
+        actions: [_ThemeToggleButton(), const SizedBox(width: 4)],
+      ),
       body: child,
+    );
+  }
+}
+
+/// Animated sun/moon toggle in the app bar.
+class _ThemeToggleButton extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return IconButton(
+      tooltip: isDark ? 'Switch to light mode' : 'Switch to dark mode',
+      onPressed: () => ThemeProvider.instance.toggleTheme(),
+      icon: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 350),
+        transitionBuilder: (child, animation) {
+          return RotationTransition(
+            turns: Tween(begin: 0.75, end: 1.0).animate(animation),
+            child: FadeTransition(opacity: animation, child: child),
+          );
+        },
+        child: Icon(
+          isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+          key: ValueKey(isDark),
+          color: AppColors.usmGold,
+          size: 22,
+        ),
+      ),
     );
   }
 }
@@ -162,45 +221,56 @@ class _BottomNav extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final c = AppColors.of(context);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final selectedColor = isDark ? AppColors.usmGold : AppColors.brandGreen;
+    final unselectedColor = isDark
+        ? Colors.white.withValues(alpha: 0.40)
+        : AppColors.brandGreen.withValues(alpha: 0.45);
 
-    return NavigationBar(
-      selectedIndex: selectedIndex,
-      onDestinationSelected: onTabSelected,
-      backgroundColor: theme.bottomNavigationBarTheme.backgroundColor,
-      indicatorColor: const Color(0xFF1B4D3E).withValues(alpha: 0.12),
-      labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-      destinations: [
-        const NavigationDestination(
-          icon: Icon(Icons.qr_code_scanner_rounded),
-          selectedIcon: Icon(
-            Icons.qr_code_scanner_rounded,
-            color: Color(0xFF1B4D3E),
+    return Container(
+      decoration: BoxDecoration(
+        color: c.navBarBg,
+        border: Border(top: BorderSide(color: c.navBarBorder, width: 1)),
+      ),
+      child: NavigationBar(
+        selectedIndex: selectedIndex,
+        onDestinationSelected: onTabSelected,
+        backgroundColor: Colors.transparent,
+        indicatorColor: selectedColor.withValues(alpha: 0.12),
+        labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+        destinations: [
+          NavigationDestination(
+            icon: Icon(Icons.qr_code_scanner_rounded, color: unselectedColor),
+            selectedIcon: Icon(
+              Icons.qr_code_scanner_rounded,
+              color: selectedColor,
+            ),
+            label: 'Scanner',
           ),
-          label: 'Scanner',
-        ),
-        NavigationDestination(
-          icon: Badge(
-            isLabelVisible: pendingCount > 0,
-            label: Text('$pendingCount'),
-            child: const Icon(Icons.wifi_off_rounded),
+          NavigationDestination(
+            icon: Badge(
+              isLabelVisible: pendingCount > 0,
+              label: Text('$pendingCount'),
+              child: Icon(Icons.wifi_off_rounded, color: unselectedColor),
+            ),
+            selectedIcon: Badge(
+              isLabelVisible: pendingCount > 0,
+              label: Text('$pendingCount'),
+              child: Icon(Icons.wifi_off_rounded, color: selectedColor),
+            ),
+            label: 'Offline',
           ),
-          selectedIcon: Badge(
-            isLabelVisible: pendingCount > 0,
-            label: Text('$pendingCount'),
-            child: const Icon(Icons.wifi_off_rounded, color: Color(0xFF1B4D3E)),
+          NavigationDestination(
+            icon: Icon(Icons.receipt_long_rounded, color: unselectedColor),
+            selectedIcon: Icon(
+              Icons.receipt_long_rounded,
+              color: selectedColor,
+            ),
+            label: 'Logs',
           ),
-          label: 'Offline',
-        ),
-        const NavigationDestination(
-          icon: Icon(Icons.receipt_long_rounded),
-          selectedIcon: Icon(
-            Icons.receipt_long_rounded,
-            color: Color(0xFF1B4D3E),
-          ),
-          label: 'Logs',
-        ),
-      ],
+        ],
+      ),
     );
   }
 }

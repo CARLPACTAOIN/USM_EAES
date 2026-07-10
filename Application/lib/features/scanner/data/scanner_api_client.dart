@@ -8,31 +8,37 @@ import '../domain/roster_student.dart';
 import '../domain/scanner_session.dart';
 import 'scanner_contracts.dart';
 
+typedef DeviceIdResolver = Future<String> Function();
+
 class ScannerApiClient implements ScannerRemoteApi {
-  ScannerApiClient(this.apiBaseUrl, {http.Client? httpClient})
-    : _client = httpClient ?? http.Client();
+  ScannerApiClient(
+    this.apiBaseUrl, {
+    http.Client? httpClient,
+    DeviceIdResolver? deviceIdResolver,
+  }) : _client = httpClient ?? http.Client(),
+       _deviceIdResolver = deviceIdResolver ?? (() async => AppConfig.deviceId);
 
   final String apiBaseUrl;
   final http.Client _client;
+  final DeviceIdResolver _deviceIdResolver;
 
   @override
   Future<Map<String, dynamic>> validateSession(ScannerSession session) async {
+    final deviceId = await _deviceIdResolver();
     final response = await _client.post(
       _uri('/v1/scanner/validate'),
       headers: _headers(session.token),
-      body: jsonEncode({
-        'event_id': session.eventId,
-        'device_id': AppConfig.deviceId,
-      }),
+      body: jsonEncode({'event_id': session.eventId, 'device_id': deviceId}),
     );
     return _decodeJson(response);
   }
 
   @override
   Future<List<RosterStudent>> hydrateRoster(ScannerSession session) async {
+    final deviceId = await _deviceIdResolver();
     final response = await _client.get(
       _uri('/v1/events/${session.eventId}/hydrate'),
-      headers: {..._headers(session.token), 'X-Device-Id': AppConfig.deviceId},
+      headers: {..._headers(session.token), 'X-Device-Id': deviceId},
     );
     final payload = _decodeJson(response);
     final roster = payload['roster'] as List<dynamic>? ?? [];

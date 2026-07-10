@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\Schedule;
 use App\Jobs\AnalyzeEventSentimentsJob;
 use App\Models\Event;
 use App\Services\EventLifecycleService;
+use App\Services\EventNotificationService;
 use App\Support\EvaluationWindow;
 
 Artisan::command('inspire', function () {
@@ -53,6 +54,12 @@ Artisan::command('eaes:update-event-lifecycles', function (EventLifecycleService
 
     $this->info("Updated {$updated} event lifecycle record(s).");
 })->purpose('Update approved event lifecycle phases from schedule, evaluation, sync, and processing state');
+
+Artisan::command('eaes:send-participant-scope-reminders', function (EventNotificationService $notifications) {
+    $sent = $notifications->sendParticipantScopeReminders();
+
+    $this->info("Sent {$sent} participant invitation reminder notification(s).");
+})->purpose('Send in-app reminders for participant invitations and PPAs that still need action');
 
 Artisan::command('eaes:deployment-check {--profile= : demo or production}', function () {
     $profile = $this->option('profile') ?: (config('app.env') === 'production' ? 'production' : 'demo');
@@ -162,3 +169,4 @@ Artisan::command('eaes:deployment-check {--profile= : demo or production}', func
 
 Schedule::command('eaes:analyze-closed-evaluations')->hourly();
 Schedule::command('eaes:update-event-lifecycles')->everyFifteenMinutes();
+Schedule::command('eaes:send-participant-scope-reminders')->dailyAt('08:00');

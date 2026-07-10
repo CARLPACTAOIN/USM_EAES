@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:eaes_scanner/features/scanner/data/scanner_api_client.dart';
@@ -101,6 +102,175 @@ void main() {
       expect(controller.statusMessage, contains('Offline scanning is ready'));
     });
 
+    test('builds rich snapshot after validated activation', () async {
+      final now = DateTime.utc(2026, 7, 10, 9);
+      final remote = FakeRemoteApi(
+        scanWindowStart: '2026-07-10T08:00:00Z',
+        scanWindowEnd: '2026-07-10T12:00:00Z',
+      );
+      final controller = buildController(
+        remoteApi: remote,
+        nowFactory: () => now,
+      );
+
+      await controller.activateSession(
+        const ScannerSession(
+          token: 'token-1',
+          eventId: 'event-1',
+          assignmentId: 'assignment-1',
+        ),
+      );
+
+      final snapshot = controller.currentSessionSnapshot();
+      expect(snapshot, isNotNull);
+      expect(snapshot!.eventTitle, 'Test Event');
+      expect(snapshot.eventLifecyclePhase, 'active');
+      expect(snapshot.scanWindowStart, DateTime.utc(2026, 7, 10, 8));
+      expect(snapshot.scanWindowEnd, DateTime.utc(2026, 7, 10, 12));
+      expect(snapshot.savedAt, now);
+    });
+
+    test(
+      'restores cached active session offline and records local scans',
+      () async {
+        final now = DateTime.utc(2026, 7, 10, 9);
+        final local = FakeLocalStore();
+        await local.upsertRoster(const [
+          RosterStudent(
+            studentId: 'student-1',
+            qrCodeValue: 'QR-1',
+            name: 'Juan Dela Cruz',
+            programCode: 'BSIS',
+            studentIdNumber: '23-72634',
+          ),
+        ]);
+        final controller = buildController(
+          localStore: local,
+          networkStatus: FakeNetworkStatus([ConnectivityResult.none]),
+          nowFactory: () => now,
+        );
+
+        await controller.restoreCachedSession(
+          ScannerSessionSnapshot(
+            token: 'token-1',
+            eventId: 'event-1',
+            assignmentId: 'assignment-1',
+            eventParticipationScopeId: 'scope-1',
+            participationScopeName: 'PSITS',
+            eventTitle: 'Development Seminar',
+            eventStatus: 'approved',
+            eventLifecyclePhase: 'active',
+            scannerSessionStatus: 'active',
+            scanWindowStart: DateTime.utc(2026, 7, 10, 8),
+            scanWindowEnd: DateTime.utc(2026, 7, 10, 12),
+            syncGraceEndsAt: DateTime.utc(2026, 7, 13, 12),
+            savedAt: DateTime.utc(2026, 7, 10, 8, 30),
+          ),
+        );
+
+        expect(controller.hasSession, isTrue);
+        expect(controller.canCaptureScans, isTrue);
+        expect(controller.rosterCount, 1);
+        expect(controller.statusMessage, contains('Offline mode'));
+
+        final result = await controller.recordQr('QR-1');
+        expect(result.success, isTrue);
+        expect(local.scans.single.eventParticipationScopeId, 'scope-1');
+        expect(local.scans.single.deviceId, 'test-device');
+      },
+    );
+
+    test(
+      'legacy cached session restores but does not allow offline capture',
+      () async {
+        final controller = buildController();
+
+        await controller.restoreCachedSession(
+          ScannerSessionSnapshot.fromJson(const {
+            'token': 'legacy-token',
+            'event_id': 'event-1',
+          }),
+        );
+
+        expect(controller.hasSession, isTrue);
+        expect(controller.canCaptureScans, isFalse);
+
+        final result = await controller.recordQr('QR-1');
+        expect(result.success, isFalse);
+        expect(result.detail, contains('Scanning is not available'));
+      },
+    );
+
+    test(
+      'saved scan window blocks offline captures after window end',
+      () async {
+        final controller = buildController(
+          nowFactory: () => DateTime.utc(2026, 7, 10, 13),
+        );
+
+        await controller.restoreCachedSession(
+          ScannerSessionSnapshot(
+            token: 'token-1',
+            eventId: 'event-1',
+            eventLifecyclePhase: 'active',
+            scanWindowStart: DateTime.utc(2026, 7, 10, 8),
+            scanWindowEnd: DateTime.utc(2026, 7, 10, 12),
+            savedAt: DateTime.utc(2026, 7, 10, 9),
+          ),
+        );
+
+        expect(controller.canCaptureScans, isFalse);
+        final result = await controller.recordQr('QR-1');
+        expect(result.success, isFalse);
+        expect(result.detail, contains('scan window has ended'));
+      },
+    );
+
+    test(
+      'hydration replaces stale roster instead of accumulating old scopes',
+      () async {
+        final local = FakeLocalStore();
+        await local.upsertRoster(const [
+          RosterStudent(
+            studentId: 'stale-1',
+            qrCodeValue: 'QR-STALE-1',
+            name: 'Old Roster Student',
+            programCode: 'BSIS',
+            studentIdNumber: '23-70000',
+          ),
+          RosterStudent(
+            studentId: 'stale-2',
+            qrCodeValue: 'QR-STALE-2',
+            name: 'Old Roster Student Two',
+            programCode: 'BSIS',
+            studentIdNumber: '23-70001',
+          ),
+        ]);
+        final remote = FakeRemoteApi(
+          roster: const [
+            RosterStudent(
+              studentId: 'psits-1',
+              qrCodeValue: 'QR-PSITS-1',
+              name: 'PSITS Student',
+              programCode: 'BSIS',
+              studentIdNumber: '23-72634',
+            ),
+          ],
+        );
+        final controller = buildController(
+          localStore: local,
+          remoteApi: remote,
+        );
+
+        await controller.activateSession(session);
+        await controller.hydrateRoster();
+
+        expect(controller.rosterCount, 1);
+        expect(await local.findStudentByQr('QR-STALE-1'), isNull);
+        expect(await local.findStudentByQr('QR-PSITS-1'), isNotNull);
+      },
+    );
+
     test('does not keep session when backend validation fails', () async {
       final remote = FakeRemoteApi(
         validateError: ScannerApiException('Unauthorized', statusCode: 401),
@@ -112,6 +282,19 @@ void main() {
       expect(controller.hasSession, isFalse);
       expect(controller.errorMessage, contains('expired or unauthorized'));
       expect(controller.errorMessage, isNot(contains('401')));
+      expect(controller.lastSessionActivationFailureIsRecoverable, isFalse);
+    });
+
+    test('marks network activation failure as recoverable', () async {
+      final remote = FakeRemoteApi(
+        validateError: const SocketException('Network is unreachable'),
+      );
+      final controller = buildController(remoteApi: remote);
+
+      await controller.activateSession(session);
+
+      expect(controller.hasSession, isFalse);
+      expect(controller.lastSessionActivationFailureIsRecoverable, isTrue);
     });
 
     test('records known QR and unresolved manual ID offline', () async {
@@ -468,6 +651,8 @@ class FakeRemoteApi implements ScannerRemoteApi {
     this.syncResponse = const {'unresolved_count': 0, 'ingested_count': 1},
     this.eventStatus = 'approved',
     this.eventPhase,
+    this.scanWindowStart,
+    this.scanWindowEnd,
     this.validateError,
   });
 
@@ -475,7 +660,9 @@ class FakeRemoteApi implements ScannerRemoteApi {
   final Map<String, dynamic> syncResponse;
   final String eventStatus;
   final String? eventPhase;
-  final ScannerApiException? validateError;
+  final String? scanWindowStart;
+  final String? scanWindowEnd;
+  final Object? validateError;
   final List<List<OfflineScan>> syncedBatches = [];
 
   @override
@@ -495,8 +682,8 @@ class FakeRemoteApi implements ScannerRemoteApi {
       'scanner_session': {
         'id': 'scanner-session-1',
         'status': 'active',
-        'scan_window_start': '2026-01-01T08:00:00Z',
-        'scan_window_end': '2026-01-01T12:00:00Z',
+        'scan_window_start': scanWindowStart,
+        'scan_window_end': scanWindowEnd,
         'sync_grace_ends_at': '2026-01-04T12:00:00Z',
       },
     };
@@ -537,6 +724,13 @@ class FakeLocalStore implements ScannerLocalStore {
         _rosterByIdNumber[student.studentIdNumber!] = student;
       }
     }
+  }
+
+  @override
+  Future<void> replaceRoster(List<RosterStudent> students) async {
+    _rosterByQr.clear();
+    _rosterByIdNumber.clear();
+    await upsertRoster(students);
   }
 
   @override

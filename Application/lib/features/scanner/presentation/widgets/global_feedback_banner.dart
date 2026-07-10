@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../../config/app_colors.dart';
 import '../../domain/scan_sync_status.dart';
 
 class GlobalFeedbackBanner extends StatelessWidget {
@@ -27,24 +28,20 @@ class GlobalFeedbackBanner extends StatelessWidget {
 
     switch (feedback.kind) {
       case FeedbackKind.loading:
-        background = isDark ? const Color(0xFF1E293B) : const Color(0xFFEFF6FF);
-        foreground = const Color(0xFF2563EB);
+        background = AppColors.accentBlue.withValues(alpha: 0.12);
+        foreground = AppColors.accentBlue;
         icon = Icons.hourglass_top_rounded;
       case FeedbackKind.success:
-        background = isDark ? const Color(0xFF0F2E25) : const Color(0xFFECFDF5);
-        foreground = const Color(0xFF1B4D3E);
+        background = AppColors.accentGreen.withValues(alpha: 0.10);
+        foreground = AppColors.accentGreen;
         icon = Icons.check_circle_rounded;
       case FeedbackKind.error:
-        background = isDark
-            ? theme.colorScheme.error.withValues(alpha: 0.2)
-            : theme.colorScheme.errorContainer.withValues(alpha: 0.5);
-        foreground = theme.colorScheme.error;
+        background = theme.colorScheme.error.withValues(alpha: 0.12);
+        foreground = isDark ? AppColors.errorRedLight : theme.colorScheme.error;
         icon = Icons.error_outline_rounded;
       case FeedbackKind.warning:
-        background = isDark
-            ? Colors.orange.withValues(alpha: 0.15)
-            : Colors.orange.shade50;
-        foreground = Colors.orange.shade800;
+        background = AppColors.usmGold.withValues(alpha: 0.10);
+        foreground = AppColors.usmGold;
         icon = Icons.warning_amber_rounded;
       case FeedbackKind.none:
         return const SizedBox.shrink();
@@ -91,7 +88,7 @@ class GlobalFeedbackBanner extends StatelessWidget {
                       Text(
                         feedback.subtitle!,
                         style: theme.textTheme.bodySmall?.copyWith(
-                          color: foreground.withValues(alpha: 0.85),
+                          color: foreground.withValues(alpha: 0.80),
                         ),
                       ),
                     ],

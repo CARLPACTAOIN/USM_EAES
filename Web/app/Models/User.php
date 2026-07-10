@@ -32,6 +32,7 @@ class User extends Authenticatable
         'student_id_number',
         'qr_code_value',
         'program_code',
+        'year_level',
         'user_type',
     ];
 

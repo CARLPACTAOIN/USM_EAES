@@ -10,14 +10,13 @@ use App\Http\Controllers\Web\EventExportController;
 use App\Http\Controllers\Web\AnalyticsOverviewController;
 use App\Http\Controllers\Web\EventAnalyticsController;
 use App\Http\Controllers\Web\AdminAccessController;
+use App\Http\Controllers\Web\NotificationController;
 use App\Http\Controllers\Dev\DevLoginController;
 
 // ─── Public / Guest Routes ──────────────────────────────────
-Route::get('/', function () {
-    return redirect()->route('login');
-});
+Route::get('/', [AuthController::class, 'login'])->name('login');
 
-Route::get('/login', [AuthController::class, 'login'])->name('login');
+Route::redirect('/login', '/');
 
 // Google OAuth
 Route::get('/auth/google', [GoogleAuthController::class, 'redirectToGoogle'])->name('auth.google');
@@ -44,6 +43,9 @@ Route::middleware(['auth'])->group(function () {
             Route::get('/', [DashboardController::class, 'index'])->name('dashboard');
             Route::get('/ai', [AiInsightsController::class, 'index'])->name('dashboard.ai');
             Route::post('/ai/query', [AiInsightsController::class, 'query'])->name('dashboard.ai.query');
+            Route::get('/notifications', [NotificationController::class, 'index'])->name('dashboard.notifications');
+            Route::post('/notifications/{notification}/read', [NotificationController::class, 'markRead'])->name('dashboard.notifications.read');
+            Route::post('/notifications/read-all', [NotificationController::class, 'readAll'])->name('dashboard.notifications.read-all');
 
             // Events / PPA
             Route::get('/events', [DashboardController::class, 'events'])->name('dashboard.events');
@@ -59,6 +61,7 @@ Route::middleware(['auth'])->group(function () {
             Route::post('/events/{event}/participant-scopes/{participationScope}/review', [DashboardController::class, 'reviewParticipantScope'])->name('dashboard.events.participant-scopes.review');
             Route::post('/events/{event}/participant-scopes/{participationScope}/approve', [DashboardController::class, 'approveParticipantScope'])->name('dashboard.events.participant-scopes.approve');
             Route::post('/events/{event}/participant-scopes/{participationScope}/reject', [DashboardController::class, 'rejectParticipantScope'])->name('dashboard.events.participant-scopes.reject');
+            Route::post('/events/{event}/participant-scopes/{participationScope}/acknowledge', [DashboardController::class, 'acknowledgeParticipantScope'])->name('dashboard.events.participant-scopes.acknowledge');
             Route::get('/events/{event}/proposal-document', [DashboardController::class, 'downloadProposal'])->name('dashboard.events.proposal-document');
             Route::get('/events/{event}/scanner-candidates', [DashboardController::class, 'scannerCandidates'])->name('dashboard.events.scanner-candidates');
             Route::post('/events/{event}/scanner-assignments', [DashboardController::class, 'assignEventScanner'])->name('dashboard.events.scanner-assignments.store');

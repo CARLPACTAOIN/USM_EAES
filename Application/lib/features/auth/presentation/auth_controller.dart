@@ -8,6 +8,7 @@ import '../../../config/app_config.dart';
 import '../../scanner/presentation/scanner_controller.dart';
 import '../../scanner/domain/scanner_session.dart';
 import '../data/auth_api_client.dart';
+import '../data/device_identity_provider.dart';
 import '../data/google_auth_gateway.dart';
 import '../domain/mobile_user.dart';
 import '../domain/scanner_assignment.dart';
@@ -18,15 +19,21 @@ class AuthController extends ChangeNotifier {
     required FlutterSecureStorage secureStorage,
     SharedPreferences? preferences,
     GoogleAuthGateway? googleAuthGateway,
+    DeviceIdentityProvider? deviceIdentityProvider,
   }) : _apiClient = apiClient,
        _secureStorage = secureStorage,
        _preferences = preferences,
-       _googleAuthGateway = googleAuthGateway ?? GoogleSignInGateway();
+       _googleAuthGateway = googleAuthGateway ?? GoogleSignInGateway(),
+       _deviceIdentityProvider =
+           deviceIdentityProvider ?? PlatformDeviceIdentityProvider();
 
-  factory AuthController.defaultInstance() {
+  factory AuthController.defaultInstance({
+    DeviceIdentityProvider? deviceIdentityProvider,
+  }) {
     return AuthController(
       apiClient: AuthApiClient(AppConfig.apiBaseUrl),
       secureStorage: const FlutterSecureStorage(),
+      deviceIdentityProvider: deviceIdentityProvider,
     );
   }
 
@@ -39,6 +46,7 @@ class AuthController extends ChangeNotifier {
   final FlutterSecureStorage _secureStorage;
   SharedPreferences? _preferences;
   final GoogleAuthGateway _googleAuthGateway;
+  final DeviceIdentityProvider _deviceIdentityProvider;
 
   MobileUser? user;
   List<ScannerAssignment> assignments = [];
@@ -91,7 +99,7 @@ class AuthController extends ChangeNotifier {
 
       final result = await _apiClient.loginWithGoogle(
         idToken: accountToken.idToken,
-        deviceName: AppConfig.deviceId,
+        deviceName: await _deviceIdentityProvider.deviceId(),
       );
 
       authToken = result.token;
@@ -123,7 +131,10 @@ class AuthController extends ChangeNotifier {
     }
 
     try {
-      assignments = await _apiClient.assignments(token);
+      assignments = await _apiClient.assignments(
+        token: token,
+        deviceId: await _deviceIdentityProvider.deviceId(),
+      );
       await _preferences!.setString(
         _assignmentsKey,
         jsonEncode(assignments.map((item) => item.toJson()).toList()),
@@ -164,11 +175,11 @@ class AuthController extends ChangeNotifier {
       final session = await _apiClient.activateAssignment(
         token: token,
         assignment: assignment,
-        deviceId: AppConfig.deviceId,
+        deviceId: await _deviceIdentityProvider.deviceId(),
       );
-      await _persistActiveSession(session);
       await scannerController.activateSession(session);
       if (scannerController.session != null) {
+        await _persistActiveSessionSnapshot(scannerController);
         await scannerController.hydrateRoster();
       }
       await refreshAssignments(silent: true);
@@ -220,26 +231,39 @@ class AuthController extends ChangeNotifier {
     if (raw == null) return;
 
     try {
-      final json = jsonDecode(raw) as Map<String, dynamic>;
-      final token = json['token']?.toString();
-      final eventId = json['event_id']?.toString();
-      if (token == null || eventId == null) return;
-
-      final session = ScannerSession(
-        token: token,
-        eventId: eventId,
-        assignmentId: json['assignment_id']?.toString(),
-        eventParticipationScopeId: json['event_participation_scope_id']
-            ?.toString(),
-        participationScopeName: json['participation_scope_name']?.toString(),
+      final snapshot = ScannerSessionSnapshot.fromJson(
+        jsonDecode(raw) as Map<String, dynamic>,
       );
-      await scannerController.activateSession(session);
-      if (scannerController.session == null) {
-        await _secureStorage.delete(key: _activeSessionKey);
+      await scannerController.activateSession(snapshot.session);
+      if (scannerController.session != null) {
+        await _persistActiveSessionSnapshot(scannerController);
+        return;
       }
+
+      if (scannerController.lastSessionActivationFailureIsRecoverable) {
+        await scannerController.restoreCachedSession(snapshot);
+        return;
+      }
+
+      await _secureStorage.delete(key: _activeSessionKey);
     } catch (_) {
       await _secureStorage.delete(key: _activeSessionKey);
     }
+  }
+
+  Future<void> _persistActiveSessionSnapshot(
+    ScannerController scannerController,
+  ) async {
+    final snapshot = scannerController.currentSessionSnapshot();
+    if (snapshot == null) {
+      await _secureStorage.delete(key: _activeSessionKey);
+      return;
+    }
+
+    await _secureStorage.write(
+      key: _activeSessionKey,
+      value: jsonEncode(snapshot.toJson()),
+    );
   }
 
   Future<void> _loadCachedAssignments() async {
@@ -250,19 +274,6 @@ class AuthController extends ChangeNotifier {
     assignments = decoded
         .map((item) => ScannerAssignment.fromJson(item as Map<String, dynamic>))
         .toList();
-  }
-
-  Future<void> _persistActiveSession(ScannerSession session) async {
-    await _secureStorage.write(
-      key: _activeSessionKey,
-      value: jsonEncode({
-        'token': session.token,
-        'event_id': session.eventId,
-        'assignment_id': session.assignmentId,
-        'event_participation_scope_id': session.eventParticipationScopeId,
-        'participation_scope_name': session.participationScopeName,
-      }),
-    );
   }
 
   String _friendlyAuthError(Object error) {

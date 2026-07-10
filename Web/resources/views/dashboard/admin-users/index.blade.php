@@ -66,9 +66,9 @@
                 <span class="admin-access-metric-note">{{ $stats['total_organizations'] }} official records</span>
             </div>
             <div class="admin-access-metric">
-                <span class="admin-access-metric-label">Admin Roles</span>
-                <strong class="admin-access-metric-value">{{ count($adminRoles) }}</strong>
-                <span class="admin-access-metric-note">OSA, USG, LSG, Society</span>
+                <span class="admin-access-metric-label">Assignable Roles</span>
+                <strong class="admin-access-metric-value">{{ count($assignableRoles) }}</strong>
+                <span class="admin-access-metric-note">USG, LSG, Society, Academic, Office</span>
             </div>
         </div>
 
@@ -76,7 +76,7 @@
         @include('dashboard.admin-users.partials.assign-admin-form', [
             'assignmentOrganizations' => $assignmentOrganizations,
             'assignmentColleges' => $assignmentColleges,
-            'adminRoles' => $adminRoles,
+            'adminRoles' => $assignableRoles,
         ])
 
         <div x-data="{
@@ -542,7 +542,6 @@
                     'Society Admin': ['society', 'non_academic_org'],
                     'Academic Unit Admin': 'academic_unit',
                     'Office Event Admin': 'administrative_office',
-                    'HR Admin': 'hr_unit',
                 },
                 async searchUsers() {
                     if (this.searchQuery.length < 2) {
@@ -587,9 +586,6 @@
                     return source.charAt(0).toUpperCase();
                 },
                 scopeSummary() {
-                    if (this.role === 'Super Admin (OSA)') {
-                        return 'University-wide OSA scope';
-                    }
                     if (this.role === 'USG Admin') {
                         return 'USG organization scope';
                     }
@@ -604,9 +600,6 @@
                     }
                     if (this.role === 'Office Event Admin') {
                         return 'Administrative office event scope';
-                    }
-                    if (this.role === 'HR Admin') {
-                        return 'HR unit event and roster scope';
                     }
                     return 'Assignment scope';
                 },

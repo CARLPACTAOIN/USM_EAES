@@ -26,7 +26,7 @@ class DeploymentHardeningTest extends TestCase
     {
         config(['services.eaes.security_headers' => true]);
 
-        $this->get('/login')
+        $this->get('/')
             ->assertHeader('X-Content-Type-Options', 'nosniff')
             ->assertHeader('Referrer-Policy', 'strict-origin-when-cross-origin')
             ->assertHeader('X-Frame-Options', 'DENY')
@@ -41,15 +41,15 @@ class DeploymentHardeningTest extends TestCase
             'services.eaes.force_https' => false,
         ]);
 
-        $this->get('/login')->assertHeaderMissing('Strict-Transport-Security');
+        $this->get('/')->assertHeaderMissing('Strict-Transport-Security');
 
         $this->withHeader('X-Forwarded-Proto', 'https')
-            ->get('/login')
+            ->get('/')
             ->assertHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
 
         config(['services.eaes.force_https' => true]);
 
-        $this->get('/login')
+        $this->get('/')
             ->assertHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
     }
 
@@ -139,9 +139,9 @@ class DeploymentHardeningTest extends TestCase
             'end_date' => today(),
         ]);
 
-        $this->get(route('dashboard.ai'))->assertRedirect('/login');
-        $this->get(route('dashboard.pending-links'))->assertRedirect('/login');
-        $this->get(route('dashboard.events.exports.attendance.excel', $event))->assertRedirect('/login');
+        $this->get(route('dashboard.ai'))->assertRedirect('/');
+        $this->get(route('dashboard.pending-links'))->assertRedirect('/');
+        $this->get(route('dashboard.events.exports.attendance.excel', $event))->assertRedirect('/');
 
         $this->actingAs($student)->get(route('dashboard.ai'))->assertForbidden();
         $this->actingAs($student)->post(route('dashboard.ai.query'), ['query' => 'show events'])->assertForbidden();

@@ -160,6 +160,23 @@ class ScannerLocalDatabase implements ScannerLocalStore {
   }
 
   @override
+  Future<void> replaceRoster(List<RosterStudent> students) async {
+    final db = await database;
+    await db.transaction((txn) async {
+      await txn.delete('roster_students');
+      final batch = txn.batch();
+      for (final student in students) {
+        batch.insert(
+          'roster_students',
+          student.toDb(),
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+      }
+      await batch.commit(noResult: true);
+    });
+  }
+
+  @override
   Future<RosterStudent?> findStudentByQr(String qrCodeValue) async {
     final db = await database;
     final rows = await db.query(

@@ -12,6 +12,7 @@ use App\Models\RawScan;
 use App\Models\ScannerSession;
 use App\Models\User;
 use App\Support\EvaluationQuestions;
+use App\Support\YearLevels;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -57,6 +58,7 @@ class EventAnalyticsService
             'participant_scopes' => $this->scopeRollups($event, $analyticsScopes, $attendanceRecords, $evaluations),
             'scanner_sync' => $scannerSync,
             'demographics' => $this->demographics($attendanceRecords),
+            'year_levels' => $this->yearLevelDemographics($attendanceRecords),
         ];
     }
 
@@ -113,6 +115,8 @@ class EventAnalyticsService
                 'name' => $user->name,
                 'email' => $user->email,
                 'program_code' => $user->program_code ?: $user->program?->code,
+                'year_level' => $user->year_level,
+                'year_level_label' => YearLevels::label($user->year_level),
                 'organization' => $user->organization?->acronym ?: $user->organization?->name,
                 'expected' => $audience['ids']->contains($user->id),
                 'scope_ids' => $scopeIds,
@@ -549,6 +553,26 @@ class EventAnalyticsService
             ]);
     }
 
+    private function yearLevelDemographics(Collection $records): Collection
+    {
+        $attendedIds = $records->whereNotNull('time_in')->pluck('student_id')->filter()->unique()->values();
+
+        if ($attendedIds->isEmpty()) {
+            return collect();
+        }
+
+        return User::whereIn('id', $attendedIds)
+            ->select('year_level', DB::raw('count(*) as count'))
+            ->groupBy('year_level')
+            ->orderBy('year_level')
+            ->get()
+            ->map(fn ($row) => [
+                'year_level' => $row->year_level,
+                'label' => YearLevels::label($row->year_level),
+                'count' => (int) $row->count,
+            ]);
+    }
+
     private function participantDayStatuses(Event $event, Collection $records): Collection
     {
         return $event->eventDays->map(function ($day) use ($records) {
@@ -602,10 +626,11 @@ class EventAnalyticsService
         $dayId = $filters['day_id'] ?? null;
         $status = $filters['status'] ?? null;
         $validation = $filters['validation'] ?? null;
+        $yearLevel = $filters['year_level'] ?? null;
         $search = trim((string) ($filters['q'] ?? ''));
 
         return $rows
-            ->filter(function (array $row) use ($scopeId, $dayId, $status, $validation, $search) {
+            ->filter(function (array $row) use ($scopeId, $dayId, $status, $validation, $yearLevel, $search) {
                 if ($scopeId && !$row['scope_ids']->contains($scopeId)) {
                     return false;
                 }
@@ -637,12 +662,17 @@ class EventAnalyticsService
                     return false;
                 }
 
+                if ($yearLevel && $row['year_level'] !== $yearLevel) {
+                    return false;
+                }
+
                 if ($search !== '') {
                     $haystack = strtolower(implode(' ', array_filter([
                         $row['name'],
                         $row['email'],
                         $row['student_id_number'],
                         $row['program_code'],
+                        $row['year_level_label'],
                         $row['organization'],
                     ])));
 

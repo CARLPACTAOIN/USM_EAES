@@ -3,8 +3,10 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../../../config/app_colors.dart';
 import '../../../../config/app_config.dart';
 import '../../domain/scan_type.dart';
+import '../formatters/student_id_input_formatter.dart';
 import '../scanner_controller.dart';
 import '../widgets/scan_result_card.dart';
 import '../widgets/scanner_viewfinder.dart';
@@ -25,6 +27,8 @@ class _LiveScannerScreenState extends State<LiveScannerScreen> {
   String? _manualError;
   final TextEditingController _manualController = TextEditingController();
   Timer? _duplicateOverlayTimer;
+
+  // --- Brand tokens ---------------------------------------------------------
 
   /// Post-scan throttle: after a successful capture, ignore detections for a
   /// short window so we don't rapidly read the next QR (or re-read this one).
@@ -157,9 +161,6 @@ class _LiveScannerScreenState extends State<LiveScannerScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-
     return AnimatedBuilder(
       animation: _ctrl,
       builder: (context, _) {
@@ -167,80 +168,92 @@ class _LiveScannerScreenState extends State<LiveScannerScreen> {
         final isTimeIn = scanType == ScanType.timeIn;
         final pendingCount = _ctrl.pendingCount;
 
-        return Scaffold(
-          backgroundColor: isDark
-              ? const Color(0xFF0A0F1E)
-              : const Color(0xFFF0F4F8),
-          appBar: _ScannerAppBar(
-            ctrl: _ctrl,
-            scanType: scanType,
-            isTimeIn: isTimeIn,
-            pendingCount: pendingCount + _ctrl.failedCount,
+        return Container(
+          decoration: BoxDecoration(
+            gradient: RadialGradient(
+              center: Alignment(0.0, -0.6),
+              radius: 1.4,
+              colors: [
+                AppColors.of(context).gradientStart,
+                AppColors.of(context).gradientMid,
+                AppColors.of(context).gradientEnd,
+              ],
+              stops: [0.0, 0.45, 1.0],
+            ),
           ),
-          body: SafeArea(
-            child: Column(
-              children: [
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-                    child: ScannerViewfinder(
-                      active: _ctrl.hasSession,
-                      processingState: _processingState,
-                      onDetect: _handleScan,
+          child: Scaffold(
+            backgroundColor: Colors.transparent,
+            appBar: _ScannerAppBar(
+              ctrl: _ctrl,
+              scanType: scanType,
+              isTimeIn: isTimeIn,
+              pendingCount: pendingCount + _ctrl.failedCount,
+            ),
+            body: SafeArea(
+              child: Column(
+                children: [
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                      child: ScannerViewfinder(
+                        active: _ctrl.hasSession,
+                        processingState: _processingState,
+                        onDetect: _handleScan,
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(height: 12),
-                AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 250),
-                  child: _ctrl.lastScanResult != null
-                      ? Padding(
-                          key: ValueKey(_ctrl.lastScanResult?.title),
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                          child: ScanResultCard(
-                            result: _ctrl.lastScanResult!,
-                            compact: true,
-                          ),
-                        )
-                      : const SizedBox.shrink(key: ValueKey('no-result')),
-                ),
-                const SizedBox(height: 12),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: SyncSummaryStrip(controller: _ctrl),
-                ),
-                const SizedBox(height: 12),
-                AnimatedSize(
-                  duration: const Duration(milliseconds: 250),
-                  curve: Curves.easeOutCubic,
-                  child: _showManualEntry
-                      ? _ManualEntryPanel(
-                          controller: _manualController,
-                          errorText: _manualError,
-                          onSubmit: _handleManualScan,
-                          onDismiss: () => setState(() {
-                            _showManualEntry = false;
-                            _manualError = null;
-                          }),
-                        )
-                      : const SizedBox.shrink(),
-                ),
-                _BottomActionRow(
-                  ctrl: _ctrl,
-                  isTimeIn: isTimeIn,
-                  pendingCount: pendingCount,
-                  onManualEntry: () => setState(() {
-                    _showManualEntry = !_showManualEntry;
-                    _manualError = null;
-                  }),
-                  onSwitchMode: () {
-                    _ctrl.setScanType(
-                      isTimeIn ? ScanType.timeOut : ScanType.timeIn,
-                    );
-                  },
-                  onSync: _ctrl.syncPending,
-                ),
-              ],
+                  const SizedBox(height: 12),
+                  AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 250),
+                    child: _ctrl.lastScanResult != null
+                        ? Padding(
+                            key: ValueKey(_ctrl.lastScanResult?.title),
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            child: ScanResultCard(
+                              result: _ctrl.lastScanResult!,
+                              compact: true,
+                            ),
+                          )
+                        : const SizedBox.shrink(key: ValueKey('no-result')),
+                  ),
+                  const SizedBox(height: 12),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: SyncSummaryStrip(controller: _ctrl),
+                  ),
+                  const SizedBox(height: 12),
+                  AnimatedSize(
+                    duration: const Duration(milliseconds: 250),
+                    curve: Curves.easeOutCubic,
+                    child: _showManualEntry
+                        ? _ManualEntryPanel(
+                            controller: _manualController,
+                            errorText: _manualError,
+                            onSubmit: _handleManualScan,
+                            onDismiss: () => setState(() {
+                              _showManualEntry = false;
+                              _manualError = null;
+                            }),
+                          )
+                        : const SizedBox.shrink(),
+                  ),
+                  _BottomActionRow(
+                    ctrl: _ctrl,
+                    isTimeIn: isTimeIn,
+                    pendingCount: pendingCount,
+                    onManualEntry: () => setState(() {
+                      _showManualEntry = !_showManualEntry;
+                      _manualError = null;
+                    }),
+                    onSwitchMode: () {
+                      _ctrl.setScanType(
+                        isTimeIn ? ScanType.timeOut : ScanType.timeIn,
+                      );
+                    },
+                    onSync: _ctrl.syncPending,
+                  ),
+                ],
+              ),
             ),
           ),
         );
@@ -268,8 +281,12 @@ class _ScannerAppBar extends StatelessWidget implements PreferredSizeWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final c = AppColors.of(context);
 
     return AppBar(
+      backgroundColor: Colors.transparent,
+      elevation: 0,
+      foregroundColor: c.isDark ? Colors.white : AppColors.brandGreenDark,
       leading: IconButton(
         icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 28),
         tooltip: 'Back to session',
@@ -281,7 +298,7 @@ class _ScannerAppBar extends StatelessWidget implements PreferredSizeWidget {
           Text(
             ctrl.eventTitle ?? 'Scanning',
             style: theme.textTheme.titleMedium?.copyWith(
-              color: Colors.white,
+              color: c.isDark ? Colors.white : AppColors.brandGreenDark,
               fontWeight: FontWeight.w700,
             ),
             maxLines: 1,
@@ -291,19 +308,24 @@ class _ScannerAppBar extends StatelessWidget implements PreferredSizeWidget {
           Text(
             'USM EAES Scanner',
             style: theme.textTheme.labelSmall?.copyWith(
-              color: Colors.white.withValues(alpha: 0.65),
+              color: c.isDark
+                  ? AppColors.usmGold.withValues(alpha: 0.60)
+                  : c.onSurfaceMuted,
             ),
           ),
         ],
       ),
       actions: [
+        // Scan type badge — gold tinted
         Container(
           margin: const EdgeInsets.only(right: 4),
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
           decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.15),
+            color: AppColors.usmGold.withValues(alpha: 0.12),
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.25)),
+            border: Border.all(
+              color: AppColors.usmGold.withValues(alpha: 0.25),
+            ),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
@@ -311,7 +333,7 @@ class _ScannerAppBar extends StatelessWidget implements PreferredSizeWidget {
               Icon(
                 isTimeIn ? Icons.login_rounded : Icons.logout_rounded,
                 size: 14,
-                color: Colors.white,
+                color: AppColors.usmGold,
               ),
               const SizedBox(width: 5),
               Text(
@@ -320,7 +342,7 @@ class _ScannerAppBar extends StatelessWidget implements PreferredSizeWidget {
                   fontFamily: 'Inter',
                   fontSize: 12,
                   fontWeight: FontWeight.w700,
-                  color: Colors.white,
+                  color: AppColors.usmGold,
                 ),
               ),
             ],
@@ -345,8 +367,9 @@ class _PendingBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: Colors.orange.shade600,
+        color: AppColors.usmGold.withValues(alpha: 0.20),
         borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.usmGold.withValues(alpha: 0.40)),
       ),
       child: Text(
         '$count',
@@ -354,7 +377,7 @@ class _PendingBadge extends StatelessWidget {
           fontFamily: 'Inter',
           fontSize: 12,
           fontWeight: FontWeight.w700,
-          color: Colors.white,
+          color: AppColors.usmGold,
         ),
       ),
     );
@@ -380,18 +403,30 @@ class _BottomActionRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-
+    final c = AppColors.of(context);
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        color: c.isDark ? c.panelElevated : null,
+        gradient: c.isDark
+            ? null
+            : LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Colors.white,
+                  c.brandWash.withValues(alpha: 0.70),
+                  c.goldWash.withValues(alpha: 0.42),
+                ],
+              ),
         borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: c.panelBorder),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.08),
+            color: c.isDark
+                ? Colors.black.withValues(alpha: 0.30)
+                : c.softShadow,
             blurRadius: 12,
             offset: const Offset(0, -2),
           ),
@@ -449,21 +484,15 @@ class _ActionButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    const brandGreen = Color(0xFF1B4D3E);
-
     final bgColor = primary
-        ? brandGreen
-        : isDark
-        ? const Color(0xFF334155)
-        : const Color(0xFFF1F5F9);
+        ? AppColors.brandGreen
+        : AppColors.of(context).panelElevated;
 
     final fgColor = primary
         ? Colors.white
-        : isDark
-        ? const Color(0xFFCBD5E1)
-        : const Color(0xFF334155);
+        : (AppColors.of(context).isDark
+              ? AppColors.usmGold.withValues(alpha: 0.75)
+              : AppColors.brandGreen);
 
     return Material(
       color: bgColor,
@@ -522,26 +551,37 @@ class _ManualEntryPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
+    final c = AppColors.of(context);
 
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        color: c.isDark ? c.panelElevated : null,
+        gradient: c.isDark
+            ? null
+            : LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [c.blueWash.withValues(alpha: 0.75), Colors.white],
+              ),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: theme.colorScheme.outlineVariant),
+        border: Border.all(color: c.panelBorder),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
             children: [
-              const Icon(Icons.keyboard_rounded, size: 18),
+              Icon(
+                Icons.keyboard_rounded,
+                size: 18,
+                color: AppColors.usmGold.withValues(alpha: 0.70),
+              ),
               const SizedBox(width: 8),
               Text(
                 'Manual Student ID Entry',
-                style: theme.textTheme.titleSmall,
+                style: theme.textTheme.titleSmall?.copyWith(color: c.onSurface),
               ),
               const Spacer(),
               IconButton(
@@ -550,6 +590,7 @@ class _ManualEntryPanel extends StatelessWidget {
                 tooltip: 'Close',
                 padding: EdgeInsets.zero,
                 constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                color: c.onSurfaceMuted,
               ),
             ],
           ),
@@ -557,6 +598,9 @@ class _ManualEntryPanel extends StatelessWidget {
           TextField(
             controller: controller,
             autofocus: true,
+            style: TextStyle(color: c.onSurface),
+            keyboardType: TextInputType.number,
+            inputFormatters: const [StudentIdInputFormatter()],
             decoration: InputDecoration(
               labelText: 'Student ID number',
               hintText: '23-72634',

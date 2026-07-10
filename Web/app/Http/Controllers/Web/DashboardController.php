@@ -17,6 +17,7 @@ use App\Models\ScannerSession;
 use App\Models\User;
 use App\Services\AdminAssignmentService;
 use App\Services\AdminScopeService;
+use App\Services\EventNotificationService;
 use App\Services\ParticipationScopeService;
 use App\Services\ScannerAssignmentService;
 use App\Services\ScannerSessionService;
@@ -34,7 +35,8 @@ class DashboardController extends Controller
         private readonly ScannerSessionService $scannerSessions,
         private readonly ScannerAssignmentService $scannerAssignments,
         private readonly AdminScopeService $adminScopes,
-        private readonly ParticipationScopeService $participationScopes
+        private readonly ParticipationScopeService $participationScopes,
+        private readonly EventNotificationService $eventNotifications
     ) {
     }
 
@@ -57,6 +59,7 @@ class DashboardController extends Controller
             'approved_events' => (clone $eventsQuery)->where('status', 'approved')->count(),
             'pending_qr_links' => $pendingLinksQuery->count(),
         ];
+        $needsActionItems = $this->eventNotifications->needsActionItemsForUser($user, 5);
 
         $recentEvents = (clone $eventsQuery)
             ->with('organization')
@@ -64,7 +67,7 @@ class DashboardController extends Controller
             ->take(5)
             ->get();
 
-        return view('dashboard.index', compact('stats', 'recentEvents'));
+        return view('dashboard.index', compact('stats', 'recentEvents', 'needsActionItems'));
     }
 
     /**
@@ -126,7 +129,10 @@ class DashboardController extends Controller
             ->tap(fn ($query) => $this->applyParticipatingEventScope($query, $user))
             ->count();
         $colleges = College::orderBy('name')->get();
-        $organizations = Organization::whereIn('type', ['society', 'usg', 'lsg', 'academic_unit', 'administrative_office', 'non_academic_org', 'hr_unit'])->orderBy('name')->get();
+        $organizations = Organization::with('college')
+            ->whereIn('type', ['society', 'usg', 'lsg', 'academic_unit', 'administrative_office', 'non_academic_org', 'hr_unit'])
+            ->orderBy('name')
+            ->get();
         $eligibleScannerUsers = $this->scannerAssignments->eligibleUsers(
             search: $request->input('scanner_search'),
             admin: $user
@@ -358,6 +364,8 @@ class DashboardController extends Controller
             'submitted_by' => $request->user()->id,
             'submitted_at' => now(),
         ]);
+        $this->eventNotifications->notifyPendingInvitationsForEvent($event->fresh(['organization', 'participationScopes.organization', 'participationScopes.delegatedOrganization']));
+
         return redirect()->back()->with('success', 'Proposal submitted for review.');
     }
 
@@ -486,18 +494,26 @@ class DashboardController extends Controller
         }
 
         $event->update(['parent_event_id' => $parentEvent->id]);
-        $this->syncParticipantScopeFromLinkedEvent($parentEvent, $event);
+        $participantScope = $this->syncParticipantScopeFromLinkedEvent($parentEvent, $event);
+        $this->eventNotifications->notifyParticipantScopeInvitation($participantScope->fresh(['event.organization', 'organization', 'delegatedOrganization']));
 
         return redirect()->back()->with('success', 'Event linked under the parent permit.');
     }
 
     public function storeParticipantScope(Request $request, Event $event)
     {
+        abort_unless($request->user()->can('create-proposals') && !$request->user()->hasRole('Super Admin (OSA)'), 403);
+
         $this->authorizeEventAccess($event, $request->user());
 
         $validated = $request->validate([
-            'organization_id' => 'required_without:college_id|nullable|uuid|exists:organizations,id',
+            'audience_mode' => 'nullable|string|in:all,college,organization',
+            'organization_id' => 'nullable|uuid|exists:organizations,id',
+            'organization_ids' => 'nullable|array',
+            'organization_ids.*' => 'uuid|exists:organizations,id',
             'college_id' => 'nullable|uuid|exists:colleges,id',
+            'college_ids' => 'nullable|array',
+            'college_ids.*' => 'uuid|exists:colleges,id',
             'program_id' => 'nullable|uuid|exists:programs,id',
             'participant_name_snapshot' => 'nullable|string|max:255',
             'participant_type' => 'nullable|string|in:college,organization,society,program,non_academic_org,academic_unit,administrative_office,custom_roster,hr_unit',
@@ -506,41 +522,191 @@ class DashboardController extends Controller
             'analytics_rollup_enabled' => 'nullable|boolean',
         ]);
 
-        $organization = filled($validated['organization_id'] ?? null)
-            ? Organization::findOrFail($validated['organization_id'])
-            : null;
+        $organizationIds = collect($validated['organization_ids'] ?? [])
+            ->when(filled($validated['organization_id'] ?? null), fn ($ids) => $ids->push($validated['organization_id']))
+            ->filter()
+            ->unique()
+            ->values();
+        $collegeIds = collect($validated['college_ids'] ?? [])
+            ->when(filled($validated['college_id'] ?? null), fn ($ids) => $ids->push($validated['college_id']))
+            ->filter()
+            ->unique()
+            ->values();
 
-        if ($organization && $organization->id === $event->organization_id) {
+        $audienceMode = $validated['audience_mode'] ?? match (true) {
+            $collegeIds->isNotEmpty() && $organizationIds->isEmpty() => 'college',
+            default => 'organization',
+        };
+
+        if ($audienceMode === 'all') {
+            $collegeIds = College::orderBy('name')->pluck('id')->values();
+        }
+
+        if ($audienceMode === 'organization' && $organizationIds->isEmpty()) {
+            return redirect()->back()
+                ->withErrors(['organization_ids' => 'Select at least one organization audience.'])
+                ->withInput();
+        }
+
+        if (in_array($audienceMode, ['all', 'college'], true) && $collegeIds->isEmpty()) {
+            return redirect()->back()
+                ->withErrors(['college_ids' => 'Select at least one College audience.'])
+                ->withInput();
+        }
+
+        $ppaRequired = $request->boolean('ppa_required', true);
+        $analyticsRollupEnabled = $request->boolean('analytics_rollup_enabled', true);
+        $captureMode = $validated['capture_mode'];
+        $parentScope = $this->participationScopes->ensureOrganizerScope($event);
+        $createdScopes = collect();
+        $skippedOrganizer = 0;
+        $skippedExisting = 0;
+
+        DB::transaction(function () use (
+            $audienceMode,
+            $organizationIds,
+            $collegeIds,
+            $event,
+            $parentScope,
+            $validated,
+            $ppaRequired,
+            $analyticsRollupEnabled,
+            $captureMode,
+            &$createdScopes,
+            &$skippedOrganizer,
+            &$skippedExisting
+        ): void {
+            if ($audienceMode === 'organization') {
+                Organization::query()
+                    ->whereIn('id', $organizationIds)
+                    ->orderBy('name')
+                    ->get()
+                    ->each(function (Organization $organization) use (
+                        $event,
+                        $parentScope,
+                        $validated,
+                        $organizationIds,
+                        $ppaRequired,
+                        $analyticsRollupEnabled,
+                        $captureMode,
+                        &$createdScopes,
+                        &$skippedOrganizer,
+                        &$skippedExisting
+                    ): void {
+                        if ($organization->id === $event->organization_id) {
+                            $skippedOrganizer++;
+                            return;
+                        }
+
+                        $exists = $event->participationScopes()
+                            ->where('organization_id', $organization->id)
+                            ->where('status', EventParticipationScope::STATUS_ACTIVE)
+                            ->exists();
+
+                        if ($exists) {
+                            $skippedExisting++;
+                            return;
+                        }
+
+                        $createdScopes->push($event->participationScopes()->create([
+                            'parent_scope_id' => $parentScope->id,
+                            'participation_role' => EventParticipationScope::ROLE_PARTICIPANT,
+                            'participant_type' => $this->participationScopes->participantTypeForOrganization($organization),
+                            'organization_id' => $organization->id,
+                            'college_id' => $organization->college_id,
+                            'program_id' => $validated['program_id'] ?? null,
+                            'participant_name_snapshot' => $organizationIds->count() === 1
+                                ? ($validated['participant_name_snapshot'] ?? $this->participationScopes->participantName($organization, 'Participant scope'))
+                                : $this->participationScopes->participantName($organization, 'Participant scope'),
+                            'ppa_required' => $ppaRequired,
+                            'ppa_status' => $ppaRequired ? EventParticipationScope::PPA_DRAFT : EventParticipationScope::PPA_NOT_REQUIRED,
+                            'capture_mode' => $captureMode,
+                            'analytics_rollup_enabled' => $analyticsRollupEnabled,
+                            'status' => EventParticipationScope::STATUS_ACTIVE,
+                        ]));
+                    });
+
+                return;
+            }
+
+            College::query()
+                ->whereIn('id', $collegeIds)
+                ->orderBy('name')
+                ->get()
+                ->each(function (College $college) use (
+                    $event,
+                    $parentScope,
+                    $ppaRequired,
+                    $analyticsRollupEnabled,
+                    $captureMode,
+                    &$createdScopes,
+                    &$skippedExisting
+                ): void {
+                    $exists = $event->participationScopes()
+                        ->where('participant_type', 'college')
+                        ->whereNull('organization_id')
+                        ->where('college_id', $college->id)
+                        ->where('status', EventParticipationScope::STATUS_ACTIVE)
+                        ->exists();
+
+                    if ($exists) {
+                        $skippedExisting++;
+                        return;
+                    }
+
+                    $createdScopes->push($event->participationScopes()->create([
+                        'parent_scope_id' => $parentScope->id,
+                        'participation_role' => EventParticipationScope::ROLE_PARTICIPANT,
+                        'participant_type' => 'college',
+                        'organization_id' => null,
+                        'college_id' => $college->id,
+                        'program_id' => null,
+                        'participant_name_snapshot' => trim(($college->code ? "{$college->code} - " : '') . $college->name),
+                        'ppa_required' => $ppaRequired,
+                        'ppa_status' => $ppaRequired ? EventParticipationScope::PPA_DRAFT : EventParticipationScope::PPA_NOT_REQUIRED,
+                        'capture_mode' => $captureMode,
+                        'analytics_rollup_enabled' => $analyticsRollupEnabled,
+                        'status' => EventParticipationScope::STATUS_ACTIVE,
+                    ]));
+                });
+        });
+
+        $createdScopes->each(fn (EventParticipationScope $participantScope) => $this->eventNotifications
+            ->notifyParticipantScopeInvitation($participantScope->fresh(['event.organization', 'organization', 'college', 'delegatedOrganization'])));
+
+        if ($createdScopes->isNotEmpty()) {
+            $message = $createdScopes->count() === 1
+                ? 'Participant scope added.'
+                : "{$createdScopes->count()} participant scopes added.";
+
+            if ($skippedOrganizer > 0) {
+                $message .= ' Organizer audience was skipped because it is already included.';
+            }
+
+            if ($skippedExisting > 0) {
+                $message .= " {$skippedExisting} duplicate audience selection(s) were skipped.";
+            }
+
+            return redirect()->back()->with('success', $message);
+        }
+
+        if ($skippedOrganizer > 0 && $skippedExisting === 0) {
             return redirect()->back()->with('error', 'The organizer is already included through the organizer attendance scope and does not need a participant PPA.');
         }
 
-        if ($organization && $event->participationScopes()
-            ->where('organization_id', $organization->id)
-            ->where('status', EventParticipationScope::STATUS_ACTIVE)
-            ->exists()) {
-            return redirect()->back()->with('error', 'This organization already has an active participant scope for the event.');
+        return redirect()->back()->with('error', 'Every selected audience already has an active participant scope for the event.');
+    }
+
+    public function acknowledgeParticipantScope(Request $request, Event $event, EventParticipationScope $participationScope)
+    {
+        abort_unless($participationScope->event_id === $event->id, 404);
+
+        if (!$this->eventNotifications->acknowledgeInvitation($participationScope, $request->user())) {
+            abort(403, 'Only the invited participant organization can acknowledge this invitation.');
         }
 
-        $participantType = $validated['participant_type'] ?? $this->participationScopes->participantTypeForOrganization($organization);
-        $ppaRequired = $request->boolean('ppa_required', true);
-
-        $event->participationScopes()->create([
-            'parent_scope_id' => $this->participationScopes->ensureOrganizerScope($event)->id,
-            'participation_role' => EventParticipationScope::ROLE_PARTICIPANT,
-            'participant_type' => $participantType,
-            'organization_id' => $organization?->id,
-            'college_id' => $validated['college_id'] ?? $organization?->college_id,
-            'program_id' => $validated['program_id'] ?? null,
-            'participant_name_snapshot' => $validated['participant_name_snapshot']
-                ?? $this->participationScopes->participantName($organization, 'Participant scope'),
-            'ppa_required' => $ppaRequired,
-            'ppa_status' => $ppaRequired ? EventParticipationScope::PPA_DRAFT : EventParticipationScope::PPA_NOT_REQUIRED,
-            'capture_mode' => $validated['capture_mode'],
-            'analytics_rollup_enabled' => $request->boolean('analytics_rollup_enabled', true),
-            'status' => EventParticipationScope::STATUS_ACTIVE,
-        ]);
-
-        return redirect()->back()->with('success', 'Participant scope added.');
+        return redirect()->route('dashboard.events', ['workspace' => 'participating'])
+            ->with('success', 'Participant invitation acknowledged.');
     }
 
     public function submitParticipantScope(Request $request, Event $event, EventParticipationScope $participationScope)
@@ -578,6 +744,7 @@ class DashboardController extends Controller
         }
 
         $participationScope->update($updates);
+        $this->eventNotifications->notifyParticipantScopeSubmitted($participationScope->fresh(['event.organization', 'organization', 'delegatedOrganization']));
 
         return redirect()->back()->with('success', 'Participant PPA submitted for OSA review.');
     }
@@ -596,6 +763,7 @@ class DashboardController extends Controller
             'reviewed_by' => $request->user()->id,
             'reviewed_at' => now(),
         ]);
+        $this->eventNotifications->notifyParticipantScopeReviewed($participationScope->fresh(['event.organization', 'organization', 'delegatedOrganization']), EventParticipationScope::PPA_UNDER_REVIEW);
 
         return redirect()->back()->with('success', 'Participant PPA is now under review.');
     }
@@ -620,6 +788,7 @@ class DashboardController extends Controller
             'approved_at' => now(),
             'review_remarks' => null,
         ]);
+        $this->eventNotifications->notifyParticipantScopeReviewed($participationScope->fresh(['event.organization', 'organization', 'delegatedOrganization']), EventParticipationScope::PPA_APPROVED);
 
         return redirect()->back()->with('success', 'Participant PPA approved. Scoped scanner access is now available.');
     }
@@ -643,6 +812,7 @@ class DashboardController extends Controller
             'reviewed_at' => now(),
             'review_remarks' => $validated['review_remarks'] ?? null,
         ]);
+        $this->eventNotifications->notifyParticipantScopeReviewed($participationScope->fresh(['event.organization', 'organization', 'delegatedOrganization']), EventParticipationScope::PPA_REJECTED);
 
         return redirect()->back()->with('success', 'Participant PPA rejected.');
     }
@@ -1151,14 +1321,14 @@ class DashboardController extends Controller
 
     private function authorizeScannerAssignmentAccess(Event $event, User $user): void
     {
-        abort_unless($user->hasRole('Super Admin (OSA)') || $user->can('assign-scanners-own'), 403);
+        abort_unless($user->can('assign-scanners-own'), 403);
 
         $this->authorizeEventAccess($event, $user);
     }
 
     private function authorizeScannerScopeAccess(User $user, EventParticipationScope $participationScope): void
     {
-        abort_unless($user->hasRole('Super Admin (OSA)') || $user->can('assign-scanners-own'), 403);
+        abort_unless($user->can('assign-scanners-own'), 403);
 
         if ($this->participationScopes->canManageScope($user, $participationScope)) {
             return;

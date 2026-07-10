@@ -47,6 +47,30 @@
         </div>
     </div>
 
+    @if(($needsActionItems ?? collect())->isNotEmpty())
+    <div class="card mb-6">
+        <div class="card-header flex items-center justify-between gap-3">
+            <div>
+                <h2 class="font-semibold text-(--color-text-primary)">Needs Action</h2>
+                <p class="text-xs text-(--color-text-tertiary) mt-1">Invitation acknowledgements, participant PPAs, and review handoffs</p>
+            </div>
+            <a href="{{ route('dashboard.notifications') }}" class="btn btn-sm btn-secondary">Open notifications</a>
+        </div>
+        <div class="card-body p-0 divide-y divide-(--color-border)">
+            @foreach($needsActionItems as $item)
+                <a href="{{ $item['url'] }}" class="notification-dashboard-row">
+                    <span class="notification-dot notification-dot-warning" aria-hidden="true"></span>
+                    <span class="min-w-0 flex-1">
+                        <span class="notification-dashboard-title">{{ $item['label'] }}</span>
+                        <span class="notification-dashboard-meta">{{ Str::limit($item['event_title'], 64) }} · {{ $item['participant_name'] }}</span>
+                    </span>
+                    <span class="badge badge-{{ str_replace('_', '-', $item['status']) }}">{{ ucwords(str_replace('_', ' ', $item['status'])) }}</span>
+                </a>
+            @endforeach
+        </div>
+    </div>
+    @endif
+
     {{-- Quick Actions + Recent Events --}}
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {{-- Quick Actions --}}

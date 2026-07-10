@@ -1,10 +1,5 @@
 @php
     $roleMeta = [
-        'Super Admin (OSA)' => [
-            'short' => 'OSA',
-            'desc' => 'University-wide staff access without student profile scope.',
-            'icon' => 'M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z',
-        ],
         'USG Admin' => [
             'short' => 'USG',
             'desc' => 'University Student Government organization scope.',
@@ -29,11 +24,6 @@
             'short' => 'Office',
             'desc' => 'Administrative office event organizer scope.',
             'icon' => 'M3.75 21h16.5M4.5 3h15l-.75 18H5.25L4.5 3zm4.5 4.5h6m-6 3h6m-6 3h6',
-        ],
-        'HR Admin' => [
-            'short' => 'HR',
-            'desc' => 'HR events, faculty roster, and employee attendance scope.',
-            'icon' => 'M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.5 20.25a8.25 8.25 0 0115 0M18 8.25h3m-1.5-1.5v3',
         ],
     ];
 @endphp
@@ -177,7 +167,7 @@
                 </div>
                 <div class="sm:col-span-2">
                     <label for="admin-password" class="form-label">Password</label>
-                    <input type="password" name="password" id="admin-password" class="form-input max-w-md @error('password') form-input-error @enderror" placeholder="Required for new OSA staff accounts">
+                    <input type="password" name="password" id="admin-password" class="form-input max-w-md @error('password') form-input-error @enderror" placeholder="Required for new staff accounts">
                     @error('password') <p class="form-error" role="alert">{{ $message }}</p> @enderror
                 </div>
             </div>
@@ -262,9 +252,6 @@
                             </div>
                         </div>
 
-                        <p class="text-xs text-(--color-text-tertiary)" x-show="role === 'Super Admin (OSA)'" x-cloak>
-                            Super Admin assignments are university-wide and do not require organization or college scope.
-                        </p>
                         <p class="text-xs text-(--color-text-tertiary)" x-show="role === 'USG Admin'" x-cloak>
                             USG scope resolves to the active USG organization when left blank.
                         </p>

@@ -3,6 +3,7 @@
         $collegeId = old('college_id', $user->college_id ?? $user->organization?->college_id);
         $programId = old('program_id', $user->program_id);
         $organizationId = old('organization_id', $user->organization_id);
+        $yearLevel = old('year_level', $user->year_level);
         $studentId = old('student_id_number', $user->student_id_number);
         $qrValue = old('qr_code_value', $user->qr_code_value);
 
@@ -16,6 +17,11 @@
                 'label' => 'Program selected',
                 'note' => 'Must match your enrolled course',
                 'done' => filled($programId),
+            ],
+            [
+                'label' => 'Year Level set',
+                'note' => 'Current academic year standing',
+                'done' => filled($yearLevel),
             ],
             [
                 'label' => 'Organization linked',
@@ -130,6 +136,11 @@
                                         <span class="text-xs text-(--color-text-tertiary) font-data block mt-1">{{ $user->program->code }}</span>
                                     @endif
                                 </div>
+                                <div class="p-4 rounded-xl border border-(--color-border) bg-(--color-surface)">
+                                    <p class="text-xs text-(--color-text-secondary) font-medium">Year Level</p>
+                                    <p class="font-semibold text-(--color-text-primary) mt-1 text-sm">{{ \App\Support\YearLevels::label($user->year_level) }}</p>
+                                    <span class="text-xs text-(--color-text-tertiary) block mt-1">Used for analytics and report filters</span>
+                                </div>
                                 <div class="p-4 rounded-xl border border-(--color-border) bg-(--color-surface) md:col-span-2">
                                     <p class="text-xs text-(--color-text-secondary) font-medium">Organization / Society</p>
                                     <p class="font-semibold text-(--color-text-primary) mt-1 text-sm">{{ $user->organization?->name ?? 'Not set' }}</p>
@@ -240,6 +251,20 @@
                                         @endforeach
                                     </select>
                                     @error('program_id') <p class="form-error" role="alert">{{ $message }}</p> @enderror
+                                </div>
+
+                                <div>
+                                    <label for="year_level" class="form-label">Year Level <span class="text-(--color-destructive)">*</span></label>
+                                    <select name="year_level" id="year_level"
+                                            class="form-input form-select @error('year_level') form-input-error @enderror"
+                                            required>
+                                        <option value="">Select your year level</option>
+                                        @foreach($yearLevelOptions as $value => $label)
+                                            <option value="{{ $value }}" @selected($yearLevel === $value)>{{ $label }}</option>
+                                        @endforeach
+                                    </select>
+                                    <p class="form-helper">Choose your current year standing for cohort analytics and reports.</p>
+                                    @error('year_level') <p class="form-error" role="alert">{{ $message }}</p> @enderror
                                 </div>
 
                                 <div class="proposal-grid-full">

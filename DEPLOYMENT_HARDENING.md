@@ -20,7 +20,7 @@ php artisan eaes:deployment-check --profile=demo
 
 Use `--profile=production` on a real deployment.
 
-For local development, `composer run dev` starts Laravel, the queue listener, and Vite. The script prepends the Laragon PHP 8.4 path before spawning child processes so `php artisan serve` and `php artisan queue:listen` do not fall back to XAMPP PHP 8.2.
+For local development, `composer run dev` starts Laravel, the queue worker, and Vite. The script prepends the Laragon PHP 8.4 path before spawning child processes so `php artisan serve` and `php artisan queue:work --tries=3` do not fall back to XAMPP PHP 8.2.
 
 ## HTTPS And Cookies
 
@@ -59,6 +59,8 @@ Production recommendation:
 
 - `CACHE_STORE=redis`
 - `QUEUE_CONNECTION=redis`
+- `REDIS_CLIENT=predis` unless the PHP Redis extension is installed and tested.
+- Run a Redis-compatible server on the configured `REDIS_HOST` and `REDIS_PORT`.
 - Run persistent queue workers.
 - Run Laravel scheduler every minute.
 
@@ -70,6 +72,15 @@ Local/demo fallback:
 - Run `php artisan schedule:work`.
 
 The database queue fallback is approved only for local/demo usage. Redis remains the production path for scanner sync and AI sentiment jobs.
+
+After switching an environment to Redis, clear cached config and verify Laravel is reading the Redis-backed settings:
+
+```powershell
+php artisan optimize:clear
+php artisan config:show queue.default
+php artisan config:show cache.default
+php artisan eaes:deployment-check --profile=production
+```
 
 ## Demo Walkthrough
 

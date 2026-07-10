@@ -23,6 +23,14 @@ class AdminAssignmentService
         'HR Admin',
     ];
 
+    public const OSA_ASSIGNABLE_ROLES = [
+        'USG Admin',
+        'LSG Admin',
+        'Society Admin',
+        'Academic Unit Admin',
+        'Office Event Admin',
+    ];
+
     public function approveApplication(AdminApplication $application, User $approver, ?string $remarks = null): AdminAssignment
     {
         return DB::transaction(function () use ($application, $approver, $remarks) {

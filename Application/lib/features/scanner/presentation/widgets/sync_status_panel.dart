@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../../config/app_colors.dart';
 import '../scanner_controller.dart';
 import 'technical_details_panel.dart';
 
@@ -16,40 +17,64 @@ class SyncStatusPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
     final ctrl = controller;
+    final c = AppColors.of(context);
 
     return Container(
       padding: EdgeInsets.all(compact ? 14 : 20),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E293B) : Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: theme.colorScheme.outlineVariant),
-        boxShadow: isDark
+        color: c.isDark ? c.panel : null,
+        gradient: c.isDark
             ? null
-            : [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.04),
-                  blurRadius: 8,
-                  offset: const Offset(0, 2),
-                ),
-              ],
+            : LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Colors.white,
+                  c.blueWash.withValues(alpha: 0.62),
+                  c.brandWash.withValues(alpha: 0.74),
+                ],
+              ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: c.isDark
+              ? c.panelBorder
+              : AppColors.accentBlue.withValues(alpha: 0.20),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: c.softShadow,
+            blurRadius: 12,
+            offset: const Offset(0, 3),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
             children: [
-              const Icon(
-                Icons.cloud_sync_rounded,
-                size: 20,
-                color: Color(0xFF1B4D3E),
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color: c.isDark
+                      ? AppColors.usmGold.withValues(alpha: 0.12)
+                      : AppColors.accentBlue.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  Icons.cloud_sync_rounded,
+                  size: 19,
+                  color: c.isDark ? AppColors.usmGold : AppColors.accentBlue,
+                ),
               ),
               const SizedBox(width: 10),
               Text(
                 'Sync Status',
                 style: theme.textTheme.titleSmall?.copyWith(
                   fontWeight: FontWeight.w700,
+                  color: c.onSurface,
                 ),
               ),
               const Spacer(),
@@ -64,12 +89,12 @@ class SyncStatusPanel extends StatelessWidget {
               _MetricChip(
                 label: 'Pending',
                 value: '${ctrl.pendingCount}',
-                color: ctrl.pendingCount > 0 ? Colors.orange.shade700 : null,
+                color: ctrl.pendingCount > 0 ? AppColors.usmGold : null,
               ),
               _MetricChip(
                 label: 'Synced',
                 value: '${ctrl.syncedCount}',
-                color: const Color(0xFF1B4D3E),
+                color: AppColors.accentGreen,
               ),
               _MetricChip(
                 label: 'Failed',
@@ -94,9 +119,11 @@ class SyncStatusPanel extends StatelessWidget {
             const SizedBox(height: 8),
             Text(
               'Do not uninstall the app until all scans are synced.',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: Colors.orange.shade800,
+              style: TextStyle(
+                fontFamily: 'Inter',
+                fontSize: 12,
                 fontWeight: FontWeight.w600,
+                color: AppColors.usmGold.withValues(alpha: 0.80),
               ),
             ),
           ],
@@ -165,15 +192,18 @@ class _NetworkChip extends StatelessWidget {
 
   final bool isOnline;
 
+  static const Color _accentGreen = AppColors.accentGreen;
+  static const Color _usmGold = AppColors.usmGold;
+
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final color = isOnline ? const Color(0xFF16A34A) : Colors.orange.shade700;
+    final color = isOnline ? _accentGreen : _usmGold;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withValues(alpha: 0.25)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -186,9 +216,11 @@ class _NetworkChip extends StatelessWidget {
           const SizedBox(width: 5),
           Text(
             isOnline ? 'Online' : 'Offline',
-            style: theme.textTheme.labelSmall?.copyWith(
-              color: color,
+            style: TextStyle(
+              fontFamily: 'Inter',
+              fontSize: 11,
               fontWeight: FontWeight.w700,
+              color: color,
             ),
           ),
         ],
@@ -206,28 +238,37 @@ class _MetricChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final chipColor = color ?? theme.colorScheme.onSurface;
+    final c = AppColors.of(context);
+    final chipColor = color ?? AppColors.of(context).onSurfaceMuted;
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: chipColor.withValues(alpha: 0.08),
+        color: chipColor.withValues(alpha: c.isDark ? 0.10 : 0.15),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: chipColor.withValues(alpha: 0.25)),
+        border: Border.all(
+          color: chipColor.withValues(alpha: c.isDark ? 0.20 : 0.28),
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             label,
-            style: theme.textTheme.labelSmall?.copyWith(color: chipColor),
+            style: TextStyle(
+              fontFamily: 'Inter',
+              fontSize: 11,
+              fontWeight: FontWeight.w500,
+              color: chipColor.withValues(alpha: 0.80),
+            ),
           ),
           Text(
             value,
-            style: theme.textTheme.titleMedium?.copyWith(
-              color: chipColor,
+            style: TextStyle(
+              fontFamily: 'Inter',
+              fontSize: 18,
               fontWeight: FontWeight.w800,
+              color: chipColor,
             ),
           ),
         ],
@@ -243,10 +284,15 @@ class _StatusLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final c = AppColors.of(context);
     return Text(
       message,
-      style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
+      style: TextStyle(
+        fontFamily: 'Inter',
+        fontSize: 12,
+        fontWeight: FontWeight.w600,
+        color: c.onSurfaceMuted,
+      ),
     );
   }
 }
@@ -259,13 +305,16 @@ class _MetaLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final c = AppColors.of(context);
     return Padding(
       padding: const EdgeInsets.only(top: 4),
       child: Text(
         '$label: $value',
-        style: theme.textTheme.labelSmall?.copyWith(
-          color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+        style: TextStyle(
+          fontFamily: 'Inter',
+          fontSize: 11,
+          fontWeight: FontWeight.w500,
+          color: c.onSurfaceMuted.withValues(alpha: c.isDark ? 0.65 : 0.88),
         ),
       ),
     );

@@ -15,6 +15,8 @@ use Illuminate\Support\Facades\Validator;
 
 class ScannerAssignmentController extends Controller
 {
+    private const ACTIVE_SESSION_EXISTS_MESSAGE = 'This scanner assignment is already active on another device. Ask an admin to revoke the old scanner session before activating this device.';
+
     public function __construct(
         private readonly ScannerAssignmentService $assignments,
         private readonly ScannerSessionService $scannerSessions,
@@ -32,9 +34,10 @@ class ScannerAssignmentController extends Controller
             ], 403);
         }
 
+        $deviceId = $request->header('X-Device-Id');
         $assignments = $this->assignments
             ->assignmentsForUser($request->user())
-            ->map(fn (EventScannerAssignment $assignment) => $this->assignmentPayload($assignment));
+            ->map(fn (EventScannerAssignment $assignment) => $this->assignmentPayload($assignment, $deviceId));
 
         return response()->json([
             'success' => true,
@@ -109,18 +112,44 @@ class ScannerAssignmentController extends Controller
             ], 423);
         }
 
-        $this->revokeOtherAssignmentSessions($assignment, $request);
+        $deviceId = $request->input('device_id');
+        $activeAssignmentSession = $this->activeAssignmentSession($assignment);
+        if ($activeAssignmentSession) {
+            if ($this->sessionDeviceMatches($activeAssignmentSession, $deviceId) === false) {
+                return $this->activeSessionExistsResponse();
+            }
+
+            [$session, $plainTextToken] = $this->scannerSessions->reissueTokenForSession(
+                $activeAssignmentSession,
+                $deviceId
+            );
+
+            $assignment->update(['last_activated_at' => now()]);
+
+            return response()->json([
+                'success' => true,
+                'resumed' => true,
+                'message' => 'Scanner assignment resumed.',
+                'token' => $plainTextToken,
+                'token_type' => 'Bearer',
+                'assignment' => $this->assignmentPayload($assignment->fresh(['participationScope.organization', 'event.organization', 'event.eventDays', 'scannerSessions']), $deviceId),
+                'event' => $this->eventPayload($event),
+                'scanner_session' => $this->scannerSessions->scannerState($event, $session->fresh()),
+            ]);
+        }
+
+        if ($this->otherActiveAssignmentSession($assignment, $request)) {
+            return $this->activeSessionExistsResponse();
+        }
 
         [$session, $plainTextToken] = $this->scannerSessions->createSession(
             event: $event,
             scannerUser: $request->user(),
             issuedBy: $assignment->assignedBy,
             label: $assignment->label,
-            revokeExisting: true,
+            revokeExisting: false,
             assignment: $assignment
         );
-
-        $deviceId = $request->input('device_id');
         $session->update([
             'device_id' => $deviceId,
             'device_fingerprint_hash' => hash('sha256', $deviceId),
@@ -132,16 +161,17 @@ class ScannerAssignmentController extends Controller
 
         return response()->json([
             'success' => true,
+            'resumed' => false,
             'message' => 'Scanner assignment activated.',
             'token' => $plainTextToken,
             'token_type' => 'Bearer',
-            'assignment' => $this->assignmentPayload($assignment->fresh(['participationScope.organization', 'event.organization', 'event.eventDays', 'scannerSessions'])),
+            'assignment' => $this->assignmentPayload($assignment->fresh(['participationScope.organization', 'event.organization', 'event.eventDays', 'scannerSessions']), $deviceId),
             'event' => $this->eventPayload($event),
             'scanner_session' => $this->scannerSessions->scannerState($event, $session->fresh()),
         ]);
     }
 
-    private function assignmentPayload(EventScannerAssignment $assignment): array
+    private function assignmentPayload(EventScannerAssignment $assignment, ?string $deviceId = null): array
     {
         $assignment->loadMissing(['participationScope.organization', 'event.organization', 'event.eventDays', 'scannerSessions']);
         $event = $assignment->event;
@@ -149,6 +179,30 @@ class ScannerAssignmentController extends Controller
             && $this->activationAllowed($event)
             && $assignment->participationScope
             && !$this->participationScopes->runtimeGuard($assignment->participationScope);
+
+        $activeSession = $this->activeAssignmentSession($assignment);
+        $activeSessionDeviceMatches = $activeSession && $deviceId
+            ? $this->sessionDeviceMatches($activeSession, $deviceId)
+            : null;
+        $otherActiveSession = $this->otherActiveAssignmentSession($assignment);
+        $activationState = 'locked';
+        $activationMessage = null;
+
+        if ($activationAllowed) {
+            if ($activeSession && $activeSessionDeviceMatches === false) {
+                $activationState = 'blocked_active_session';
+                $activationMessage = self::ACTIVE_SESSION_EXISTS_MESSAGE;
+            } elseif ($activeSession) {
+                $activationState = 'resume';
+                $activationMessage = 'Scanner assignment can be resumed on this device.';
+            } elseif ($otherActiveSession) {
+                $activationState = 'blocked_active_session';
+                $activeSessionDeviceMatches = false;
+                $activationMessage = 'Another scanner assignment is already active for this account. Ask an admin to revoke the old scanner session before activating this event.';
+            } else {
+                $activationState = 'activate';
+            }
+        }
 
         return [
             'id' => $assignment->id,
@@ -161,6 +215,9 @@ class ScannerAssignmentController extends Controller
             'session_available' => $assignment->scannerSessions
                 ->where('status', ScannerSession::STATUS_ACTIVE)
                 ->isNotEmpty(),
+            'activation_state' => $activationState,
+            'active_session_device_matches' => $activeSessionDeviceMatches,
+            'activation_message' => $activationMessage,
             'event' => $this->eventPayload($event),
             'participation_scope' => $this->participationScopes->scopePayload($assignment->participationScope),
         ];
@@ -213,19 +270,52 @@ class ScannerAssignmentController extends Controller
         return !$syncGraceEndsAt || now()->lte($syncGraceEndsAt);
     }
 
-    private function revokeOtherAssignmentSessions(EventScannerAssignment $assignment, Request $request): void
+    private function activeAssignmentSession(EventScannerAssignment $assignment): ?ScannerSession
     {
-        ScannerSession::query()
-            ->where('scanner_user_id', $request->user()->id)
+        if ($assignment->relationLoaded('scannerSessions')) {
+            return $assignment->scannerSessions
+                ->where('status', ScannerSession::STATUS_ACTIVE)
+                ->sortByDesc('updated_at')
+                ->first();
+        }
+
+        return ScannerSession::query()
+            ->where('assignment_id', $assignment->id)
+            ->where('scanner_user_id', $assignment->scanner_user_id)
+            ->where('status', ScannerSession::STATUS_ACTIVE)
+            ->latest('updated_at')
+            ->first();
+    }
+
+    private function otherActiveAssignmentSession(EventScannerAssignment $assignment, ?Request $request = null): ?ScannerSession
+    {
+        $scannerUserId = $request?->user()?->id ?? $assignment->scanner_user_id;
+
+        return ScannerSession::query()
+            ->where('scanner_user_id', $scannerUserId)
             ->where('status', ScannerSession::STATUS_ACTIVE)
             ->whereNotNull('assignment_id')
             ->where('assignment_id', '!=', $assignment->id)
-            ->get()
-            ->each(fn (ScannerSession $session) => $this->scannerSessions->revoke(
-                $session,
-                $request->user(),
-                'Mobile scanner switched to another assigned event.'
-            ));
+            ->latest('updated_at')
+            ->first();
+    }
+
+    private function sessionDeviceMatches(ScannerSession $session, string $deviceId): ?bool
+    {
+        if (!$session->device_fingerprint_hash) {
+            return null;
+        }
+
+        return hash_equals($session->device_fingerprint_hash, hash('sha256', $deviceId));
+    }
+
+    private function activeSessionExistsResponse()
+    {
+        return response()->json([
+            'success' => false,
+            'message' => self::ACTIVE_SESSION_EXISTS_MESSAGE,
+            'reason' => 'active_session_exists',
+        ], 409);
     }
 
     private function tokenCanManageAssignments(Request $request): bool

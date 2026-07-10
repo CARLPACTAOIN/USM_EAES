@@ -187,7 +187,7 @@ class AdminOnboardingTest extends TestCase
         ]);
     }
 
-    public function test_osa_can_create_super_admin_without_student_role(): void
+    public function test_osa_cannot_assign_super_admin_through_admin_access(): void
     {
         $osa = $this->createOsa();
 
@@ -199,14 +199,106 @@ class AdminOnboardingTest extends TestCase
                 'role' => 'Super Admin (OSA)',
                 'academic_year' => '2026-2027',
             ])
-            ->assertRedirect(route('dashboard.admin-users') . '?tab=assignments')
+            ->assertSessionHasErrors('role');
+
+        $this->assertDatabaseMissing('users', [
+            'email' => 'newosa@usm.edu.ph',
+        ]);
+
+        $this->assertDatabaseMissing('admin_assignments', [
+            'role_name' => 'Super Admin (OSA)',
+            'academic_year' => '2026-2027',
+        ]);
+    }
+
+    public function test_osa_cannot_assign_hr_admin_through_admin_access(): void
+    {
+        $osa = $this->createOsa();
+        $hrUnit = Organization::create([
+            'college_id' => null,
+            'name' => 'Human Resource Management Office',
+            'acronym' => 'HRMO',
+            'type' => 'hr_unit',
+            'status' => 'active',
+        ]);
+
+        $this->actingAs($osa)
+            ->post(route('dashboard.admin-users.create'), [
+                'name' => 'HR Staff',
+                'email' => 'hr.staff@usm.edu.ph',
+                'password' => 'password123',
+                'role' => 'HR Admin',
+                'organization_id' => $hrUnit->id,
+                'academic_year' => '2026-2027',
+            ])
+            ->assertSessionHasErrors('role');
+
+        $this->assertDatabaseMissing('users', [
+            'email' => 'hr.staff@usm.edu.ph',
+        ]);
+
+        $this->assertDatabaseMissing('admin_assignments', [
+            'role_name' => 'HR Admin',
+            'organization_id' => $hrUnit->id,
+            'academic_year' => '2026-2027',
+        ]);
+    }
+
+    public function test_osa_can_assign_academic_unit_and_office_event_admins(): void
+    {
+        [$college] = $this->createCollegeAndProgram();
+        $academicUnit = Organization::create([
+            'college_id' => $college->id,
+            'name' => 'CEIT Academic Programs Office',
+            'acronym' => 'CEIT APO',
+            'type' => 'academic_unit',
+            'status' => 'active',
+        ]);
+        $office = Organization::create([
+            'college_id' => null,
+            'name' => 'Student Affairs and Services Office',
+            'acronym' => 'SASO',
+            'type' => 'administrative_office',
+            'status' => 'active',
+        ]);
+        $academicAdmin = $this->createStudent('academic.admin@usm.edu.ph');
+        $officeAdmin = $this->createStudent('office.admin@usm.edu.ph');
+        $osa = $this->createOsa();
+
+        $this->actingAs($osa)
+            ->post(route('dashboard.admin-users.create'), [
+                'email' => $academicAdmin->email,
+                'role' => 'Academic Unit Admin',
+                'organization_id' => $academicUnit->id,
+                'college_id' => $college->id,
+                'academic_year' => '2026-2027',
+            ])
             ->assertSessionHasNoErrors();
 
-        $user = User::where('email', 'newosa@usm.edu.ph')->firstOrFail();
-        $this->assertTrue($user->hasRole('Super Admin (OSA)'));
-        $this->assertFalse($user->hasRole('Student'));
-        $this->assertNull($user->organization_id);
-        $this->assertNull($user->college_id);
+        $this->actingAs($osa)
+            ->post(route('dashboard.admin-users.create'), [
+                'email' => $officeAdmin->email,
+                'role' => 'Office Event Admin',
+                'organization_id' => $office->id,
+                'academic_year' => '2026-2027',
+            ])
+            ->assertSessionHasNoErrors();
+
+        $this->assertDatabaseHas('admin_assignments', [
+            'user_id' => $academicAdmin->id,
+            'role_name' => 'Academic Unit Admin',
+            'organization_id' => $academicUnit->id,
+            'college_id' => $college->id,
+            'status' => AdminAssignment::STATUS_ACTIVE,
+        ]);
+
+        $this->assertDatabaseHas('admin_assignments', [
+            'user_id' => $officeAdmin->id,
+            'role_name' => 'Office Event Admin',
+            'organization_id' => $office->id,
+            'college_id' => null,
+            'status' => AdminAssignment::STATUS_ACTIVE,
+        ]);
     }
 
     public function test_non_osa_cannot_manage_organizations_or_assign_admins(): void
@@ -252,13 +344,80 @@ class AdminOnboardingTest extends TestCase
         Organization::create(['college_id' => $college->id, 'name' => 'CEIT Local Student Government', 'acronym' => 'CEIT LSG', 'type' => 'lsg', 'status' => 'active']);
         Organization::create(['college_id' => null, 'name' => 'University Student Government', 'acronym' => 'USG', 'type' => 'usg', 'status' => 'active']);
 
-        $this->actingAs($this->createOsa())
+        $response = $this->actingAs($this->createOsa())
             ->get(route('dashboard.admin-users'))
             ->assertOk()
             ->assertSee('Assign Admin Authority')
             ->assertSee('Organizations')
             ->assertSee('Admin Assignments')
             ->assertDontSee('Pending Applications');
+
+        $content = $response->getContent();
+        $modalStart = strpos($content, 'id="assign-admin-modal"');
+        $modalEnd = strpos($content, '</dialog>', $modalStart);
+        $this->assertNotFalse($modalStart);
+        $this->assertNotFalse($modalEnd);
+        $assignmentModal = substr($content, $modalStart, $modalEnd - $modalStart);
+
+        $this->assertStringContainsString('USG Admin', $assignmentModal);
+        $this->assertStringContainsString('LSG Admin', $assignmentModal);
+        $this->assertStringContainsString('Society Admin', $assignmentModal);
+        $this->assertStringContainsString('Academic Unit Admin', $assignmentModal);
+        $this->assertStringContainsString('Office Event Admin', $assignmentModal);
+        $this->assertStringNotContainsString('Super Admin (OSA)', $assignmentModal);
+        $this->assertStringNotContainsString('HR Admin', $assignmentModal);
+    }
+
+    public function test_assignment_service_still_projects_bootstrap_super_admin_and_hr_admin_roles(): void
+    {
+        $osa = $this->createOsa();
+        $hrUnit = Organization::create([
+            'college_id' => null,
+            'name' => 'Human Resource Management Office',
+            'acronym' => 'HRMO',
+            'type' => 'hr_unit',
+            'status' => 'active',
+        ]);
+        $bootstrapOsa = User::create([
+            'name' => 'Bootstrap OSA',
+            'email' => 'bootstrap.osa@usm.edu.ph',
+            'password' => null,
+        ]);
+        $hrAdmin = User::create([
+            'name' => 'Bootstrap HR',
+            'email' => 'bootstrap.hr@usm.edu.ph',
+            'password' => null,
+        ]);
+        $service = app(AdminAssignmentService::class);
+
+        $service->createAssignment(
+            user: $bootstrapOsa,
+            roleName: 'Super Admin (OSA)',
+            organization: null,
+            college: null,
+            academicYear: '2026-2027',
+            termStart: null,
+            termEnd: null,
+            positionTitle: 'OSA Bootstrap',
+            approvedBy: $osa,
+            isPrimaryAdmin: false
+        );
+
+        $service->createAssignment(
+            user: $hrAdmin,
+            roleName: 'HR Admin',
+            organization: $hrUnit,
+            college: null,
+            academicYear: '2026-2027',
+            termStart: null,
+            termEnd: null,
+            positionTitle: 'HR Bootstrap',
+            approvedBy: $osa,
+            isPrimaryAdmin: false
+        );
+
+        $this->assertTrue($bootstrapOsa->fresh()->hasRole('Super Admin (OSA)'));
+        $this->assertTrue($hrAdmin->fresh()->hasRole('HR Admin'));
     }
 
     public function test_assignment_service_blocks_duplicate_active_primary_admins_but_allows_non_primary(): void

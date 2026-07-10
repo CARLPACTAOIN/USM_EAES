@@ -69,6 +69,46 @@ class ScannerSessionService
         return [$session, $newToken->plainTextToken];
     }
 
+    public function reissueTokenForSession(ScannerSession $session, string $deviceId): array
+    {
+        $scannerUser = $session->scannerUser;
+        if (!$scannerUser) {
+            throw new \RuntimeException('Scanner session has no scanner user.');
+        }
+
+        $oldTokenId = $session->token_id;
+        $newToken = $scannerUser->createToken('scanner-' . $session->event_id, ['scan-qr-codes', 'manual-entry-id']);
+        $deviceHash = hash('sha256', $deviceId);
+
+        $updates = [
+            'token_id' => (string) $newToken->accessToken->id,
+            'last_seen_at' => now(),
+        ];
+
+        if (!$session->activated_at) {
+            $updates['activated_at'] = now();
+        }
+
+        if (!$session->device_fingerprint_hash) {
+            $updates['device_id'] = $deviceId;
+            $updates['device_fingerprint_hash'] = $deviceHash;
+        }
+
+        $session->update($updates);
+
+        if ($oldTokenId) {
+            PersonalAccessToken::find($oldTokenId)?->delete();
+        }
+
+        $this->audit($session->event, $session->issuer, 'scanner-session-token-reissued', [
+            'scanner_session_id' => $session->id,
+            'assignment_id' => $session->assignment_id,
+            'scanner_user_id' => $session->scanner_user_id,
+        ]);
+
+        return [$session->fresh(), $newToken->plainTextToken];
+    }
+
     public function revoke(ScannerSession $session, User $user, string $reason = 'Revoked by admin.'): void
     {
         if ($session->status === ScannerSession::STATUS_REVOKED) {

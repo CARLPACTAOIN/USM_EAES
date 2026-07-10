@@ -35,11 +35,15 @@ class ScannerController extends ChangeNotifier {
            duplicateCooldown ??
            Duration(seconds: AppConfig.duplicateCooldownSeconds);
 
-  factory ScannerController.defaultInstance() {
+  factory ScannerController.defaultInstance({String? deviceId}) {
+    final resolvedDeviceId = deviceId ?? AppConfig.deviceId;
     return ScannerController(
       localDatabase: ScannerLocalDatabase.instance,
-      apiClient: ScannerApiClient(AppConfig.apiBaseUrl),
-      deviceId: AppConfig.deviceId,
+      apiClient: ScannerApiClient(
+        AppConfig.apiBaseUrl,
+        deviceIdResolver: () async => resolvedDeviceId,
+      ),
+      deviceId: resolvedDeviceId,
     );
   }
 
@@ -76,13 +80,19 @@ class ScannerController extends ChangeNotifier {
   ScanCaptureResult? lastScanResult;
   GlobalFeedback globalFeedback = const GlobalFeedback.none();
   int sessionActivatedSignal = 0;
+  ScannerErrorCategory? lastSessionActivationErrorCategory;
 
   final Map<String, DateTime> recentScanCache = {};
   final Duration duplicateCooldown;
 
   bool get hasSession => session != null;
 
-  bool get canCaptureScans => hasSession && eventLifecyclePhase == 'active';
+  bool get canCaptureScans =>
+      hasSession && eventLifecyclePhase == 'active' && _isInsideScanWindow();
+
+  bool get lastSessionActivationFailureIsRecoverable =>
+      lastSessionActivationErrorCategory == ScannerErrorCategory.networkError ||
+      lastSessionActivationErrorCategory == ScannerErrorCategory.serverError;
 
   bool get syncGraceActive {
     final graceEnd = syncGraceEndsAt;
@@ -117,7 +127,7 @@ class ScannerController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void _setError(Object error, {bool sessionActivation = false}) {
+  MappedScannerError _setError(Object error, {bool sessionActivation = false}) {
     final mapped = sessionActivation
         ? ScannerErrorMapper.mapSessionActivation(error)
         : ScannerErrorMapper.map(error);
@@ -127,6 +137,7 @@ class ScannerController extends ChangeNotifier {
       kind: FeedbackKind.error,
       message: mapped.message,
     );
+    return mapped;
   }
 
   Future<void> _refreshCounts(String eventId) async {
@@ -136,8 +147,58 @@ class ScannerController extends ChangeNotifier {
     rosterCount = await _localDatabase.rosterCount();
   }
 
-  Future<void> activateSession(ScannerSession nextSession) async {
+  ScannerSessionSnapshot? currentSessionSnapshot() {
+    final activeSession = session;
+    if (activeSession == null) return null;
+
+    return ScannerSessionSnapshot(
+      token: activeSession.token,
+      eventId: activeSession.eventId,
+      assignmentId: activeSession.assignmentId,
+      eventParticipationScopeId: activeSession.eventParticipationScopeId,
+      participationScopeName:
+          participationScopeName ?? activeSession.participationScopeName,
+      eventTitle: eventTitle,
+      eventStatus: eventStatus,
+      eventLifecyclePhase: eventLifecyclePhase,
+      scannerSessionStatus: scannerSessionStatus,
+      scanWindowStart: scanWindowStart,
+      scanWindowEnd: scanWindowEnd,
+      syncGraceEndsAt: syncGraceEndsAt,
+      savedAt: _nowFactory().toUtc(),
+    );
+  }
+
+  Future<void> restoreCachedSession(ScannerSessionSnapshot snapshot) async {
+    session = snapshot.session;
+    eventTitle = snapshot.eventTitle;
+    eventStatus = snapshot.eventStatus;
+    eventLifecyclePhase = snapshot.eventLifecyclePhase;
+    scannerSessionStatus = snapshot.scannerSessionStatus;
+    participationScopeName =
+        snapshot.participationScopeName ??
+        snapshot.session.participationScopeName;
+    scanWindowStart = snapshot.scanWindowStart;
+    scanWindowEnd = snapshot.scanWindowEnd;
+    syncGraceEndsAt = snapshot.syncGraceEndsAt;
+    lastSessionActivationErrorCategory = null;
+    errorMessage = null;
+    errorDetails = null;
+    isOnline = false;
+    await _refreshCounts(snapshot.eventId);
+    statusMessage =
+        'Offline mode. Using saved scanner session and hydrated roster.';
+    globalFeedback = GlobalFeedback(
+      kind: canCaptureScans ? FeedbackKind.success : FeedbackKind.warning,
+      message: statusMessage!,
+    );
+    sessionActivatedSignal++;
+    notifyListeners();
+  }
+
+  Future<bool> activateSession(ScannerSession nextSession) async {
     busy = true;
+    lastSessionActivationErrorCategory = null;
     errorMessage = null;
     errorDetails = null;
     statusMessage = null;
@@ -177,6 +238,7 @@ class ScannerController extends ChangeNotifier {
         message: statusMessage!,
       );
       sessionActivatedSignal++;
+      return true;
     } catch (error) {
       session = null;
       eventTitle = null;
@@ -187,8 +249,10 @@ class ScannerController extends ChangeNotifier {
       scanWindowStart = null;
       scanWindowEnd = null;
       syncGraceEndsAt = null;
-      _setError(error, sessionActivation: true);
+      final mapped = _setError(error, sessionActivation: true);
+      lastSessionActivationErrorCategory = mapped.category;
       statusMessage = null;
+      return false;
     } finally {
       busy = false;
       notifyListeners();
@@ -214,7 +278,7 @@ class ScannerController extends ChangeNotifier {
 
     try {
       final roster = await _apiClient.hydrateRoster(activeSession);
-      await _localDatabase.upsertRoster(roster);
+      await _localDatabase.replaceRoster(roster);
       await _refreshCounts(activeSession.eventId);
       statusMessage = 'Participant roster hydrated. Offline scanning is ready.';
     } catch (error) {
@@ -629,6 +693,19 @@ class ScannerController extends ChangeNotifier {
     return DateTime.tryParse(value.toString());
   }
 
+  bool _isInsideScanWindow() {
+    final now = _nowFactory().toUtc();
+    final start = scanWindowStart?.toUtc();
+    final end = scanWindowEnd?.toUtc();
+    if (start != null && now.isBefore(start)) {
+      return false;
+    }
+    if (end != null && now.isAfter(end)) {
+      return false;
+    }
+    return true;
+  }
+
   String _sessionReadyMessage() {
     switch (eventLifecyclePhase) {
       case 'scheduled':
@@ -637,6 +714,9 @@ class ScannerController extends ChangeNotifier {
             ? 'Event has not started yet.'
             : 'Event has not started yet. Scanning will be available at ${_formatTime(start)}.';
       case 'active':
+        if (!_isInsideScanWindow()) {
+          return _scanWindowBlockedMessage();
+        }
         return 'Event active. Scanning enabled.';
       case 'ended':
       case 'evaluation_open':
@@ -657,6 +737,8 @@ class ScannerController extends ChangeNotifier {
         return start == null
             ? 'Event has not started yet.'
             : 'Event has not started yet. Scanning will be available at ${_formatTime(start)}.';
+      case 'active':
+        return _scanWindowBlockedMessage();
       case 'ended':
       case 'evaluation_open':
       case 'evaluation_closed':
@@ -667,6 +749,19 @@ class ScannerController extends ChangeNotifier {
       default:
         return 'Scanning is not available for this event phase.';
     }
+  }
+
+  String _scanWindowBlockedMessage() {
+    final now = _nowFactory().toUtc();
+    final start = scanWindowStart;
+    if (start != null && now.isBefore(start.toUtc())) {
+      return 'Event has not started yet. Scanning will be available at ${_formatTime(start)}.';
+    }
+    final end = scanWindowEnd;
+    if (end != null && now.isAfter(end.toUtc())) {
+      return 'Event scan window has ended. Please sync all pending scans.';
+    }
+    return 'Scanning is not available for this event phase.';
   }
 
   String _formatTime(DateTime value) {

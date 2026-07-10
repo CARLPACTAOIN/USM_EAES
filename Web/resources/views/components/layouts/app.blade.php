@@ -100,6 +100,7 @@
     @if(request()->routeIs('dashboard.events*') || request()->routeIs('dashboard.admin-users*') || request()->routeIs('dashboard.admin-access*') || request()->routeIs('dashboard.analytics*') || request()->routeIs('portal.profile*'))
         <link rel="stylesheet" href="{{ asset('css/proposal-modal.css') }}">
     @endif
+    @stack('styles')
 </head>
 <body class="eaes-app-body min-h-dvh bg-(--color-surface-raised)" x-data="sidebar">
 
@@ -133,8 +134,9 @@
 
         <nav class="p-3 space-y-1">
             @php
-                $isAdmin = auth()->user()?->hasAnyRole(['Super Admin (OSA)', 'USG Admin', 'LSG Admin', 'Society Admin']);
+                $isAdmin = auth()->user()?->hasAnyRole(['Super Admin (OSA)', 'USG Admin', 'LSG Admin', 'Society Admin', 'Academic Unit Admin', 'Office Event Admin', 'HR Admin']);
                 $hasStudentPortal = auth()->user()?->hasRole('Student');
+                $notificationSummary = $notificationSummary ?? ['unread_count' => 0, 'needs_action_count' => 0];
             @endphp
 
             @if($isAdmin)
@@ -150,7 +152,19 @@
                 <a href="{{ route('dashboard.events') }}"
                    class="sidebar-link relative {{ request()->routeIs('dashboard.events*') ? 'sidebar-link-active' : '' }}">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
-                    Event Proposals
+                    <span class="flex-1">Event Proposals</span>
+                    @if(($notificationSummary['needs_action_count'] ?? 0) > 0)
+                        <span class="sidebar-count-badge sidebar-count-warning">{{ $notificationSummary['needs_action_count'] }}</span>
+                    @endif
+                </a>
+
+                <a href="{{ route('dashboard.notifications') }}"
+                   class="sidebar-link relative {{ request()->routeIs('dashboard.notifications*') ? 'sidebar-link-active' : '' }}">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M14.25 18.75a2.25 2.25 0 01-4.5 0m8.25-5.25V9a6 6 0 10-12 0v4.5L4.5 15.75h15L18 13.5z"/></svg>
+                    <span class="flex-1">Notifications</span>
+                    @if(($notificationSummary['unread_count'] ?? 0) > 0)
+                        <span class="sidebar-count-badge">{{ $notificationSummary['unread_count'] }}</span>
+                    @endif
                 </a>
 
                 <a href="{{ route('dashboard.pending-links') }}"
@@ -279,5 +293,6 @@
         </div>
     </main>
 
+    @stack('scripts')
 </body>
 </html>

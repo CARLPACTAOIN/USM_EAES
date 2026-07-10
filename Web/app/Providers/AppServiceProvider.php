@@ -3,9 +3,12 @@
 namespace App\Providers;
 
 use App\Services\Contracts\AiServiceInterface;
+use App\Services\EventNotificationService;
 use App\Services\GeminiService;
 use App\Services\OllamaService;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\URL;
+use Illuminate\Support\Facades\View;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -35,5 +38,21 @@ class AppServiceProvider extends ServiceProvider
         if (config('services.eaes.force_https')) {
             URL::forceScheme('https');
         }
+
+        View::composer('components.layouts.app', function ($view): void {
+            $summary = [
+                'unread_count' => 0,
+                'needs_action_count' => 0,
+            ];
+
+            if (auth()->check()
+                && Schema::hasTable('notifications')
+                && Schema::hasTable('event_participation_scopes')
+                && Schema::hasColumn('event_participation_scopes', 'invitation_acknowledged_at')) {
+                $summary = app(EventNotificationService::class)->summaryForUser(auth()->user());
+            }
+
+            $view->with('notificationSummary', $summary);
+        });
     }
 }

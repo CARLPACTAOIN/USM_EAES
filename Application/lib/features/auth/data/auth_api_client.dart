@@ -13,7 +13,10 @@ abstract class AuthRemoteApi {
   });
 
   Future<void> logout(String token);
-  Future<List<ScannerAssignment>> assignments(String token);
+  Future<List<ScannerAssignment>> assignments({
+    required String token,
+    required String deviceId,
+  });
   Future<ScannerSession> activateAssignment({
     required String token,
     required ScannerAssignment assignment,
@@ -52,10 +55,13 @@ class AuthApiClient implements AuthRemoteApi {
   }
 
   @override
-  Future<List<ScannerAssignment>> assignments(String token) async {
+  Future<List<ScannerAssignment>> assignments({
+    required String token,
+    required String deviceId,
+  }) async {
     final response = await _client.get(
       _uri('/v1/scanner/assignments'),
-      headers: _authHeaders(token),
+      headers: {..._authHeaders(token), 'X-Device-Id': deviceId},
     );
     final payload = _decodeJson(response);
     final items = payload['assignments'] as List<dynamic>? ?? [];

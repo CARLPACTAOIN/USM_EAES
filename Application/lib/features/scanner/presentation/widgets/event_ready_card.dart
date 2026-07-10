@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../../config/app_colors.dart';
+
 import '../scanner_controller.dart';
 import '../../domain/scan_type.dart';
 
@@ -11,9 +13,7 @@ class EventReadyCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    const brandGreen = Color(0xFF1B4D3E);
-
+    final c = AppColors.of(context);
     final title = controller.eventTitle ?? 'Active Event';
 
     return Container(
@@ -22,16 +22,27 @@ class EventReadyCard extends StatelessWidget {
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: isDark
-              ? [const Color(0xFF0F2E25), const Color(0xFF0D2137)]
-              : [brandGreen, const Color(0xFF1E6B54)],
+          colors: c.isDark
+              ? const [AppColors.brandGreen, Color(0xFF0D2137)]
+              : const [
+                  AppColors.brandGreen,
+                  Color(0xFF24765D),
+                  Color(0xFFD4A843),
+                ],
+          stops: c.isDark ? null : const [0.0, 0.64, 1.0],
         ),
         borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: AppColors.usmGold.withValues(alpha: 0.18),
+          width: 1,
+        ),
         boxShadow: [
           BoxShadow(
-            color: brandGreen.withValues(alpha: isDark ? 0.3 : 0.25),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
+            color: AppColors.brandGreen.withValues(
+              alpha: c.isDark ? 0.30 : 0.22,
+            ),
+            blurRadius: 20,
+            offset: const Offset(0, 6),
           ),
         ],
       ),
@@ -46,12 +57,15 @@ class EventReadyCard extends StatelessWidget {
                   width: 40,
                   height: 40,
                   decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.15),
+                    color: AppColors.usmGold.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: AppColors.usmGold.withValues(alpha: 0.20),
+                    ),
                   ),
-                  child: const Icon(
+                  child: Icon(
                     Icons.event_available_rounded,
-                    color: Colors.white,
+                    color: AppColors.usmGold,
                     size: 22,
                   ),
                 ),
@@ -63,8 +77,9 @@ class EventReadyCard extends StatelessWidget {
                       Text(
                         'Session Active',
                         style: theme.textTheme.labelSmall?.copyWith(
-                          color: Colors.white.withValues(alpha: 0.7),
+                          color: AppColors.usmGold.withValues(alpha: 0.80),
                           letterSpacing: 0.8,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
                       const SizedBox(height: 2),
@@ -90,7 +105,19 @@ class EventReadyCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 16),
-            Divider(color: Colors.white.withValues(alpha: 0.15), height: 1),
+            // Gold-tinted divider
+            Container(
+              height: 1,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    Colors.transparent,
+                    AppColors.usmGold.withValues(alpha: 0.25),
+                    Colors.transparent,
+                  ],
+                ),
+              ),
+            ),
             const SizedBox(height: 16),
             Wrap(
               spacing: 20,
@@ -138,16 +165,17 @@ class _StatusBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.18),
+        color: AppColors.usmGold.withValues(alpha: 0.15),
         borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppColors.usmGold.withValues(alpha: 0.30)),
       ),
       child: Text(
         status[0].toUpperCase() + status.substring(1),
-        style: const TextStyle(
+        style: TextStyle(
           fontFamily: 'Inter',
           fontSize: 11,
           fontWeight: FontWeight.w700,
-          color: Colors.white,
+          color: AppColors.usmGold,
           letterSpacing: 0.3,
         ),
       ),
@@ -169,8 +197,8 @@ class _MetaItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = warning
-        ? Colors.orange.shade200
-        : Colors.white.withValues(alpha: 0.9);
+        ? AppColors.usmGold.withValues(alpha: 0.80)
+        : Colors.white.withValues(alpha: 0.85);
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -202,15 +230,17 @@ class ScanModeButtons extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
+    final c = AppColors.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
           'Choose scanning mode',
-          style: theme.textTheme.titleMedium?.copyWith(
-            color: theme.colorScheme.onSurface.withValues(alpha: 0.7),
+          style: TextStyle(
+            fontFamily: 'Inter',
+            fontSize: 15,
+            fontWeight: FontWeight.w600,
+            color: c.onSurfaceMuted,
           ),
         ),
         const SizedBox(height: 12),
@@ -249,18 +279,18 @@ class _ScanModeButton extends StatelessWidget {
   final ScanType scanType;
   final VoidCallback onTap;
 
+  static const Color _brandGreen = AppColors.brandGreen;
+  static const Color _accentBlue = AppColors.accentBlue;
+  static const Color _usmGold = AppColors.usmGold;
+
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    const brandGreen = Color(0xFF1B4D3E);
-    const accentBlue = Color(0xFF2563EB);
-
+    final c = AppColors.of(context);
     final isTimeIn = scanType == ScanType.timeIn;
-    final buttonColor = isTimeIn ? brandGreen : accentBlue;
-    final bgColor = isDark
-        ? buttonColor.withValues(alpha: 0.15)
-        : buttonColor.withValues(alpha: 0.06);
+    final buttonColor = isTimeIn ? _brandGreen : _accentBlue;
+    final borderColor = isTimeIn
+        ? _usmGold.withValues(alpha: 0.25)
+        : _accentBlue.withValues(alpha: 0.30);
 
     return Material(
       color: Colors.transparent,
@@ -270,12 +300,36 @@ class _ScanModeButton extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
           decoration: BoxDecoration(
-            color: bgColor,
+            color: c.isDark ? buttonColor.withValues(alpha: 0.12) : null,
+            gradient: c.isDark
+                ? null
+                : LinearGradient(
+                    begin: Alignment.centerLeft,
+                    end: Alignment.centerRight,
+                    colors: [
+                      isTimeIn ? c.brandWash : c.blueWash,
+                      Colors.white,
+                      isTimeIn
+                          ? c.goldWash.withValues(alpha: 0.52)
+                          : c.blueWash.withValues(alpha: 0.62),
+                    ],
+                  ),
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
-              color: buttonColor.withValues(alpha: 0.3),
+              color: c.isDark
+                  ? borderColor
+                  : buttonColor.withValues(alpha: 0.34),
               width: 1.5,
             ),
+            boxShadow: c.isDark
+                ? null
+                : [
+                    BoxShadow(
+                      color: buttonColor.withValues(alpha: 0.10),
+                      blurRadius: 16,
+                      offset: const Offset(0, 6),
+                    ),
+                  ],
           ),
           child: Row(
             children: [
@@ -295,18 +349,22 @@ class _ScanModeButton extends StatelessWidget {
                   children: [
                     Text(
                       title,
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        color: buttonColor,
+                      style: TextStyle(
+                        fontFamily: 'Inter',
+                        fontSize: 14,
                         fontWeight: FontWeight.w700,
+                        color: isTimeIn
+                            ? (c.isDark ? _usmGold : _brandGreen)
+                            : (c.isDark ? Colors.white : _accentBlue),
                       ),
                     ),
                     const SizedBox(height: 2),
                     Text(
                       subtitle,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurface.withValues(
-                          alpha: 0.6,
-                        ),
+                      style: TextStyle(
+                        fontFamily: 'Inter',
+                        fontSize: 12,
+                        color: c.onSurfaceMuted,
                       ),
                     ),
                   ],
@@ -314,7 +372,9 @@ class _ScanModeButton extends StatelessWidget {
               ),
               Icon(
                 Icons.chevron_right_rounded,
-                color: buttonColor.withValues(alpha: 0.6),
+                color: (isTimeIn ? _usmGold : _accentBlue).withValues(
+                  alpha: 0.50,
+                ),
               ),
             ],
           ),

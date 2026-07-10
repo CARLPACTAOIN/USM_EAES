@@ -52,6 +52,9 @@ class EventParticipationScope extends Model
         'delegated_to_organization_id',
         'analytics_rollup_enabled',
         'status',
+        'invitation_acknowledged_at',
+        'invitation_acknowledged_by',
+        'invitation_last_reminded_at',
     ];
 
     protected $casts = [
@@ -63,6 +66,8 @@ class EventParticipationScope extends Model
         'submitted_at' => 'datetime',
         'reviewed_at' => 'datetime',
         'approved_at' => 'datetime',
+        'invitation_acknowledged_at' => 'datetime',
+        'invitation_last_reminded_at' => 'datetime',
     ];
 
     public function event()
@@ -113,6 +118,11 @@ class EventParticipationScope extends Model
     public function reviewedBy()
     {
         return $this->belongsTo(User::class, 'reviewed_by');
+    }
+
+    public function invitationAcknowledgedBy()
+    {
+        return $this->belongsTo(User::class, 'invitation_acknowledged_by');
     }
 
     public function scannerAssignments()

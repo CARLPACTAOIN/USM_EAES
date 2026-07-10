@@ -166,8 +166,8 @@ DB::transaction(function () use ($eventId, $studentIds) {
 ### **Epic 1: Authentication & Onboarding**
 
 * **Feature 1.1 \- Google OAuth Registration & Login:** Enforced through Laravel Socialite. On Callback, the system checks if the email domain matches the institutional @usm.edu.ph constraint. On success, Laravel Sanctum issues an API bearer token.  
-* **Feature 1.2 \- Student Profile Hydration & QR Registration:** Upon initial registration, students must fill out their hierarchical profile (College ![][image1] Society ![][image1] Program) and parse their physical ID QR code using their webcam.  
-* **Feature 1.3 \- OSA Admin Assignment Governance:** OSA/Super Admin directly manages official organizations and term-bound `admin_assignments`. Students cannot apply for admin roles or request/register organizations. OSA searches existing student/officer/faculty/staff accounts or creates non-student staff accounts, then assigns USG, LSG, Society, Academic Unit, Office Event, HR, or Super Admin authority with academic-year term boundaries. `admin_assignments` are the source of truth for administrative authority and admin tenant scope. Spatie roles are synchronized as the permission projection only; `users.organization_id`, `users.college_id`, and `users.program_id` remain student profile membership fields for portal, attendance, evaluation, scanner eligibility, rosters, and student-affairs analytics denominators. OSA/Super Admin accounts are staff/admin-only accounts and are not required to carry student profile membership. The legacy `admin_applications` table is deprecated and no longer used by routes or UI.
+* **Feature 1.2 \- Student Profile Hydration & QR Registration:** Upon initial registration, students must fill out their hierarchical profile (College ![][image1] Society ![][image1] Program ![][image1] Year Level) and parse their physical ID QR code using their webcam. Year Level is a controlled student-profile demographic used for cohort filtering in analytics and reports; it is not an administrative tenant scope.
+* **Feature 1.3 \- OSA Admin Assignment Governance:** OSA/Super Admin directly manages official organizations and term-bound `admin_assignments`. Students cannot apply for admin roles or request/register organizations. OSA searches existing student/officer/faculty/staff accounts or creates non-student staff accounts, then assigns USG, LSG, Society, Academic Unit, or Office Event authority with academic-year term boundaries. Super Admin (OSA) provisioning is bootstrap-controlled outside the OSA assignment UI, and HR Admin provisioning is independent from OSA governance. `admin_assignments` are the source of truth for administrative authority and admin tenant scope. Spatie roles are synchronized as the permission projection only; `users.organization_id`, `users.college_id`, and `users.program_id` remain student profile membership fields for portal, attendance, evaluation, scanner eligibility, rosters, and student-affairs analytics denominators. OSA/Super Admin accounts are staff/admin-only accounts and are not required to carry student profile membership. The legacy `admin_applications` table is deprecated and no longer used by routes or UI.
 * **Onboarding Separation:** Institutional Google login still requires `@usm.edu.ph`. Accounts with `s.` email prefixes default to `user_type=student` and must complete student onboarding. Non-`s.` institutional accounts default to `faculty_or_staff_pending`; HR roster verification or imported employee records are the source of truth before faculty/staff attendance scanning is trusted.
 * **Onboarding Master Data Rule:** Colleges and Programs are official institutional master data seeded before deployment and maintained only by OSA/Super Admin. USG and per-college LSG shells are seeded governance organizations. Society organizations are created and maintained by OSA only.
 
@@ -199,8 +199,8 @@ DB::transaction(function () use ($eventId, $studentIds) {
 
 ### **Epic 6: Analytics & Compiled Export Module**
 
-* **Feature 6.1 \- Aggregated Evaluation Analytics:** Real-time dashboards visualizing average rating scores, attendance percentages, demographic breakdowns, and comment sentiment trends.  
-* **Feature 6.2 \- Verifiable Export Engine:** Generates highly secure, timestamped PDF/Excel outputs of verified attendance and evaluation summaries. Officers print these digital certificates and attach them to their physical semestral accomplishment reports.  
+* **Feature 6.1 \- Aggregated Evaluation Analytics:** Real-time dashboards visualizing average rating scores, attendance percentages, demographic breakdowns including Program and Year Level, and comment sentiment trends.
+* **Feature 6.2 \- Verifiable Export Engine:** Generates highly secure, timestamped PDF/Excel outputs of verified attendance and evaluation summaries, including student Program and Year Level report columns. Officers print these digital certificates and attach them to their physical semestral accomplishment reports.
 * **Feature 6.3 \- Gawad Parangal Metric Tracking:** An OSA dashboard calculating system-measurable indicators (e.g., Attendance Rates, Membership Active ratios, Evaluation Averages) combined with manual entry fields for non-system metrics.
 
 ## **5\. System Algorithms & Logic Flowcharts**
@@ -348,6 +348,7 @@ JSON Response Schema:
 * role (String, handled via Spatie roles relationship)  
 * organization\_id (UUID, Foreign Key, Nullable; student profile membership, not admin tenant scope)  
 * user\_type (Enum/String: student, faculty, staff, faculty\_or\_staff\_pending)  
+* year\_level (String, Nullable; controlled student demographic for analytics/report filters)
 * student\_id\_number (String, Unique, Nullable)  
 * qr\_code\_value (String, Unique, Nullable)
 
@@ -356,6 +357,7 @@ JSON Response Schema:
 * id (UUID, Primary Key)  
 * user\_id (UUID, Foreign Key to users)  
 * organization\_id (UUID, Foreign Key to organizations)  
+* year\_level (String, Nullable; mirrors current profile-sourced student standing where applicable)
 * college\_id / program\_id (UUID, Nullable)  
 * membership\_type (primary\_academic, secondary\_org, non\_academic, officer)  
 * status (active, inactive, pending, rejected)  

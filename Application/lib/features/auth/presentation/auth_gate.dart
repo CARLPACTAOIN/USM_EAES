@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../scanner/presentation/scanner_controller.dart';
+import '../data/device_identity_provider.dart';
 import 'auth_controller.dart';
 import 'screens/assigned_events_screen.dart';
 import 'screens/login_screen.dart';
@@ -14,8 +15,10 @@ class AuthGate extends StatefulWidget {
 }
 
 class _AuthGateState extends State<AuthGate> {
-  late final AuthController _authController;
-  late final ScannerController _scannerController;
+  final DeviceIdentityProvider _deviceIdentityProvider =
+      PlatformDeviceIdentityProvider();
+  AuthController? _authController;
+  ScannerController? _scannerController;
 
   /// Stays true until boot completes AND the minimum splash duration elapses.
   bool _showSplash = true;
@@ -23,8 +26,6 @@ class _AuthGateState extends State<AuthGate> {
   @override
   void initState() {
     super.initState();
-    _authController = AuthController.defaultInstance();
-    _scannerController = ScannerController.defaultInstance();
     _boot();
   }
 
@@ -42,42 +43,55 @@ class _AuthGateState extends State<AuthGate> {
   }
 
   Future<void> _initControllers() async {
-    await _authController.initialize();
-    await _authController.restoreScannerSession(_scannerController);
+    final deviceId = await _deviceIdentityProvider.deviceId();
+    final authController = AuthController.defaultInstance(
+      deviceIdentityProvider: _deviceIdentityProvider,
+    );
+    final scannerController = ScannerController.defaultInstance(
+      deviceId: deviceId,
+    );
+
+    _authController = authController;
+    _scannerController = scannerController;
+
+    await authController.initialize();
+    await authController.restoreScannerSession(scannerController);
   }
 
   @override
   void dispose() {
-    _authController.dispose();
-    _scannerController.dispose();
+    _authController?.dispose();
+    _scannerController?.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final authController = _authController;
+    final scannerController = _scannerController;
+
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 500),
       switchInCurve: Curves.easeOut,
       switchOutCurve: Curves.easeIn,
-      child: _showSplash
+      child: _showSplash || authController == null || scannerController == null
           ? const SplashScreen(key: ValueKey('splash'))
           : AnimatedBuilder(
               key: const ValueKey('main'),
-              animation:
-                  Listenable.merge([_authController, _scannerController]),
+              animation: Listenable.merge([authController, scannerController]),
               builder: (context, _) {
-                if (!_authController.initialized) {
+                if (!authController.initialized) {
                   // Edge-case: controllers reset after splash — show splash again
                   return const SplashScreen();
                 }
 
-                if (!_authController.isSignedIn) {
-                  return LoginScreen(controller: _authController);
+                if (!authController.isSignedIn) {
+                  return LoginScreen(controller: authController);
                 }
 
                 return AssignedEventsScreen(
-                  authController: _authController,
-                  scannerController: _scannerController,
+                  authController: authController,
+                  scannerController: scannerController,
                 );
               },
             ),
