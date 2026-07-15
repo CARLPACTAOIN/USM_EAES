@@ -1,0 +1,7 @@
+interface:
+  display_name: "UI/UX Pro Max"
+  short_description: "Searchable UI/UX design guidance."
+  default_prompt: "Use $ui-ux-pro-max to plan, implement, or review a polished, accessible interface."
+
+policy:
+  allow_implicit_invocation: true

@@ -3,6 +3,7 @@
 namespace App\Providers;
 
 use App\Services\Contracts\AiServiceInterface;
+use App\Services\AdminScopeService;
 use App\Services\EventNotificationService;
 use App\Services\GeminiService;
 use App\Services\OllamaService;
@@ -44,15 +45,24 @@ class AppServiceProvider extends ServiceProvider
                 'unread_count' => 0,
                 'needs_action_count' => 0,
             ];
+            $currentAdminScope = null;
 
             if (auth()->check()
                 && Schema::hasTable('notifications')
                 && Schema::hasTable('event_participation_scopes')
                 && Schema::hasColumn('event_participation_scopes', 'invitation_acknowledged_at')) {
-                $summary = app(EventNotificationService::class)->summaryForUser(auth()->user());
+                $user = auth()->user();
+                $summary = app(EventNotificationService::class)->summaryForUser($user);
             }
 
-            $view->with('notificationSummary', $summary);
+            if (auth()->check() && Schema::hasTable('admin_assignments')) {
+                $currentAdminScope = app(AdminScopeService::class)->forUser(auth()->user());
+            }
+
+            $view->with([
+                'notificationSummary' => $summary,
+                'currentAdminScope' => $currentAdminScope,
+            ]);
         });
     }
 }

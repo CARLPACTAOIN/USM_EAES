@@ -12,9 +12,9 @@
         </select>
         @error('type', 'organization') <p class="form-error" role="alert">{{ $message }}</p> @enderror
     </div>
-    <div x-show="typeUsesCollege()" x-cloak>
+    <div x-show="typeShowsCollege()" x-cloak>
         <label class="form-label">College <span class="text-(--color-destructive)">*</span></label>
-        <select name="college_id" x-model="collegeId" class="form-input form-select @error('college_id', 'organization') form-input-error @enderror" :required="typeUsesCollege()">
+        <select name="college_id" x-model="collegeId" class="form-input form-select @error('college_id', 'organization') form-input-error @enderror" :required="typeRequiresCollege()">
             <option value="">Select college</option>
             <template x-for="college in colleges" :key="college.id">
                 <option :value="college.id" x-text="college.code"></option>
@@ -41,14 +41,61 @@
         @error('status', 'organization') <p class="form-error" role="alert">{{ $message }}</p> @enderror
     </div>
     <div class="md:col-span-2" x-show="typeUsesPrograms()" x-cloak>
-        <label class="form-label">Covered Programs</label>
-        <select name="program_ids[]" multiple class="form-input min-h-28 @error('program_ids', 'organization') form-input-error @enderror">
-            <template x-for="program in programsForCollege()" :key="program.id">
-                <option :value="program.id" x-text="`${program.code} - ${program.name}`"></option>
-            </template>
-        </select>
+        <div class="org-program-picker @error('program_ids', 'organization') org-program-picker-error @enderror">
+            <div class="org-program-picker-head">
+                <div>
+                    <label id="covered-programs-label" class="form-label">Covered Programs</label>
+                    <p class="org-program-picker-help">Choose the academic programs represented by this organization.</p>
+                </div>
+                <span class="org-program-picker-count" x-text="`${selectedProgramCount()} selected`" aria-live="polite"></span>
+            </div>
+
+            <div class="org-program-picker-toolbar">
+                <div class="org-program-picker-search">
+                    <label for="covered-program-search" class="sr-only">Search covered programs</label>
+                    <svg aria-hidden="true" class="org-program-picker-search-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M21 21l-4.35-4.35M10.5 18a7.5 7.5 0 110-15 7.5 7.5 0 010 15z"/>
+                    </svg>
+                    <input id="covered-program-search"
+                           type="search"
+                           x-model="programSearch"
+                           class="org-program-picker-input"
+                           placeholder="Search code or program name"
+                           autocomplete="off">
+                </div>
+                <div class="org-program-picker-actions">
+                    <button type="button" class="org-program-picker-action" @click="selectAllPrograms()" :disabled="programsForCollege().length === 0">Select all</button>
+                    <button type="button" class="org-program-picker-action" @click="clearPrograms()" :disabled="selectedProgramCount() === 0">Clear</button>
+                </div>
+            </div>
+
+            <div class="org-program-picker-list" role="group" aria-labelledby="covered-programs-label">
+                <template x-for="program in filteredProgramsForCollege()" :key="program.id">
+                    <label class="org-program-option" :class="{ 'is-selected': programIds.includes(String(program.id)) }">
+                        <input type="checkbox"
+                               name="program_ids[]"
+                               :value="program.id"
+                               x-model="programIds"
+                               class="org-program-option-check">
+                        <span class="org-program-option-main">
+                            <span class="org-program-option-code" x-text="program.code"></span>
+                            <span class="org-program-option-name" x-text="program.name"></span>
+                        </span>
+                    </label>
+                </template>
+
+                <div class="org-program-picker-empty" x-show="typeUsesPrograms() && !collegeId">
+                    Select a college to load available programs.
+                </div>
+                <div class="org-program-picker-empty" x-show="typeUsesPrograms() && collegeId && programsForCollege().length === 0">
+                    No programs are registered under the selected college.
+                </div>
+                <div class="org-program-picker-empty" x-show="typeUsesPrograms() && collegeId && programsForCollege().length > 0 && filteredProgramsForCollege().length === 0">
+                    No programs match your search.
+                </div>
+            </div>
+        </div>
         @error('program_ids', 'organization') <p class="form-error" role="alert">{{ $message }}</p> @enderror
-        <p class="text-xs text-(--color-text-tertiary) mt-1">Hold Ctrl/Cmd to select multiple programs.</p>
     </div>
     <div class="md:col-span-2">
         <label class="form-label">Logo <span class="text-(--color-text-tertiary)">(optional)</span></label>

@@ -103,6 +103,14 @@
     @stack('styles')
 </head>
 <body class="eaes-app-body min-h-dvh bg-(--color-surface-raised)" x-data="sidebar">
+    @php
+        $isAdmin = auth()->user()?->hasAnyRole(['Super Admin (OSA)', 'USG Admin', 'LSG Admin', 'Society Admin', 'Academic Unit Admin', 'Office Event Admin', 'HR Admin']);
+        $hasStudentPortal = auth()->user()?->hasRole('Student');
+        $notificationSummary = $notificationSummary ?? ['unread_count' => 0, 'needs_action_count' => 0];
+        $canManageOrganizationProfile = $currentAdminScope
+            && !$currentAdminScope->isSuperAdmin()
+            && $currentAdminScope->organization;
+    @endphp
 
     {{-- ─── Mobile Top Bar ─────────────────────────────────── --}}
     <header class="mobile-topbar lg:hidden fixed top-0 left-0 right-0 z-50 h-14 flex items-center justify-between px-4 bg-(--color-sidebar) text-white">
@@ -119,7 +127,7 @@
     <div x-show="open" @click="close()" class="lg:hidden fixed inset-0 z-50 bg-black/50" x-transition.opacity x-cloak></div>
 
     {{-- ─── Sidebar ────────────────────────────────────────── --}}
-    <aside class="sidebar" :class="{ 'open': open }" x-cloak>
+    <aside class="sidebar" :class="{ 'open': open }">
         <div class="p-5 border-b border-white/10">
             <div class="eaes-brand">
                 <span class="eaes-brand-mark" aria-hidden="true">
@@ -133,12 +141,6 @@
         </div>
 
         <nav class="p-3 space-y-1">
-            @php
-                $isAdmin = auth()->user()?->hasAnyRole(['Super Admin (OSA)', 'USG Admin', 'LSG Admin', 'Society Admin', 'Academic Unit Admin', 'Office Event Admin', 'HR Admin']);
-                $hasStudentPortal = auth()->user()?->hasRole('Student');
-                $notificationSummary = $notificationSummary ?? ['unread_count' => 0, 'needs_action_count' => 0];
-            @endphp
-
             @if($isAdmin)
                 {{-- Admin Navigation --}}
                 <p class="px-3 pt-4 pb-1 text-xs font-semibold text-(--color-sidebar-text) uppercase">Dashboard</p>
@@ -155,15 +157,6 @@
                     <span class="flex-1">Event Proposals</span>
                     @if(($notificationSummary['needs_action_count'] ?? 0) > 0)
                         <span class="sidebar-count-badge sidebar-count-warning">{{ $notificationSummary['needs_action_count'] }}</span>
-                    @endif
-                </a>
-
-                <a href="{{ route('dashboard.notifications') }}"
-                   class="sidebar-link relative {{ request()->routeIs('dashboard.notifications*') ? 'sidebar-link-active' : '' }}">
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M14.25 18.75a2.25 2.25 0 01-4.5 0m8.25-5.25V9a6 6 0 10-12 0v4.5L4.5 15.75h15L18 13.5z"/></svg>
-                    <span class="flex-1">Notifications</span>
-                    @if(($notificationSummary['unread_count'] ?? 0) > 0)
-                        <span class="sidebar-count-badge">{{ $notificationSummary['unread_count'] }}</span>
                     @endif
                 </a>
 
@@ -184,6 +177,14 @@
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
                     Analytics
                 </a>
+
+                @if($canManageOrganizationProfile)
+                <a href="{{ route('dashboard.organization-profile') }}"
+                   class="sidebar-link relative {{ request()->routeIs('dashboard.organization-profile*') ? 'sidebar-link-active' : '' }}">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3.75 21h16.5M4.5 3h15l-.75 18H5.25L4.5 3zm3.75 4.5h7.5m-7.5 4h7.5m-7.5 4h4"/></svg>
+                    Organization Profile
+                </a>
+                @endif
 
                 @if(auth()->user()?->hasRole('Super Admin (OSA)'))
                 <a href="{{ route('dashboard.admin-users') }}"

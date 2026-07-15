@@ -54,22 +54,67 @@
             </div>
         </header>
 
-        <div class="admin-access-metrics">
-            <div class="admin-access-metric">
-                <span class="admin-access-metric-label">Active Assignments</span>
-                <strong class="admin-access-metric-value">{{ $stats['active_assignments'] }}</strong>
-                <span class="admin-access-metric-note">{{ $stats['total_assignments'] }} total records</span>
-            </div>
-            <div class="admin-access-metric">
-                <span class="admin-access-metric-label">Active Organizations</span>
-                <strong class="admin-access-metric-value">{{ $stats['active_organizations'] }}</strong>
-                <span class="admin-access-metric-note">{{ $stats['total_organizations'] }} official records</span>
-            </div>
-            <div class="admin-access-metric">
-                <span class="admin-access-metric-label">Assignable Roles</span>
-                <strong class="admin-access-metric-value">{{ count($assignableRoles) }}</strong>
+        <div class="admin-access-metrics" aria-label="Admin access summary">
+            <article class="admin-access-metric admin-access-metric--assignments">
+                <div class="admin-access-metric-top">
+                    <span class="admin-access-metric-icon" aria-hidden="true">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/>
+                        </svg>
+                    </span>
+                    <span class="admin-access-metric-label">Active Assignments</span>
+                </div>
+                <div class="admin-access-metric-main">
+                    <strong class="admin-access-metric-value">{{ $stats['active_assignments'] }}</strong>
+                    <span class="admin-access-metric-badge">Term-bound</span>
+                </div>
+                <span class="admin-access-metric-note">{{ $stats['total_assignments'] }} total authority records</span>
+            </article>
+            <article class="admin-access-metric admin-access-metric--organizations">
+                <div class="admin-access-metric-top">
+                    <span class="admin-access-metric-icon" aria-hidden="true">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0H5m14 0h2m-2 0h-4m-5 0H3m2 0h4M9 7h6m-6 4h6m-6 4h6"/>
+                        </svg>
+                    </span>
+                    <span class="admin-access-metric-label">Active Organizations</span>
+                </div>
+                <div class="admin-access-metric-main">
+                    <strong class="admin-access-metric-value">{{ $stats['active_organizations'] }}</strong>
+                    <span class="admin-access-metric-badge">Official</span>
+                </div>
+                <span class="admin-access-metric-note">{{ $stats['total_organizations'] }} official organization records</span>
+            </article>
+            <article class="admin-access-metric admin-access-metric--roles">
+                <div class="admin-access-metric-top">
+                    <span class="admin-access-metric-icon" aria-hidden="true">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 6.75a3 3 0 013 3v.75h.75A2.25 2.25 0 0118 12.75v4.5a2.25 2.25 0 01-2.25 2.25h-7.5A2.25 2.25 0 016 17.25v-4.5a2.25 2.25 0 012.25-2.25H9v-.75a3 3 0 013-3zm0 0V4.5m0 0h3m-3 0H9"/>
+                        </svg>
+                    </span>
+                    <span class="admin-access-metric-label">Assignable Roles</span>
+                </div>
+                <div class="admin-access-metric-main">
+                    <strong class="admin-access-metric-value">{{ count($assignableRoles) }}</strong>
+                    <span class="admin-access-metric-badge">OSA allowlist</span>
+                </div>
                 <span class="admin-access-metric-note">USG, LSG, Society, Academic, Office</span>
-            </div>
+            </article>
+            <article class="admin-access-metric admin-access-metric--audit">
+                <div class="admin-access-metric-top">
+                    <span class="admin-access-metric-icon" aria-hidden="true">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 6v6l4 2m6-2a10 10 0 11-20 0 10 10 0 0120 0z"/>
+                        </svg>
+                    </span>
+                    <span class="admin-access-metric-label">Audit History</span>
+                </div>
+                <div class="admin-access-metric-main">
+                    <strong class="admin-access-metric-value">{{ $stats['audit_logs'] }}</strong>
+                    <span class="admin-access-metric-badge">Logged</span>
+                </div>
+                <span class="admin-access-metric-note">governance actions available for review</span>
+            </article>
         </div>
 
         {{-- Assignment creation --}}
@@ -96,7 +141,7 @@
             }
         }">
             {{-- Segmented Tab Control --}}
-            <div class="flex items-center gap-2 p-1 rounded-xl bg-(--color-surface-raised) border border-(--color-border) w-fit mb-4">
+            <div class="flex flex-wrap items-center gap-2 p-1 rounded-xl bg-(--color-surface-raised) border border-(--color-border) w-fit max-w-full mb-4">
                 <button type="button"
                         @click="switchTab('organizations')"
                         :class="activeTab === 'organizations'
@@ -125,6 +170,21 @@
                     <span :class="activeTab === 'assignments' ? 'bg-white/20 text-white' : 'bg-(--color-surface-inset) text-(--color-text-secondary) border border-(--color-border)'"
                           class="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full text-[10px] font-bold transition-colors">
                         {{ $assignments->total() }}
+                    </span>
+                </button>
+                <button type="button"
+                        @click="switchTab('audit')"
+                        :class="activeTab === 'audit'
+                            ? 'bg-(--color-accent) text-white shadow-sm'
+                            : 'text-(--color-text-secondary) hover:text-(--color-text-primary) hover:bg-(--color-surface-raised)'"
+                        class="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-150 focus:outline-none cursor-pointer">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 6v6l4 2m6-2a10 10 0 11-20 0 10 10 0 0120 0z"/>
+                    </svg>
+                    Audit History
+                    <span :class="activeTab === 'audit' ? 'bg-white/20 text-white' : 'bg-(--color-surface-inset) text-(--color-text-secondary) border border-(--color-border)'"
+                          class="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full text-[10px] font-bold transition-colors">
+                        {{ $auditLogs->total() }}
                     </span>
                 </button>
             </div>
@@ -191,7 +251,10 @@
                             <article class="admin-access-record-row">
                                 <div class="admin-access-record-main">
                                     <div class="admin-access-entity">
-                                        <span class="admin-access-entity-mark">{{ str($organization->acronym)->substr(0, 2)->upper() }}</span>
+                                        <x-organization-mark
+                                            :organization="$organization"
+                                            class="admin-access-entity-mark"
+                                        />
                                         <span class="min-w-0">
                                             <span class="block font-medium text-(--color-text-primary) truncate">{{ $organization->name }}</span>
                                             <span class="block text-xs text-(--color-text-secondary) font-data truncate">{{ $organization->acronym }}</span>
@@ -350,6 +413,8 @@
                         <div class="card-footer">{{ $assignments->links() }}</div>
                     @endif
                 </div>
+
+                @include('dashboard.admin-users.partials.audit-history')
             </div>
         </div>
     </div>
@@ -397,6 +462,7 @@
                 colleges: @js($collegePrograms),
                 type: @js(old('type', 'society')),
                 collegeId: @js(old('college_id', '')),
+                programIds: @js(old('program_ids', [])),
             })">
         <form method="POST"
               action="{{ route('dashboard.organizations.store') }}"
@@ -659,16 +725,72 @@
                 colleges: config.colleges || [],
                 type: config.type || 'society',
                 collegeId: config.collegeId || '',
-                programIds: config.programIds || [],
+                programIds: (config.programIds || []).map((id) => String(id)),
+                programSearch: '',
                 programsForCollege() {
                     const college = this.colleges.find((item) => item.id === this.collegeId);
                     return college?.programs || [];
                 },
-                typeUsesCollege() {
+                filteredProgramsForCollege() {
+                    const term = this.programSearch.trim().toLowerCase();
+
+                    if (!term) {
+                        return this.programsForCollege();
+                    }
+
+                    return this.programsForCollege().filter((program) => {
+                        return [program.code, program.name]
+                            .some((value) => String(value || '').toLowerCase().includes(term));
+                    });
+                },
+                selectedProgramCount() {
+                    return this.programIds.length;
+                },
+                selectAllPrograms() {
+                    this.programIds = this.programsForCollege().map((program) => String(program.id));
+                },
+                clearPrograms() {
+                    this.programIds = [];
+                },
+                syncProgramSelection() {
+                    if (!this.typeUsesPrograms()) {
+                        this.programIds = [];
+                        return;
+                    }
+
+                    const allowedProgramIds = new Set(this.programsForCollege().map((program) => String(program.id)));
+                    this.programIds = this.programIds
+                        .map((id) => String(id))
+                        .filter((id) => allowedProgramIds.has(id));
+                },
+                typeShowsCollege() {
+                    return ['society', 'non_academic_org', 'lsg', 'academic_unit'].includes(this.type);
+                },
+                typeRequiresCollege() {
                     return ['society', 'lsg', 'academic_unit'].includes(this.type);
+                },
+                typeUsesCollege() {
+                    return this.typeShowsCollege();
                 },
                 typeUsesPrograms() {
                     return ['society', 'non_academic_org'].includes(this.type);
+                },
+                init() {
+                    this.syncProgramSelection();
+
+                    this.$watch('collegeId', () => {
+                        this.programSearch = '';
+                        this.syncProgramSelection();
+                    });
+
+                    this.$watch('type', () => {
+                        if (!this.typeShowsCollege()) {
+                            this.collegeId = '';
+                        }
+
+                        this.programSearch = '';
+                        this.syncProgramSelection();
+                    });
                 },
             }));
         });

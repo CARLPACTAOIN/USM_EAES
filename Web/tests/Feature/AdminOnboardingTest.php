@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\AdminAssignment;
+use App\Models\AuditLog;
 use App\Models\College;
 use App\Models\Organization;
 use App\Models\Program;
@@ -11,6 +12,8 @@ use App\Models\User;
 use App\Services\AdminAssignmentService;
 use Database\Seeders\RolePermissionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use Tests\TestCase;
 
@@ -319,6 +322,10 @@ class AdminOnboardingTest extends TestCase
             ->assertForbidden();
 
         $this->actingAs($societyAdmin)
+            ->get(route('dashboard.admin-users', ['tab' => 'audit']))
+            ->assertForbidden();
+
+        $this->actingAs($societyAdmin)
             ->post(route('dashboard.organizations.store'), [
                 'name' => 'Blocked Society',
                 'acronym' => 'BLOCK',
@@ -350,6 +357,10 @@ class AdminOnboardingTest extends TestCase
             ->assertSee('Assign Admin Authority')
             ->assertSee('Organizations')
             ->assertSee('Admin Assignments')
+            ->assertSee('Audit History')
+            ->assertSee('Search code or program name')
+            ->assertSee('Select all')
+            ->assertSee('Choose the academic programs represented by this organization.')
             ->assertDontSee('Pending Applications');
 
         $content = $response->getContent();
@@ -366,6 +377,385 @@ class AdminOnboardingTest extends TestCase
         $this->assertStringContainsString('Office Event Admin', $assignmentModal);
         $this->assertStringNotContainsString('Super Admin (OSA)', $assignmentModal);
         $this->assertStringNotContainsString('HR Admin', $assignmentModal);
+    }
+
+    public function test_admin_assignment_lifecycle_writes_governance_audit_logs(): void
+    {
+        [$college] = $this->createCollegeAndProgram();
+        $organization = Organization::create([
+            'college_id' => $college->id,
+            'name' => 'PSITS',
+            'acronym' => 'PSITS',
+            'type' => 'society',
+            'status' => 'active',
+        ]);
+        $student = $this->createStudent('audited.admin@usm.edu.ph');
+        $osa = $this->createOsa();
+        $service = app(AdminAssignmentService::class);
+
+        $assignment = $service->createAssignment(
+            user: $student,
+            roleName: 'Society Admin',
+            organization: $organization,
+            college: $college,
+            academicYear: '2026-2027',
+            termStart: '2026-07-01',
+            termEnd: '2027-06-30',
+            positionTitle: 'President',
+            approvedBy: $osa,
+            isPrimaryAdmin: true
+        );
+
+        $createLog = AuditLog::where('action', 'create-admin-assignment')
+            ->where('target_id', $assignment->id)
+            ->firstOrFail();
+
+        $this->assertSame($osa->id, $createLog->admin_id);
+        $this->assertSame($student->id, $createLog->details['user_id']);
+        $this->assertSame('Society Admin', $createLog->details['role_name']);
+        $this->assertSame($organization->id, $createLog->details['organization_id']);
+        $this->assertSame($college->id, $createLog->details['college_id']);
+        $this->assertSame('2026-2027', $createLog->details['academic_year']);
+        $this->assertTrue((bool) $createLog->details['is_primary_admin']);
+
+        $service->revokeAssignment($assignment, $osa, 'Rotation ended.');
+
+        $revokeLog = AuditLog::where('action', 'revoke-admin-assignment')
+            ->where('target_id', $assignment->id)
+            ->firstOrFail();
+
+        $this->assertSame($osa->id, $revokeLog->admin_id);
+        $this->assertSame($student->id, $revokeLog->details['user_id']);
+        $this->assertSame('Society Admin', $revokeLog->details['role_name']);
+        $this->assertSame('Rotation ended.', $revokeLog->details['reason']);
+
+        $expiringAssignment = $service->createAssignment(
+            user: $this->createStudent('expiring.admin@usm.edu.ph'),
+            roleName: 'Society Admin',
+            organization: $organization,
+            college: $college,
+            academicYear: '2026-2027',
+            termStart: '2026-07-01',
+            termEnd: '2027-06-30',
+            positionTitle: 'Vice President',
+            approvedBy: $osa,
+            isPrimaryAdmin: false
+        );
+
+        $service->expireAssignment($expiringAssignment, $osa);
+
+        $expireLog = AuditLog::where('action', 'expire-admin-assignment')
+            ->where('target_id', $expiringAssignment->id)
+            ->firstOrFail();
+
+        $this->assertSame($osa->id, $expireLog->admin_id);
+        $this->assertSame($expiringAssignment->user_id, $expireLog->details['user_id']);
+        $this->assertSame('Society Admin', $expireLog->details['role_name']);
+    }
+
+    public function test_organization_updates_write_governance_audit_logs(): void
+    {
+        [$college, $program] = $this->createCollegeAndProgram();
+        $osa = $this->createOsa();
+
+        $this->actingAs($osa)
+            ->post(route('dashboard.organizations.store'), [
+                'name' => 'Philippine Society of Information Technology Students',
+                'acronym' => 'PSITS',
+                'type' => 'society',
+                'college_id' => $college->id,
+                'program_ids' => [$program->id],
+                'status' => 'active',
+            ])
+            ->assertSessionHasNoErrors();
+
+        $organization = Organization::where('acronym', 'PSITS')->firstOrFail();
+
+        $this->actingAs($osa)
+            ->put(route('dashboard.organizations.update', $organization), [
+                'name' => 'Philippine Society of Information Technology Students',
+                'acronym' => 'PSITS',
+                'college_id' => $college->id,
+                'program_ids' => [$program->id],
+                'status' => 'inactive',
+            ])
+            ->assertRedirect(route('dashboard.admin-users') . '?tab=organizations')
+            ->assertSessionHasNoErrors();
+
+        $updateLog = AuditLog::where('action', 'update-organization')
+            ->where('target_id', $organization->id)
+            ->firstOrFail();
+
+        $this->assertSame($osa->id, $updateLog->admin_id);
+        $this->assertSame('Philippine Society of Information Technology Students', $updateLog->details['name']);
+        $this->assertSame('PSITS', $updateLog->details['acronym']);
+        $this->assertSame('society', $updateLog->details['type']);
+        $this->assertSame('inactive', $updateLog->details['status']);
+    }
+
+    public function test_scoped_admins_can_view_their_organization_profile(): void
+    {
+        [$college, $program] = $this->createCollegeAndProgram();
+        $service = app(AdminAssignmentService::class);
+        $osa = $this->createOsa();
+
+        $roleCases = [
+            ['Society Admin', 'society', $college, 'SOC'],
+            ['USG Admin', 'usg', null, 'USG'],
+            ['LSG Admin', 'lsg', $college, 'LSG'],
+            ['Academic Unit Admin', 'academic_unit', $college, 'ACAD'],
+            ['Office Event Admin', 'administrative_office', null, 'OFF'],
+            ['HR Admin', 'hr_unit', null, 'HR'],
+        ];
+
+        foreach ($roleCases as [$role, $type, $orgCollege, $acronym]) {
+            $organization = Organization::create([
+                'college_id' => $orgCollege?->id,
+                'name' => "{$acronym} Organization",
+                'acronym' => $acronym,
+                'type' => $type,
+                'status' => 'active',
+            ]);
+            $organization->programs()->attach($program->id);
+            $admin = $this->createStudent(strtolower($acronym) . '.admin@usm.edu.ph');
+
+            $service->createAssignment(
+                user: $admin,
+                roleName: $role,
+                organization: $organization,
+                college: $orgCollege,
+                academicYear: '2026-2027',
+                termStart: null,
+                termEnd: null,
+                positionTitle: 'Organization officer',
+                approvedBy: $osa,
+                isPrimaryAdmin: true
+            );
+
+            $this->actingAs($admin)
+                ->get(route('dashboard.organization-profile'))
+                ->assertOk()
+                ->assertSee('Organization Profile')
+                ->assertSee($organization->name)
+                ->assertSee($organization->acronym)
+                ->assertSee('Upload Logo')
+                ->assertSee('Selected logo preview');
+        }
+    }
+
+    public function test_osa_and_students_cannot_access_organization_profile_logo_management(): void
+    {
+        Storage::fake('public');
+        $osa = $this->createOsa();
+
+        $this->actingAs($osa)
+            ->get(route('dashboard.organization-profile'))
+            ->assertForbidden();
+
+        $this->actingAs($osa)
+            ->put(route('dashboard.organization-profile.logo.update'), [
+                'logo' => UploadedFile::fake()->image('osa-logo.png'),
+            ])
+            ->assertForbidden();
+
+        $this->actingAs($osa)
+            ->delete(route('dashboard.organization-profile.logo.destroy'))
+            ->assertForbidden();
+
+        $student = $this->createStudent('student-only@usm.edu.ph');
+
+        $this->actingAs($student)
+            ->get(route('dashboard.organization-profile'))
+            ->assertForbidden();
+
+        $this->actingAs($student)
+            ->put(route('dashboard.organization-profile.logo.update'), [
+                'logo' => UploadedFile::fake()->image('student-logo.png'),
+            ])
+            ->assertForbidden();
+    }
+
+    public function test_scoped_admin_can_upload_replace_and_remove_own_organization_logo(): void
+    {
+        Storage::fake('public');
+
+        [$college] = $this->createCollegeAndProgram();
+        $organization = Organization::create([
+            'college_id' => $college->id,
+            'name' => 'PSITS',
+            'acronym' => 'PSITS',
+            'type' => 'society',
+            'status' => 'active',
+        ]);
+        $admin = $this->createScopedAdmin('Society Admin', $organization, $college);
+
+        $this->actingAs($admin)
+            ->put(route('dashboard.organization-profile.logo.update'), [
+                'logo' => UploadedFile::fake()->image('logo.png', 400, 400),
+            ])
+            ->assertRedirect(route('dashboard.organization-profile'))
+            ->assertSessionHasNoErrors();
+
+        $organization->refresh();
+        $firstPath = $organization->logo_path;
+        $this->assertNotNull($firstPath);
+        Storage::disk('public')->assertExists($firstPath);
+
+        $this->assertDatabaseHas('audit_logs', [
+            'target_id' => $organization->id,
+            'admin_id' => $admin->id,
+            'action' => 'update-organization-logo',
+        ]);
+
+        $this->actingAs($admin)
+            ->put(route('dashboard.organization-profile.logo.update'), [
+                'logo' => UploadedFile::fake()->image('replacement.jpg', 500, 500),
+            ])
+            ->assertRedirect(route('dashboard.organization-profile'))
+            ->assertSessionHasNoErrors();
+
+        $organization->refresh();
+        $secondPath = $organization->logo_path;
+        $this->assertNotSame($firstPath, $secondPath);
+        Storage::disk('public')->assertMissing($firstPath);
+        Storage::disk('public')->assertExists($secondPath);
+
+        $this->actingAs($admin)
+            ->delete(route('dashboard.organization-profile.logo.destroy'))
+            ->assertRedirect(route('dashboard.organization-profile'))
+            ->assertSessionHasNoErrors();
+
+        $organization->refresh();
+        $this->assertNull($organization->logo_path);
+        Storage::disk('public')->assertMissing($secondPath);
+
+        $this->assertDatabaseHas('audit_logs', [
+            'target_id' => $organization->id,
+            'admin_id' => $admin->id,
+            'action' => 'delete-organization-logo',
+        ]);
+    }
+
+    public function test_uploaded_organization_logo_renders_where_org_placeholder_is_shown(): void
+    {
+        Storage::fake('public');
+
+        [$college] = $this->createCollegeAndProgram();
+        $logoPath = 'organizations/logos/psits.png';
+        Storage::disk('public')->put($logoPath, 'fake image contents');
+
+        $organization = Organization::create([
+            'college_id' => $college->id,
+            'name' => 'PSITS',
+            'acronym' => 'PSITS',
+            'type' => 'society',
+            'status' => 'active',
+            'logo_path' => $logoPath,
+        ]);
+
+        $osa = $this->createOsa();
+
+        $this->actingAs($osa)
+            ->get(route('dashboard.admin-users'))
+            ->assertOk()
+            ->assertSee('/storage/' . $logoPath, false)
+            ->assertSee('PSITS organization logo');
+
+        $scopedAdmin = $this->createStudent('psits.analytics.admin@usm.edu.ph');
+        app(AdminAssignmentService::class)->createAssignment(
+            user: $scopedAdmin,
+            roleName: 'Society Admin',
+            organization: $organization,
+            college: $college,
+            academicYear: '2026-2027',
+            termStart: null,
+            termEnd: null,
+            positionTitle: 'Organization officer',
+            approvedBy: $osa,
+            isPrimaryAdmin: true
+        );
+
+        $this->actingAs($scopedAdmin)
+            ->get(route('dashboard.analytics'))
+            ->assertOk()
+            ->assertSee('/storage/' . $logoPath, false)
+            ->assertSee('PSITS organization logo');
+    }
+
+    public function test_organization_profile_logo_validation_rejects_bad_type_and_oversized_files(): void
+    {
+        Storage::fake('public');
+
+        [$college] = $this->createCollegeAndProgram();
+        $organization = Organization::create([
+            'college_id' => $college->id,
+            'name' => 'PSITS',
+            'acronym' => 'PSITS',
+            'type' => 'society',
+            'status' => 'active',
+        ]);
+        $admin = $this->createScopedAdmin('Society Admin', $organization, $college);
+
+        $this->actingAs($admin)
+            ->from(route('dashboard.organization-profile'))
+            ->put(route('dashboard.organization-profile.logo.update'), [
+                'logo' => UploadedFile::fake()->create('logo.pdf', 16, 'application/pdf'),
+            ])
+            ->assertRedirect(route('dashboard.organization-profile'))
+            ->assertSessionHasErrors('logo');
+
+        $this->actingAs($admin)
+            ->from(route('dashboard.organization-profile'))
+            ->put(route('dashboard.organization-profile.logo.update'), [
+                'logo' => UploadedFile::fake()->create('large.png', 2049, 'image/png'),
+            ])
+            ->assertRedirect(route('dashboard.organization-profile'))
+            ->assertSessionHasErrors('logo');
+
+        $this->assertNull($organization->fresh()->logo_path);
+    }
+
+    public function test_osa_can_view_and_filter_admin_access_audit_history(): void
+    {
+        [$college] = $this->createCollegeAndProgram();
+        $organization = Organization::create([
+            'college_id' => $college->id,
+            'name' => 'PSITS',
+            'acronym' => 'PSITS',
+            'type' => 'society',
+            'status' => 'active',
+        ]);
+        $student = $this->createStudent('filterable.admin@usm.edu.ph');
+        $osa = $this->createOsa();
+        $service = app(AdminAssignmentService::class);
+
+        $assignment = $service->createAssignment(
+            user: $student,
+            roleName: 'Society Admin',
+            organization: $organization,
+            college: $college,
+            academicYear: '2026-2027',
+            termStart: '2026-07-01',
+            termEnd: '2027-06-30',
+            positionTitle: 'President',
+            approvedBy: $osa,
+            isPrimaryAdmin: true
+        );
+        $service->revokeAssignment($assignment, $osa, 'Rotation ended.');
+
+        $this->actingAs($osa)
+            ->get(route('dashboard.admin-users', [
+                'tab' => 'audit',
+                'audit_action' => 'create-admin-assignment',
+                'audit_search' => 'osa@usm.edu.ph',
+            ]))
+            ->assertOk()
+            ->assertSee('Audit History')
+            ->assertSee('Assignment activated')
+            ->assertSee('Society Admin')
+            ->assertSee('PSITS')
+            ->assertSee('Student User')
+            ->assertDontSee('Rotation ended.');
     }
 
     public function test_assignment_service_still_projects_bootstrap_super_admin_and_hr_admin_roles(): void
@@ -575,5 +965,25 @@ class AdminOnboardingTest extends TestCase
         $user->assignRole('Super Admin (OSA)');
 
         return $user;
+    }
+
+    private function createScopedAdmin(string $role, Organization $organization, ?College $college = null): User
+    {
+        $admin = $this->createStudent(strtolower(str_replace([' ', '(', ')'], '.', $role)) . '@usm.edu.ph');
+
+        app(AdminAssignmentService::class)->createAssignment(
+            user: $admin,
+            roleName: $role,
+            organization: $organization,
+            college: $college,
+            academicYear: '2026-2027',
+            termStart: null,
+            termEnd: null,
+            positionTitle: 'Organization officer',
+            approvedBy: $this->createOsa(),
+            isPrimaryAdmin: true
+        );
+
+        return $admin;
     }
 }

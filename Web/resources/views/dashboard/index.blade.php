@@ -1,12 +1,17 @@
 <x-layouts.app :title="'Admin Dashboard — EAES'">
-    <div class="mb-8">
-        <h1 class="text-2xl font-display text-(--color-text-primary)">Dashboard</h1>
-        <p class="text-sm text-(--color-text-secondary) mt-1">EAES administration overview</p>
+    <div class="flex items-start justify-between gap-4 mb-8">
+        <div class="min-w-0">
+            <h1 class="text-2xl font-display text-(--color-text-primary)">Dashboard</h1>
+            <p class="text-sm text-(--color-text-secondary) mt-1">EAES administration overview</p>
+        </div>
+        <div class="dashboard-header-actions shrink-0">
+            <x-notification-bell :summary="$notificationSummary" :items="$notificationDropdownItems" variant="dashboard" />
+        </div>
     </div>
 
     {{-- KPI Stats --}}
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        <div class="stat-card">
+        <div class="stat-card stat-card--accent">
             <div class="flex items-center justify-between mb-2">
                 <div class="w-10 h-10 rounded-lg flex items-center justify-center" style="background-color: var(--color-accent-subtle);">
                     <svg class="w-5 h-5" style="color: var(--color-accent);" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
@@ -16,7 +21,7 @@
             <p class="stat-label">Total Events</p>
         </div>
 
-        <div class="stat-card">
+        <div class="stat-card stat-card--warning">
             <div class="flex items-center justify-between mb-2">
                 <div class="w-10 h-10 rounded-lg flex items-center justify-center" style="background-color: var(--color-warning-light);">
                     <svg class="w-5 h-5" style="color: var(--color-warning);" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
@@ -26,7 +31,7 @@
             <p class="stat-label">Pending Proposals</p>
         </div>
 
-        <div class="stat-card">
+        <div class="stat-card stat-card--success">
             <div class="flex items-center justify-between mb-2">
                 <div class="w-10 h-10 rounded-lg flex items-center justify-center" style="background-color: var(--color-success-light);">
                     <svg class="w-5 h-5" style="color: var(--color-success);" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
@@ -36,7 +41,7 @@
             <p class="stat-label">Approved Events</p>
         </div>
 
-        <div class="stat-card">
+        <div class="stat-card stat-card--danger">
             <div class="flex items-center justify-between mb-2">
                 <div class="w-10 h-10 rounded-lg flex items-center justify-center" style="background-color: var(--color-destructive-light);">
                     <svg class="w-5 h-5" style="color: var(--color-destructive);" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg>
@@ -54,7 +59,6 @@
                 <h2 class="font-semibold text-(--color-text-primary)">Needs Action</h2>
                 <p class="text-xs text-(--color-text-tertiary) mt-1">Invitation acknowledgements, participant PPAs, and review handoffs</p>
             </div>
-            <a href="{{ route('dashboard.notifications') }}" class="btn btn-sm btn-secondary">Open notifications</a>
         </div>
         <div class="card-body p-0 divide-y divide-(--color-border)">
             @foreach($needsActionItems as $item)

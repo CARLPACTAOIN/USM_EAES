@@ -18,6 +18,7 @@ use App\Models\ScannerSession;
 use App\Models\University;
 use App\Models\User;
 use App\Jobs\AnalyzeEventSentimentsJob;
+use App\Notifications\EventWorkflowNotification;
 use App\Services\AdminAssignmentService;
 use App\Services\ScannerAssignmentService;
 use App\Services\ScannerSessionService;
@@ -171,6 +172,20 @@ class WebPortalTest extends TestCase
         ]);
     }
 
+    private function notifyWorkflow(User $user, array $overrides = []): void
+    {
+        $user->notify(new EventWorkflowNotification(array_merge([
+            'notification_key' => 'test_notification:' . uniqid(),
+            'kind' => 'test_notice',
+            'title' => 'Workflow notification',
+            'body' => 'A workflow update is ready for review.',
+            'action_label' => 'Open',
+            'action_url' => route('dashboard.events'),
+            'severity' => 'info',
+            'needs_action' => false,
+        ], $overrides)));
+    }
+
     private function createExportableEvent(Organization $org, User $student): Event
     {
         $event = Event::create([
@@ -271,6 +286,34 @@ class WebPortalTest extends TestCase
         $this->actingAs($admin)
             ->get('/dashboard')
             ->assertStatus(200);
+    }
+
+    public function test_notification_bell_renders_only_on_dashboard_overview_header(): void
+    {
+        $h = $this->createHierarchy();
+        $admin = $this->createAdmin('Society Admin', $h['org']);
+
+        $this->notifyWorkflow($admin, [
+            'title' => 'Dashboard Header Notice',
+            'body' => 'A participant workflow needs review from the overview.',
+            'severity' => 'warning',
+            'needs_action' => true,
+        ]);
+
+        $this->actingAs($admin)
+            ->get(route('dashboard'))
+            ->assertOk()
+            ->assertSee('notification-bell--dashboard', false)
+            ->assertSee('Open notification menu')
+            ->assertSee('Dashboard Header Notice')
+            ->assertSee('Needs action');
+
+        $this->actingAs($admin)
+            ->get(route('dashboard.events'))
+            ->assertOk()
+            ->assertDontSee('notification-bell--dashboard', false)
+            ->assertDontSee('Open notification menu')
+            ->assertDontSee('Dashboard Header Notice');
     }
 
     public function test_osa_admin_is_not_given_student_portal_access(): void

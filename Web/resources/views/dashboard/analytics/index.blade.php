@@ -439,10 +439,10 @@
                         {{-- Card Header --}}
                         <div class="card-header flex items-start justify-between gap-3 pb-4">
                             <div class="flex items-start gap-3">
-                                <div class="w-10 h-10 rounded-xl flex items-center justify-center text-sm font-bold text-white shrink-0 mt-0.5"
-                                     style="background: linear-gradient(135deg, var(--color-accent), #6366f1);">
-                                    {{ substr($org->acronym ?? $org->name, 0, 2) }}
-                                </div>
+                                <x-organization-mark
+                                    :organization="$org"
+                                    class="w-10 h-10 mt-0.5"
+                                />
                                 <div>
                                     <h3 class="font-semibold text-(--color-text-primary)">{{ $org->name }}</h3>
                                     <div class="flex flex-wrap items-center gap-1.5 mt-0.5">

@@ -131,19 +131,19 @@
         position: relative;
         overflow: hidden;
         min-height: 10rem;
-        border: 1px solid rgba(15, 23, 42, 0.08);
+        border: 1px solid color-mix(in srgb, var(--accent, #0e5d36) 28%, rgba(15, 23, 42, 0.08));
         border-radius: 8px;
-        background: rgba(255, 255, 255, 0.98);
+        background:
+            linear-gradient(135deg, color-mix(in srgb, var(--accent, #0e5d36) 10%, transparent), transparent 62%),
+            rgba(255, 255, 255, 0.98);
         box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 16px 34px rgba(15, 23, 42, 0.06);
     }
 
     .analytics-stat-card::before {
         content: "";
         position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        height: 4px;
+        inset: 0 auto 0 0;
+        width: 4px;
         background: var(--accent, #0e5d36);
     }
 

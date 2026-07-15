@@ -60,6 +60,11 @@ class DashboardController extends Controller
             'pending_qr_links' => $pendingLinksQuery->count(),
         ];
         $needsActionItems = $this->eventNotifications->needsActionItemsForUser($user, 5);
+        $notificationSummary = $this->eventNotifications->summaryForUser($user);
+        $notificationDropdownItems = $user->notifications()
+            ->latest()
+            ->limit(8)
+            ->get();
 
         $recentEvents = (clone $eventsQuery)
             ->with('organization')
@@ -67,7 +72,13 @@ class DashboardController extends Controller
             ->take(5)
             ->get();
 
-        return view('dashboard.index', compact('stats', 'recentEvents', 'needsActionItems'));
+        return view('dashboard.index', compact(
+            'stats',
+            'recentEvents',
+            'needsActionItems',
+            'notificationSummary',
+            'notificationDropdownItems'
+        ));
     }
 
     /**

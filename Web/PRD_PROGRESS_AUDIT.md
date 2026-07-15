@@ -2,7 +2,7 @@
 
 **Branch / snapshot:** `main` (local)  
 **PRD source:** `PRD_V1.md` (v2.0 content, filename `PRD_V1.md`)  
-**Last reviewed:** 2026-07-10
+**Last reviewed:** 2026-07-16
 **Backend path:** `Web/` (Laravel 12 backend with UUID schemas)
 
 > This file tracks implementation status only. It does not override `PRD_V1.md`.
@@ -80,7 +80,7 @@
 |---------|--------|------------------|
 | 1.1 Google OAuth + `@usm.edu.ph` + Sanctum tokens | Done | `GoogleAuthController` redirects with account selection + USM domain hint, checks domain, clears rejected sessions, and issues web auth |
 | 1.2 Student profile + QR registration | Done | Student profile page supporting both onboarding/edit mode (with dependent College/Program/Organization/Year Level selects and webcam QR capture) and a clean read-only view mode when complete. QR inputs collapse by default if already registered. |
-| 1.3 OSA admin assignment governance | Done | OSA Admin Access page for direct organization management and term-bound `admin_assignments`; student admin-application routes/UI removed; `AdminScopeService` assignment-scoped admin boundaries; OSA assignment creation restricted to USG, LSG, Society, Academic Unit, and Office Event roles; Super Admin (OSA) remains bootstrap-controlled and HR Admin provisioning remains independent; `AdminAssignmentService` role-only permission projection sync; legacy `admin_applications` deprecated |
+| 1.3 OSA admin assignment governance | Done | OSA Admin Access page for direct organization management, term-bound `admin_assignments`, a filtered OSA-only Audit History tab for governance audit rows, and non-OSA scoped Organization Profile logo management; student admin-application routes/UI removed; `AdminScopeService` assignment-scoped admin boundaries; OSA assignment creation restricted to USG, LSG, Society, Academic Unit, and Office Event roles; Super Admin (OSA) remains bootstrap-controlled and HR Admin provisioning remains independent; `AdminAssignmentService` role-only permission projection sync; legacy `admin_applications` deprecated |
 
 ### Epic 2: PPA
 
@@ -150,7 +150,7 @@
 | `raw_scans` | Done | Nullable student, QR, dedup_key, scanner-session/user audit, participation scope, captured-by organization/admin scope, server received, and processed markers migrated with UUID |
 | `attendance_records` | Done | EILO statuses, participation scope, validity, and override columns migrated with UUID |
 | `evaluations` | Done | Score JSONB, comment, sentiment metrics migrated with UUID |
-| `audit_logs` (NFR) | Done | Action, UUID targets, and change details migrated with UUID |
+| `audit_logs` (NFR) | Done | Action, UUID targets, change details, admin-assignment lifecycle records, organization-management records, and OSA Admin Access history visibility implemented with UUID |
 | `pending_student_links` (§3.2) | Done | UUID table added for unresolved QR review, resolution, and flagging |
 
 ---
@@ -161,7 +161,7 @@
 |------|--------|------------------|
 | Bulk sync concurrency / queue protection | Done | Pessimistic `lockForUpdate` prevents database write deadlocks |
 | PII / HTTPS expectations | Done | Deployment templates, security headers, HTTPS/session checks, dev-login gating, demo seeder, deployment check command, and PII hardening guide completed |
-| Immutable `audit_logs` for admin resolution actions | Done | `audit_logs` schema migrated; pending QR resolve/flag actions are recorded |
+| Immutable `audit_logs` for admin resolution and governance actions | Done | `audit_logs` schema migrated; pending QR resolve/flag actions, admin assignment create/revoke/expire actions, admin-application review actions, and organization create/update/logo actions are recorded; OSA can filter Admin Access governance audit history by action, actor/search text, and date range |
 
 ---
 
@@ -175,6 +175,14 @@
 
 ## Sprint Notes
 
+- **2026-07-15 (Admin Access audit history):**
+  - Added an OSA-only Audit History tab to Admin Access for governance audit rows covering admin assignment lifecycle, organization management, and legacy admin-application review actions.
+  - Added action, actor/search, and date filters while rendering only safe allowlisted details from `audit_logs.details`.
+  - Expanded `AdminOnboardingTest` coverage for assignment create/revoke/expire audit details, organization update audit details, OSA-only visibility, and audit action/search filtering.
+- **2026-07-15 (Organization Profile logo management):**
+  - Added a non-OSA scoped Organization Profile page where active organization-scoped admins can upload, replace, and remove their assigned organization logo using the existing `organizations.logo_path` field.
+  - Kept OSA out of the self-service profile page while preserving OSA Admin Access organization-management controls.
+  - Added audit actions for organization logo update/delete and focused `AdminOnboardingTest` coverage for scoped access, OSA/student blocks, file validation, replacement cleanup, and removal cleanup.
 - **2026-07-10 (student Year Level profiling and analytics filters):**
   - Added controlled student `year_level` profiling for portal onboarding/edit, mirrored it into profile-sourced `organization_memberships`, and kept it separate from admin assignment tenant scope.
   - Added Year Level filtering to organization analytics and per-event participant drilldown, plus per-event Year Level demographic chart data.

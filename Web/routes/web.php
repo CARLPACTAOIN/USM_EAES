@@ -11,6 +11,7 @@ use App\Http\Controllers\Web\AnalyticsOverviewController;
 use App\Http\Controllers\Web\EventAnalyticsController;
 use App\Http\Controllers\Web\AdminAccessController;
 use App\Http\Controllers\Web\NotificationController;
+use App\Http\Controllers\Web\OrganizationProfileController;
 use App\Http\Controllers\Dev\DevLoginController;
 
 // ─── Public / Guest Routes ──────────────────────────────────
@@ -43,6 +44,9 @@ Route::middleware(['auth'])->group(function () {
             Route::get('/', [DashboardController::class, 'index'])->name('dashboard');
             Route::get('/ai', [AiInsightsController::class, 'index'])->name('dashboard.ai');
             Route::post('/ai/query', [AiInsightsController::class, 'query'])->name('dashboard.ai.query');
+            Route::get('/organization-profile', [OrganizationProfileController::class, 'show'])->name('dashboard.organization-profile');
+            Route::put('/organization-profile/logo', [OrganizationProfileController::class, 'updateLogo'])->name('dashboard.organization-profile.logo.update');
+            Route::delete('/organization-profile/logo', [OrganizationProfileController::class, 'destroyLogo'])->name('dashboard.organization-profile.logo.destroy');
             Route::get('/notifications', [NotificationController::class, 'index'])->name('dashboard.notifications');
             Route::post('/notifications/{notification}/read', [NotificationController::class, 'markRead'])->name('dashboard.notifications.read');
             Route::post('/notifications/read-all', [NotificationController::class, 'readAll'])->name('dashboard.notifications.read-all');

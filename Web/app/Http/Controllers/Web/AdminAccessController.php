@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Web;
 
 use App\Http\Controllers\Controller;
 use App\Models\AdminAssignment;
+use App\Models\AuditLog;
 use App\Models\College;
 use App\Models\Organization;
 use App\Models\User;
@@ -16,6 +17,30 @@ use Illuminate\Validation\Rule;
 
 class AdminAccessController extends Controller
 {
+    private const AUDIT_ACTIONS = [
+        'create-admin-assignment',
+        'revoke-admin-assignment',
+        'expire-admin-assignment',
+        'approve-admin-application',
+        'reject-admin-application',
+        'create-organization',
+        'update-organization',
+        'update-organization-logo',
+        'delete-organization-logo',
+    ];
+
+    private const AUDIT_ACTION_LABELS = [
+        'create-admin-assignment' => 'Assignment activated',
+        'revoke-admin-assignment' => 'Assignment revoked',
+        'expire-admin-assignment' => 'Assignment expired',
+        'approve-admin-application' => 'Admin Application Approved',
+        'reject-admin-application' => 'Admin Application Rejected',
+        'create-organization' => 'Organization Created',
+        'update-organization' => 'Organization Updated',
+        'update-organization-logo' => 'Organization Logo Updated',
+        'delete-organization-logo' => 'Organization Logo Deleted',
+    ];
+
     public function index(Request $request)
     {
         $this->authorizeOsa($request);
@@ -30,12 +55,19 @@ class AdminAccessController extends Controller
         $assignTerm = $request->input('assign_term');
         $currentAy = $this->defaultAcademicYear();
 
+        $auditSearch = trim((string) $request->input('audit_search', ''));
+        $auditAction = $request->input('audit_action');
+        $auditFrom = $request->input('audit_from');
+        $auditTo = $request->input('audit_to');
+
         $activeTab = $request->input('tab');
-        if (!in_array($activeTab, ['organizations', 'assignments'], true)) {
+        if (!in_array($activeTab, ['organizations', 'assignments', 'audit'], true)) {
             if ($request->has('orgs_page') || $request->has('org_search') || $request->has('org_type') || $request->has('org_status')) {
                 $activeTab = 'organizations';
             } elseif ($request->has('page') || $request->has('assign_search') || $request->has('assign_role') || $request->has('assign_status') || $request->has('assign_term')) {
                 $activeTab = 'assignments';
+            } elseif ($request->has('audit_page') || $request->has('audit_search') || $request->has('audit_action') || $request->has('audit_from') || $request->has('audit_to')) {
+                $activeTab = 'audit';
             } else {
                 $activeTab = 'organizations';
             }
@@ -103,14 +135,45 @@ class AdminAccessController extends Controller
             ->orderBy('name')
             ->get();
 
+        $auditLogs = AuditLog::with('admin')
+            ->whereIn('action', self::AUDIT_ACTIONS)
+            ->when(in_array($auditAction, self::AUDIT_ACTIONS, true), function ($query) use ($auditAction) {
+                $query->where('action', $auditAction);
+            })
+            ->when($this->isDateString($auditFrom), function ($query) use ($auditFrom) {
+                $query->whereDate('created_at', '>=', $auditFrom);
+            })
+            ->when($this->isDateString($auditTo), function ($query) use ($auditTo) {
+                $query->whereDate('created_at', '<=', $auditTo);
+            })
+            ->when($auditSearch !== '', function ($query) use ($auditSearch) {
+                $needle = '%' . mb_strtolower($auditSearch) . '%';
+                $query->where(function ($inner) use ($needle) {
+                    $inner->whereRaw('LOWER(action) LIKE ?', [$needle])
+                        ->orWhereRaw('LOWER(CAST(details AS TEXT)) LIKE ?', [$needle])
+                        ->orWhereHas('admin', function ($adminQuery) use ($needle) {
+                            $adminQuery->whereRaw('LOWER(name) LIKE ?', [$needle])
+                                ->orWhereRaw('LOWER(email) LIKE ?', [$needle]);
+                        });
+                });
+            })
+            ->latest()
+            ->paginate(12, ['*'], 'audit_page')
+            ->withQueryString();
+
+        [$auditUsers, $auditOrganizations, $auditColleges] = $this->resolveAuditContext($auditLogs);
+
         $colleges = College::with('programs')->orderBy('name')->get();
         $adminRoles = AdminAssignmentService::ADMIN_ROLES;
         $assignableRoles = AdminAssignmentService::OSA_ASSIGNABLE_ROLES;
+        $auditActions = self::AUDIT_ACTIONS;
+        $auditActionLabels = $this->auditActionLabels();
         $stats = [
             'active_assignments' => AdminAssignment::where('status', AdminAssignment::STATUS_ACTIVE)->count(),
             'total_assignments' => AdminAssignment::count(),
             'active_organizations' => Organization::whereIn('type', OrganizationManagementService::ORGANIZATION_TYPES)->where('status', 'active')->count(),
             'total_organizations' => Organization::whereIn('type', OrganizationManagementService::ORGANIZATION_TYPES)->count(),
+            'audit_logs' => AuditLog::whereIn('action', self::AUDIT_ACTIONS)->count(),
         ];
 
         return view('dashboard.admin-users.index', compact(
@@ -120,6 +183,12 @@ class AdminAccessController extends Controller
             'colleges',
             'adminRoles',
             'assignableRoles',
+            'auditLogs',
+            'auditActions',
+            'auditActionLabels',
+            'auditUsers',
+            'auditOrganizations',
+            'auditColleges',
             'stats',
             'activeTab'
         ));
@@ -394,5 +463,50 @@ class AdminAccessController extends Controller
         $year = now()->year;
 
         return $year . '-' . ($year + 1);
+    }
+
+    private function isDateString(mixed $value): bool
+    {
+        return is_string($value) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $value) === 1;
+    }
+
+    private function resolveAuditContext($auditLogs): array
+    {
+        $userIds = [];
+        $organizationIds = [];
+        $collegeIds = [];
+
+        foreach ($auditLogs as $log) {
+            $details = $log->details ?? [];
+
+            foreach (['user_id'] as $key) {
+                if (!empty($details[$key])) {
+                    $userIds[] = $details[$key];
+                }
+            }
+
+            foreach (['organization_id'] as $key) {
+                if (!empty($details[$key])) {
+                    $organizationIds[] = $details[$key];
+                }
+            }
+
+            foreach (['college_id'] as $key) {
+                if (!empty($details[$key])) {
+                    $collegeIds[] = $details[$key];
+                }
+            }
+        }
+
+        return [
+            User::whereIn('id', array_unique($userIds))->get()->keyBy('id'),
+            Organization::whereIn('id', array_unique($organizationIds))->get()->keyBy('id'),
+            College::whereIn('id', array_unique($collegeIds))->get()->keyBy('id'),
+        ];
+    }
+
+    private function auditActionLabels(): array
+    {
+        return self::AUDIT_ACTION_LABELS;
     }
 }

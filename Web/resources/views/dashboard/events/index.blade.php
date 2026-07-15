@@ -323,7 +323,7 @@
 
                                 <button type="button"
                                         class="btn btn-sm btn-secondary"
-                                        title="{{ $isParticipatingWorkspace ? 'Open your participant PPA scope' : 'Manage participant scopes' }}"
+                                        title="{{ $isParticipatingWorkspace ? 'Your participant PPA scope' : 'Manage participant scopes' }}"
                                         onclick="document.getElementById('participant-scope-modal-{{ $event->id }}')?.showModal()">
                                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M8.25 6.75h7.5M8.25 12h7.5m-7.5 5.25h4.5M4.5 5.25A2.25 2.25 0 016.75 3h10.5a2.25 2.25 0 012.25 2.25v13.5A2.25 2.25 0 0117.25 21H6.75a2.25 2.25 0 01-2.25-2.25V5.25z"/></svg>
                                     @if($isParticipatingWorkspace && $primaryParticipantScope && in_array($primaryParticipantScope->ppa_status, ['draft', 'rejected'], true))
