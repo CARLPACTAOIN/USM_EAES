@@ -333,6 +333,12 @@
   - Changed mobile assignment activation from silent session replacement to safe activate/resume: same account + assignment + device reissues a token for the existing `scanner_sessions` row, while different-device activation returns `active_session_exists` until an admin revokes the old session.
   - Added platform-backed Flutter device identity for scanner assignment listing, activation, validation, hydrate, sync, and local offline scans so reinstall/reset can resume the same device-bound scanner session.
   - Added Flutter scanner-session snapshots and offline startup restore so a validated, hydrated scanner can reopen without internet, continue local capture inside the saved active scan window, and only clear the saved session after definitive backend invalidation.
+- **2026-07-11 (hydrated roster visibility):**
+  - Added a read-only Flutter Hydrated roster view from the scanner setup screen so assigned scanners can inspect the locally cached participant list for the active scope, search by allowed identity metadata, and refresh hydration without exposing QR values or changing backend hydrate contracts.
+- **2026-07-11 (event schedule visibility):**
+  - Surfaced event-day start/end times in the non-OSA-visible dashboard event list and Flutter scanner assignment/session views using existing scoped event-day payloads, without changing scanner authorization, hydration, or sync contracts.
+- **2026-07-11 (scanner schedule timezone):**
+  - Corrected scanner scan-window construction to treat stored event-day dates/times as USM local schedule time, made `APP_TIMEZONE` effective, and updated Flutter scheduled-event messaging to show date + time for future dates while keeping time-only copy for same-day events.
 - **2026-06-30 (assignment-only scanner workflow):**
   - Removed the user-facing dashboard scanner-link generation route/action, deep-link flash card, Generate Link/Regenerate/Add Device controls, and mobile manual scanner-link entry flow.
   - Made assignment activation (`POST /api/v1/scanner/assignments/{assignment}/activate`) the only supported scanner session creation path; `scanner_sessions` remain as the internal runtime/device/audit layer for hydrate and sync.

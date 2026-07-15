@@ -202,6 +202,16 @@ class AuthController extends Controller
                 'lifecycle_phase' => $event->lifecycle_phase,
                 'start_date' => $event->start_date,
                 'end_date' => $event->end_date,
+                'event_days' => $event->eventDays
+                    ->sortBy('day_number')
+                    ->values()
+                    ->map(fn ($day) => [
+                        'id' => $day->id,
+                        'day_number' => $day->day_number,
+                        'date' => $day->date,
+                        'start_time' => $day->start_time,
+                        'end_time' => $day->end_time,
+                    ]),
             ],
             'scanner_session' => $this->scannerSessions->scannerState($event, $access['session']),
             'user' => [

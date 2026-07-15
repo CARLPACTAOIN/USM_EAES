@@ -42,6 +42,15 @@ void main() {
         'title': 'Foundation Day',
         'status': 'approved',
         'lifecycle_phase': 'active',
+        'event_days': [
+          {
+            'id': 'day-1',
+            'day_number': 1,
+            'date': '2026-07-10',
+            'start_time': '08:00',
+            'end_time': '12:00',
+          },
+        ],
       },
     });
 
@@ -51,6 +60,9 @@ void main() {
       assignment.activationMessage,
       'Ask an admin to revoke the old scanner session.',
     );
+    expect(assignment.eventDays, hasLength(1));
+    expect(assignment.eventTimeRangeLabel, '8:00 AM - 12:00 PM');
+    expect(assignment.eventDaysDetailLabel, contains('D1: Jul 10, 2026'));
   });
 
   test('sends device ID body when activating scanner assignment', () async {
@@ -80,7 +92,18 @@ void main() {
             'success': true,
             'resumed': false,
             'token': 'scanner-token',
-            'event': {'id': 'event-1'},
+            'event': {
+              'id': 'event-1',
+              'event_days': [
+                {
+                  'id': 'day-1',
+                  'day_number': 1,
+                  'date': '2026-07-10',
+                  'start_time': '08:00',
+                  'end_time': '12:00',
+                },
+              ],
+            },
             'scanner_session': {
               'id': 'session-1',
               'assignment_id': 'assignment-1',
@@ -99,6 +122,7 @@ void main() {
 
     expect(session.token, 'scanner-token');
     expect(session.assignmentId, 'assignment-1');
+    expect(session.eventDays.single.timeRangeLabel, '8:00 AM - 12:00 PM');
   });
 
   test('surfaces active session transfer block message', () async {

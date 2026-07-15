@@ -1,3 +1,4 @@
+import 'package:eaes_scanner/features/scanner/domain/event_schedule_day.dart';
 import 'package:eaes_scanner/features/scanner/domain/scanner_session.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -27,6 +28,15 @@ void main() {
         eventStatus: 'approved',
         eventLifecyclePhase: 'active',
         scannerSessionStatus: 'active',
+        eventDays: [
+          EventScheduleDay(
+            id: 'day-1',
+            dayNumber: 1,
+            date: DateTime.utc(2026, 7, 10),
+            startTime: '08:00',
+            endTime: '12:00',
+          ),
+        ],
         scanWindowStart: DateTime.utc(2026, 7, 10, 8),
         scanWindowEnd: DateTime.utc(2026, 7, 10, 12),
         syncGraceEndsAt: DateTime.utc(2026, 7, 13, 12),
@@ -38,6 +48,8 @@ void main() {
       expect(restored.session.token, 'abc123');
       expect(restored.session.eventParticipationScopeId, 'scope-1');
       expect(restored.eventLifecyclePhase, 'active');
+      expect(restored.eventDays.single.timeRangeLabel, '8:00 AM - 12:00 PM');
+      expect(restored.session.eventDays.single.dateLabel, 'Jul 10, 2026');
       expect(restored.scanWindowEnd, DateTime.utc(2026, 7, 10, 12));
       expect(restored.savedAt, savedAt);
     });

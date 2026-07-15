@@ -109,8 +109,8 @@ class EventLifecycleService
             return [null, null];
         }
 
-        $starts = $days->map(fn ($day) => Carbon::parse($day->date->toDateString() . ' ' . $day->start_time));
-        $ends = $days->map(fn ($day) => Carbon::parse($day->date->toDateString() . ' ' . $day->end_time));
+        $starts = $days->map(fn ($day) => $this->eventDayDateTime($day->date, $day->start_time));
+        $ends = $days->map(fn ($day) => $this->eventDayDateTime($day->date, $day->end_time));
 
         return [$starts->min(), $ends->max()];
     }
@@ -163,11 +163,19 @@ class EventLifecycleService
     private function isWithinAnyEventDay(Collection $days, Carbon $now): bool
     {
         return $days->contains(function ($day) use ($now): bool {
-            $start = Carbon::parse($day->date->toDateString() . ' ' . $day->start_time);
-            $end = Carbon::parse($day->date->toDateString() . ' ' . $day->end_time);
+            $start = $this->eventDayDateTime($day->date, $day->start_time);
+            $end = $this->eventDayDateTime($day->date, $day->end_time);
 
             return $now->betweenIncluded($start, $end);
         });
+    }
+
+    private function eventDayDateTime(Carbon $date, string $time): Carbon
+    {
+        return Carbon::parse(
+            $date->toDateString() . ' ' . $time,
+            config('services.eaes.event_timezone', 'Asia/Manila')
+        );
     }
 
     private function expirePastDueScannerSessions(Event $event, Carbon $now): void

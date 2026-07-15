@@ -2234,12 +2234,19 @@ class WebPortalTest extends TestCase
         $societyAdmin = $this->createAdmin('Society Admin', $h['org']);
 
         // Create an event in this org
-        Event::create([
+        $ownEvent = Event::create([
             'organization_id' => $h['org']->id,
             'title' => 'Own Event',
             'status' => 'draft',
             'start_date' => today(),
             'end_date' => today(),
+        ]);
+        EventDay::create([
+            'event_id' => $ownEvent->id,
+            'day_number' => 1,
+            'date' => today(),
+            'start_time' => '08:00',
+            'end_time' => '12:00',
         ]);
 
         // Create another org + event
@@ -2262,6 +2269,8 @@ class WebPortalTest extends TestCase
 
         $response->assertStatus(200);
         $response->assertSee('Own Event');
+        $response->assertSee('8:00 AM - 12:00 PM');
+        $response->assertSee('D1:');
         $response->assertDontSee('Other Event');
     }
 

@@ -9,6 +9,7 @@ import 'package:eaes_scanner/features/auth/domain/scanner_assignment.dart';
 import 'package:eaes_scanner/features/auth/presentation/auth_controller.dart';
 import 'package:eaes_scanner/features/scanner/data/scanner_api_client.dart';
 import 'package:eaes_scanner/features/scanner/data/scanner_contracts.dart';
+import 'package:eaes_scanner/features/scanner/domain/event_schedule_day.dart';
 import 'package:eaes_scanner/features/scanner/domain/event_summary.dart';
 import 'package:eaes_scanner/features/scanner/domain/offline_scan.dart';
 import 'package:eaes_scanner/features/scanner/domain/roster_student.dart';
@@ -224,6 +225,15 @@ void main() {
         eventTitle: 'Foundation Day',
         eventStatus: 'approved',
         eventPhase: 'active',
+        eventDays: [
+          EventScheduleDay(
+            id: 'day-1',
+            dayNumber: 1,
+            date: DateTime.utc(2026, 7, 10),
+            startTime: '08:00',
+            endTime: '12:00',
+          ),
+        ],
       );
       final authApi = FakeAuthRemoteApi(
         loginResult: const AuthLoginResult(
@@ -275,6 +285,8 @@ void main() {
       expect(snapshot['event_title'], 'Test Event');
       expect(snapshot['event_lifecycle_phase'], 'active');
       expect(snapshot['scan_window_end'], '2026-07-10T12:00:00.000Z');
+      expect(snapshot['event_days'], isNotEmpty);
+      expect((snapshot['event_days'] as List).first['start_time'], '08:00');
     });
 
     test(
@@ -572,6 +584,15 @@ class AuthFakeScannerRemoteApi implements ScannerRemoteApi {
         'title': 'Test Event',
         'status': 'approved',
         'lifecycle_phase': 'active',
+        'event_days': [
+          {
+            'id': 'day-1',
+            'day_number': 1,
+            'date': '2026-07-10',
+            'start_time': '08:00',
+            'end_time': '12:00',
+          },
+        ],
       },
       'scanner_session': {
         'id': 'scanner-session-1',
@@ -643,6 +664,31 @@ class AuthFakeScannerLocalStore implements ScannerLocalStore {
       }
     }
     return null;
+  }
+
+  @override
+  Future<List<RosterStudent>> rosterStudents({
+    String? query,
+    int limit = 100,
+    int offset = 0,
+  }) async {
+    final trimmed = query?.trim().toLowerCase();
+    final rows =
+        _roster.where((student) {
+          if (trimmed == null || trimmed.isEmpty) {
+            return true;
+          }
+
+          return student.name.toLowerCase().contains(trimmed) ||
+              (student.programCode ?? '').toLowerCase().contains(trimmed) ||
+              (student.studentIdNumber ?? '').toLowerCase().contains(trimmed);
+        }).toList()..sort(
+          (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+        );
+
+    final normalizedOffset = offset < 0 ? 0 : offset;
+    final normalizedLimit = limit < 1 ? 1 : limit;
+    return rows.skip(normalizedOffset).take(normalizedLimit).toList();
   }
 
   @override

@@ -1085,6 +1085,23 @@ class UsmEaesTest extends TestCase
             ->assertJsonFragment(['reason' => 'device_mismatch']);
     }
 
+    public function test_scanner_validation_serializes_event_local_scan_window()
+    {
+        [$org, $scanner] = $this->createOrganizationWithScanner();
+        $event = $this->createApprovedEvent($org, Carbon::parse('2026-07-12', 'Asia/Manila'));
+        $event->eventDays()->update([
+            'start_time' => '09:00:00',
+            'end_time' => '12:00:00',
+        ]);
+        $token = $this->scannerTokenForEvent($event, $scanner);
+
+        $this->withHeaders(['Authorization' => 'Bearer ' . $token])
+            ->postJson('/api/v1/scanner/validate', ['event_id' => $event->id, 'device_id' => 'device-a'])
+            ->assertStatus(200)
+            ->assertJsonPath('scanner_session.scan_window_start', '2026-07-12T09:00:00+08:00')
+            ->assertJsonPath('scanner_session.scan_window_end', '2026-07-12T12:00:00+08:00');
+    }
+
     public function test_expired_scanner_session_rejects_sync_with_clear_response()
     {
         [$org, $scanner] = $this->createOrganizationWithScanner();
@@ -1163,15 +1180,15 @@ class UsmEaesTest extends TestCase
         [$org, $scanner] = $this->createOrganizationWithScanner();
         $event = $this->createApprovedEvent($org, Carbon::today());
 
-        Carbon::setTestNow(Carbon::today()->setTime(7, 0));
+        Carbon::setTestNow(Carbon::today('Asia/Manila')->setTime(7, 0));
         $this->artisan('eaes:update-event-lifecycles')->assertSuccessful();
         $this->assertSame(EventLifecycleService::PHASE_SCHEDULED, $event->fresh()->lifecycle_phase);
 
-        Carbon::setTestNow(Carbon::today()->setTime(9, 0));
+        Carbon::setTestNow(Carbon::today('Asia/Manila')->setTime(9, 0));
         $this->artisan('eaes:update-event-lifecycles')->assertSuccessful();
         $this->assertSame(EventLifecycleService::PHASE_ACTIVE, $event->fresh()->lifecycle_phase);
 
-        Carbon::setTestNow(Carbon::today()->setTime(13, 0));
+        Carbon::setTestNow(Carbon::today('Asia/Manila')->setTime(13, 0));
         $this->artisan('eaes:update-event-lifecycles')->assertSuccessful();
         $this->assertSame(EventLifecycleService::PHASE_EVALUATION_OPEN, $event->fresh()->lifecycle_phase);
 

@@ -1,0 +1,7 @@
+interface:
+  display_name: "USM Attendance System"
+  short_description: "EAES project rules and verification guardrails"
+  default_prompt: "Use $usm-attendance-system to debug this EAES Laravel or Flutter scanner issue against the PRD, audit, and real code path."
+
+policy:
+  allow_implicit_invocation: true

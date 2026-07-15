@@ -146,8 +146,27 @@ class EventReadyCard extends StatelessWidget {
                       : 'Session ${controller.scannerSessionStatus}',
                   warning: controller.scannerSessionStatus != 'active',
                 ),
+                if (controller.eventTimeRangeLabel != null)
+                  _MetaItem(
+                    icon: Icons.schedule_rounded,
+                    label: controller.eventTimeRangeLabel!,
+                  ),
               ],
             ),
+            if (controller.eventDaysDetailLabel != null) ...[
+              const SizedBox(height: 10),
+              Text(
+                controller.eventDaysDetailLabel!,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontFamily: 'Inter',
+                  fontSize: 12,
+                  height: 1.35,
+                  color: Colors.white.withValues(alpha: 0.70),
+                ),
+              ),
+            ],
           ],
         ),
       ),

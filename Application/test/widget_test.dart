@@ -6,11 +6,15 @@ import 'package:eaes_scanner/features/auth/presentation/auth_controller.dart';
 import 'package:eaes_scanner/features/auth/presentation/screens/assigned_events_screen.dart';
 import 'package:eaes_scanner/features/auth/presentation/screens/login_screen.dart';
 import 'package:eaes_scanner/features/scanner/data/scanner_contracts.dart';
+import 'package:eaes_scanner/features/scanner/domain/event_schedule_day.dart';
 import 'package:eaes_scanner/features/scanner/domain/event_summary.dart';
 import 'package:eaes_scanner/features/scanner/domain/offline_scan.dart';
 import 'package:eaes_scanner/features/scanner/domain/roster_student.dart';
 import 'package:eaes_scanner/features/scanner/domain/scanner_session.dart';
 import 'package:eaes_scanner/features/scanner/presentation/scanner_controller.dart';
+import 'package:eaes_scanner/features/scanner/presentation/widgets/event_ready_card.dart';
+import 'package:eaes_scanner/features/scanner/presentation/screens/hydrated_roster_screen.dart';
+import 'package:eaes_scanner/features/scanner/presentation/screens/session_setup_screen.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -61,7 +65,7 @@ void main() {
         email: 'scanner@usm.edu.ph',
       )
       ..initialized = true
-      ..assignments = const [
+      ..assignments = [
         ScannerAssignment(
           id: 'assignment-1',
           status: 'active',
@@ -75,6 +79,15 @@ void main() {
           eventParticipationScopeId: 'scope-1',
           participationScopeName:
               'PSITS – Philippine Society of Information Technology Students',
+          eventDays: [
+            EventScheduleDay(
+              id: 'day-1',
+              dayNumber: 1,
+              date: DateTime.utc(2026, 7, 10),
+              startTime: '08:00',
+              endTime: '12:00',
+            ),
+          ],
           label: 'Event scanner',
           organizationAcronym: 'PSITS',
         ),
@@ -117,6 +130,7 @@ void main() {
       ),
       findsOneWidget,
     );
+    expect(find.text('8:00 AM - 12:00 PM'), findsOneWidget);
     expect(
       flutterErrors.where(
         (details) =>
@@ -124,6 +138,141 @@ void main() {
       ),
       isEmpty,
     );
+  });
+
+  testWidgets('hydrated roster screen shows local rows without QR values', (
+    WidgetTester tester,
+  ) async {
+    final localStore = _FakeScannerLocalStore(
+      roster: const [
+        RosterStudent(
+          studentId: 'student-1',
+          qrCodeValue: 'QR-ALPHA',
+          name: 'Alpha Student',
+          programCode: 'BSIS',
+          studentIdNumber: '23-72634',
+        ),
+      ],
+    );
+    final scannerController = ScannerController(
+      localDatabase: localStore,
+      apiClient: _FakeScannerRemoteApi(),
+      deviceId: 'test-device',
+      networkStatusChecker: _FakeNetworkStatusChecker(),
+    );
+    addTearDown(scannerController.dispose);
+
+    await scannerController.restoreCachedSession(
+      ScannerSessionSnapshot(
+        token: 'scanner-token',
+        eventId: 'event-1',
+        eventParticipationScopeId: 'scope-1',
+        participationScopeName: 'PSITS',
+        eventTitle: 'Development Seminar',
+        eventLifecyclePhase: 'active',
+        scannerSessionStatus: 'active',
+        savedAt: DateTime.utc(2026, 7, 10, 8),
+      ),
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SessionSetupScreen(
+          controller: scannerController,
+          onReturnToAssignments: () {},
+          onHydrate: scannerController.hydrateRoster,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('View hydrated roster'), findsOneWidget);
+    await tester.tap(find.text('View hydrated roster'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Hydrated roster'), findsOneWidget);
+    expect(find.text('1 hydrated student'), findsOneWidget);
+    expect(find.text('PSITS'), findsOneWidget);
+    expect(find.text('Alpha Student'), findsOneWidget);
+    expect(find.text('BSIS - 23-72634'), findsOneWidget);
+    expect(find.textContaining('QR-ALPHA'), findsNothing);
+
+    await tester.enterText(find.byType(TextField), 'no match');
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pumpAndSettle();
+
+    expect(find.text('No matching students'), findsOneWidget);
+  });
+
+  testWidgets('empty hydrated roster view prompts hydration', (
+    WidgetTester tester,
+  ) async {
+    final scannerController = ScannerController(
+      localDatabase: _FakeScannerLocalStore(),
+      apiClient: _FakeScannerRemoteApi(),
+      deviceId: 'test-device',
+      networkStatusChecker: _FakeNetworkStatusChecker(),
+    );
+    addTearDown(scannerController.dispose);
+
+    await scannerController.restoreCachedSession(
+      ScannerSessionSnapshot(
+        token: 'scanner-token',
+        eventId: 'event-1',
+        eventLifecyclePhase: 'active',
+        scannerSessionStatus: 'active',
+        savedAt: DateTime.utc(2026, 7, 10, 8),
+      ),
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(home: HydratedRosterScreen(controller: scannerController)),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Roster not downloaded'), findsOneWidget);
+    expect(find.text('Hydrate Roster'), findsOneWidget);
+  });
+
+  testWidgets('active scanner card renders event schedule', (
+    WidgetTester tester,
+  ) async {
+    final scannerController = ScannerController(
+      localDatabase: _FakeScannerLocalStore(),
+      apiClient: _FakeScannerRemoteApi(),
+      deviceId: 'test-device',
+      networkStatusChecker: _FakeNetworkStatusChecker(),
+    );
+    addTearDown(scannerController.dispose);
+
+    await scannerController.restoreCachedSession(
+      ScannerSessionSnapshot(
+        token: 'scanner-token',
+        eventId: 'event-1',
+        eventTitle: 'Development Seminar',
+        eventLifecyclePhase: 'active',
+        scannerSessionStatus: 'active',
+        eventDays: [
+          EventScheduleDay(
+            id: 'day-1',
+            dayNumber: 1,
+            date: DateTime.utc(2026, 7, 10),
+            startTime: '08:00',
+            endTime: '12:00',
+          ),
+        ],
+        savedAt: DateTime.utc(2026, 7, 10, 8),
+      ),
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: EventReadyCard(controller: scannerController)),
+      ),
+    );
+
+    expect(find.text('8:00 AM - 12:00 PM'), findsOneWidget);
+    expect(find.textContaining('D1: Jul 10, 2026'), findsOneWidget);
   });
 }
 
@@ -198,6 +347,11 @@ class _FakeScannerRemoteApi implements ScannerRemoteApi {
 }
 
 class _FakeScannerLocalStore implements ScannerLocalStore {
+  _FakeScannerLocalStore({List<RosterStudent> roster = const []})
+    : _roster = List.of(roster);
+
+  final List<RosterStudent> _roster;
+
   @override
   Future<EventSummary?> eventSummary(String eventId) async {
     return null;
@@ -218,11 +372,21 @@ class _FakeScannerLocalStore implements ScannerLocalStore {
 
   @override
   Future<RosterStudent?> findStudentByIdNumber(String studentIdNumber) async {
+    for (final student in _roster) {
+      if (student.studentIdNumber == studentIdNumber) {
+        return student;
+      }
+    }
     return null;
   }
 
   @override
   Future<RosterStudent?> findStudentByQr(String qrCodeValue) async {
+    for (final student in _roster) {
+      if (student.qrCodeValue == qrCodeValue) {
+        return student;
+      }
+    }
     return null;
   }
 
@@ -257,14 +421,43 @@ class _FakeScannerLocalStore implements ScannerLocalStore {
   }
 
   @override
-  Future<void> replaceRoster(List<RosterStudent> students) async {}
+  Future<void> replaceRoster(List<RosterStudent> students) async {
+    _roster
+      ..clear()
+      ..addAll(students);
+  }
 
   @override
   Future<void> resetFailedToPending(List<String> dedupKeys) async {}
 
   @override
   Future<int> rosterCount() async {
-    return 0;
+    return _roster.length;
+  }
+
+  @override
+  Future<List<RosterStudent>> rosterStudents({
+    String? query,
+    int limit = 100,
+    int offset = 0,
+  }) async {
+    final trimmed = query?.trim().toLowerCase();
+    final rows =
+        _roster.where((student) {
+          if (trimmed == null || trimmed.isEmpty) {
+            return true;
+          }
+
+          return student.name.toLowerCase().contains(trimmed) ||
+              (student.programCode ?? '').toLowerCase().contains(trimmed) ||
+              (student.studentIdNumber ?? '').toLowerCase().contains(trimmed);
+        }).toList()..sort(
+          (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+        );
+
+    final normalizedOffset = offset < 0 ? 0 : offset;
+    final normalizedLimit = limit < 1 ? 1 : limit;
+    return rows.skip(normalizedOffset).take(normalizedLimit).toList();
   }
 
   @override
@@ -284,10 +477,14 @@ class _FakeScannerLocalStore implements ScannerLocalStore {
   Future<void> upsertEventSummary(EventSummary summary) async {}
 
   @override
-  Future<void> upsertRoster(List<RosterStudent> students) async {}
+  Future<void> upsertRoster(List<RosterStudent> students) async {
+    _roster.addAll(students);
+  }
 
   @override
-  Future<void> wipeRoster() async {}
+  Future<void> wipeRoster() async {
+    _roster.clear();
+  }
 }
 
 class _FakeNetworkStatusChecker implements NetworkStatusChecker {

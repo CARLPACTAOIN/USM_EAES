@@ -1,3 +1,5 @@
+import 'event_schedule_day.dart';
+
 class ScannerSession {
   const ScannerSession({
     required this.token,
@@ -5,6 +7,7 @@ class ScannerSession {
     this.assignmentId,
     this.eventParticipationScopeId,
     this.participationScopeName,
+    this.eventDays = const [],
   });
 
   final String token;
@@ -12,11 +15,13 @@ class ScannerSession {
   final String? assignmentId;
   final String? eventParticipationScopeId;
   final String? participationScopeName;
+  final List<EventScheduleDay> eventDays;
 
   ScannerSession copyWith({
     String? assignmentId,
     String? eventParticipationScopeId,
     String? participationScopeName,
+    List<EventScheduleDay>? eventDays,
   }) {
     return ScannerSession(
       token: token,
@@ -26,6 +31,7 @@ class ScannerSession {
           eventParticipationScopeId ?? this.eventParticipationScopeId,
       participationScopeName:
           participationScopeName ?? this.participationScopeName,
+      eventDays: eventDays ?? this.eventDays,
     );
   }
 }
@@ -41,6 +47,7 @@ class ScannerSessionSnapshot {
     this.eventStatus,
     this.eventLifecyclePhase,
     this.scannerSessionStatus,
+    this.eventDays = const [],
     this.scanWindowStart,
     this.scanWindowEnd,
     this.syncGraceEndsAt,
@@ -56,6 +63,7 @@ class ScannerSessionSnapshot {
   final String? eventStatus;
   final String? eventLifecyclePhase;
   final String? scannerSessionStatus;
+  final List<EventScheduleDay> eventDays;
   final DateTime? scanWindowStart;
   final DateTime? scanWindowEnd;
   final DateTime? syncGraceEndsAt;
@@ -80,6 +88,7 @@ class ScannerSessionSnapshot {
       eventStatus: _stringOrNull(json['event_status']),
       eventLifecyclePhase: _stringOrNull(json['event_lifecycle_phase']),
       scannerSessionStatus: _stringOrNull(json['scanner_session_status']),
+      eventDays: eventScheduleDaysFromJson(json['event_days']),
       scanWindowStart: _dateTimeOrNull(json['scan_window_start']),
       scanWindowEnd: _dateTimeOrNull(json['scan_window_end']),
       syncGraceEndsAt: _dateTimeOrNull(json['sync_grace_ends_at']),
@@ -94,6 +103,7 @@ class ScannerSessionSnapshot {
       assignmentId: assignmentId,
       eventParticipationScopeId: eventParticipationScopeId,
       participationScopeName: participationScopeName,
+      eventDays: eventDays,
     );
   }
 
@@ -108,6 +118,7 @@ class ScannerSessionSnapshot {
       'event_status': eventStatus,
       'event_lifecycle_phase': eventLifecyclePhase,
       'scanner_session_status': scannerSessionStatus,
+      'event_days': eventDays.map((day) => day.toJson()).toList(),
       'scan_window_start': scanWindowStart?.toUtc().toIso8601String(),
       'scan_window_end': scanWindowEnd?.toUtc().toIso8601String(),
       'sync_grace_ends_at': syncGraceEndsAt?.toUtc().toIso8601String(),

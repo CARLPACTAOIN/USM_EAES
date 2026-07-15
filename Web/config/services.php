@@ -68,6 +68,7 @@ return [
         'sync_batch_size' => (int) env('EAES_SYNC_BATCH_SIZE', 200),
         'sync_chunk_size' => (int) env('EAES_SYNC_CHUNK_SIZE', 200),
         'evaluation_window_hours' => (int) env('EAES_EVALUATION_WINDOW_HOURS', 24),
+        'event_timezone' => env('EAES_EVENT_TIMEZONE', 'Asia/Manila'),
         'scan_early_checkin_buffer_min' => (int) env('EAES_SCAN_EARLY_CHECKIN_BUFFER_MIN', 0),
         'checkout_grace_period_min' => (int) env('EAES_CHECKOUT_GRACE_PERIOD_MIN', 0),
         'sync_grace_period_hours' => (int) env('EAES_SYNC_GRACE_PERIOD_HOURS', 72),

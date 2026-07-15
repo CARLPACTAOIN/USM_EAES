@@ -1,3 +1,5 @@
+import '../../scanner/domain/event_schedule_day.dart';
+
 class ScannerAssignment {
   const ScannerAssignment({
     required this.id,
@@ -15,6 +17,7 @@ class ScannerAssignment {
     this.participationScopeName,
     this.participationScopeType,
     this.participationScopeStatus,
+    this.eventDays = const [],
     this.label,
     this.organizationName,
     this.organizationAcronym,
@@ -38,12 +41,31 @@ class ScannerAssignment {
   final String? participationScopeName;
   final String? participationScopeType;
   final String? participationScopeStatus;
+  final List<EventScheduleDay> eventDays;
   final String? organizationName;
   final String? organizationAcronym;
   final DateTime? expiresAt;
   final DateTime? lastActivatedAt;
 
   bool get isActive => status == 'active';
+
+  String? get eventTimeRangeLabel {
+    if (eventDays.isEmpty) return null;
+    final first = eventDays.first;
+    final last = eventDays.last;
+
+    if (eventDays.length == 1 || first.dateLabel == last.dateLabel) {
+      return first.timeRangeLabel;
+    }
+
+    return '${first.dateLabel} ${first.startTimeLabel ?? 'Start TBA'} - '
+        '${last.dateLabel} ${last.endTimeLabel ?? 'End TBA'}';
+  }
+
+  String? get eventDaysDetailLabel {
+    if (eventDays.isEmpty) return null;
+    return eventDays.map((day) => day.compactLabel).join(' | ');
+  }
 
   factory ScannerAssignment.fromJson(Map<String, dynamic> json) {
     final event = json['event'] as Map<String, dynamic>? ?? {};
@@ -61,6 +83,7 @@ class ScannerAssignment {
       eventTitle: event['title']?.toString() ?? 'Assigned event',
       eventStatus: event['status']?.toString() ?? 'unknown',
       eventPhase: event['lifecycle_phase']?.toString() ?? 'scheduled',
+      eventDays: eventScheduleDaysFromJson(event['event_days']),
       activationState: json['activation_state']?.toString() ?? 'activate',
       activeSessionDeviceMatches:
           json['active_session_device_matches'] as bool?,
@@ -91,6 +114,7 @@ class ScannerAssignment {
         'title': eventTitle,
         'status': eventStatus,
         'lifecycle_phase': eventPhase,
+        'event_days': eventDays.map((day) => day.toJson()).toList(),
         'organization': {
           'name': organizationName,
           'acronym': organizationAcronym,

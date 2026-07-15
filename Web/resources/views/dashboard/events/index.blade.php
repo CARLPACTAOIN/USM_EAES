@@ -128,57 +128,122 @@
                             <span class="text-sm text-(--color-text-secondary)">{{ $event->organization?->acronym ?? 'N/A' }}</span>
                         </td>
                         <td>
-                            <span class="text-sm font-data text-(--color-text-secondary)">
-                                {{ $event->start_date?->format('M d') }}
-                                @if($event->end_date && $event->end_date->ne($event->start_date))
-                                    – {{ $event->end_date->format('M d, Y') }}
-                                @else
-                                    , {{ $event->start_date?->format('Y') }}
+                            <div class="date-cell" title="{{ $eventDaysSummary ?: $scheduleSummary }}">
+                                <span class="date-cell-range">
+                                    {{ $event->start_date?->format('M d') }}@if($event->end_date && $event->end_date->ne($event->start_date)) – {{ $event->end_date->format('M d') }}@endif, {{ $event->start_date?->format('Y') }}
+                                </span>
+                                <span class="date-cell-time">
+                                    {{ $eventStartTime }} – {{ $eventEndTime }}
+                                </span>
+                                @if($event->eventDays->count() > 1)
+                                    <span class="date-cell-days">
+                                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                                        {{ $event->eventDays->count() }} days
+                                    </span>
                                 @endif
-                            </span>
+                            </div>
                         </td>
                         <td>
-                            <div class="space-y-1 text-xs">
-                                @if($isParticipatingWorkspace && $primaryParticipantScope)
-                                    <div class="font-medium text-(--color-text-primary)">Your participant PPA</div>
-                                    <div class="{{ $primaryParticipantScope->invitation_acknowledged_at ? 'text-(--color-success)' : 'text-(--color-warning)' }}">
-                                        {{ $primaryParticipantScope->invitation_acknowledged_at ? 'Invitation acknowledged' : 'Invitation needs acknowledgement' }}
-                                    </div>
+                            @if($isParticipatingWorkspace && $primaryParticipantScope)
+                                <div class="ppa-status-grid">
+                                    {{-- PPA Status badge --}}
                                     <span class="badge badge-{{ str_replace('_', '-', $primaryParticipantScope->ppa_status) }}">
                                         {{ ucwords(str_replace('_', ' ', $primaryParticipantScope->ppa_status)) }}
                                     </span>
-                                    <div class="{{ $primaryParticipantScope->ppa_softcopy_path ? 'text-(--color-success)' : 'text-(--color-warning)' }}">
-                                        {{ $primaryParticipantScope->ppa_softcopy_path ? 'Softcopy attached' : 'Softcopy pending' }}
-                                    </div>
-                                    <div class="{{ $primaryParticipantScope->hardcopy_submitted ? 'text-(--color-success)' : 'text-(--color-warning)' }}">
-                                        {{ $primaryParticipantScope->hardcopy_submitted ? 'Hardcopy recorded' : 'Hardcopy pending' }}
-                                    </div>
-                                    <div class="text-(--color-text-tertiary)">
-                                        {{ $approvedScopeCount > 0 ? 'Scoped scanner access ready' : 'Scanner access locked' }}
-                                    </div>
-                                @else
-                                    @if($event->proposal_document_path)
-                                        <a href="{{ route('dashboard.events.proposal-document', $event->id) }}" class="inline-flex items-center gap-1 text-(--color-accent) hover:underline">
-                                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414A1 1 0 0119 9.414V19a2 2 0 01-2 2z"/></svg>
+
+                                    {{-- Invitation --}}
+                                    <span class="ppa-status-item {{ $primaryParticipantScope->invitation_acknowledged_at ? 'ppa-status-item--ok' : 'ppa-status-item--warn' }}">
+                                        @if($primaryParticipantScope->invitation_acknowledged_at)
+                                            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                                            Acknowledged
+                                        @else
+                                            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3m0 3h.01M12 3a9 9 0 100 18 9 9 0 000-18z"/></svg>
+                                            Needs acknowledgement
+                                        @endif
+                                    </span>
+
+                                    <hr class="ppa-status-divider">
+
+                                    {{-- Documents --}}
+                                    <div class="ppa-status-group">
+                                        <span class="ppa-status-item {{ $primaryParticipantScope->ppa_softcopy_path ? 'ppa-status-item--ok' : 'ppa-status-item--warn' }}">
+                                            @if($primaryParticipantScope->ppa_softcopy_path)
+                                                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                                            @else
+                                                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01"/></svg>
+                                            @endif
                                             Softcopy
-                                        </a>
-                                    @else
-                                        <span class="text-(--color-destructive)">Missing softcopy</span>
-                                    @endif
-
-                                    <div class="{{ $event->hardcopy_submitted ? 'text-(--color-success)' : 'text-(--color-warning)' }}">
-                                        {{ $event->hardcopy_submitted ? 'Hardcopy submitted' : 'Hardcopy pending' }}
+                                        </span>
+                                        <span class="ppa-status-item {{ $primaryParticipantScope->hardcopy_submitted ? 'ppa-status-item--ok' : 'ppa-status-item--warn' }}">
+                                            @if($primaryParticipantScope->hardcopy_submitted)
+                                                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                                            @else
+                                                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01"/></svg>
+                                            @endif
+                                            Hardcopy
+                                        </span>
                                     </div>
 
-                                    <div class="text-(--color-text-tertiary)">
-                                        Head {{ $event->head_organization_signed ? 'signed' : 'pending' }},
-                                        Adviser {{ $event->adviser_signed ? 'signed' : 'pending' }}
+                                    {{-- Scanner access --}}
+                                    <span class="ppa-status-item ppa-status-item--muted">
+                                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+                                        {{ $approvedScopeCount > 0 ? 'Scanner ready' : 'Scanner locked' }}
+                                    </span>
+                                </div>
+                            @else
+                                <div class="ppa-status-grid">
+                                    {{-- Document status --}}
+                                    <div class="ppa-status-group">
+                                        @if($event->proposal_document_path)
+                                            <a href="{{ route('dashboard.events.proposal-document', $event->id) }}" class="ppa-status-item ppa-status-item--ok hover:underline">
+                                                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                                                Softcopy
+                                            </a>
+                                        @else
+                                            <span class="ppa-status-item ppa-status-item--error">
+                                                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                                                Softcopy
+                                            </span>
+                                        @endif
+                                        <span class="ppa-status-item {{ $event->hardcopy_submitted ? 'ppa-status-item--ok' : 'ppa-status-item--warn' }}">
+                                            @if($event->hardcopy_submitted)
+                                                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                                            @else
+                                                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01"/></svg>
+                                            @endif
+                                            Hardcopy
+                                        </span>
                                     </div>
-                                    <div class="text-(--color-text-tertiary)">
-                                        {{ $approvedScopeCount }} runtime scope(s), {{ $participantScopeCount }} participant
+
+                                    <hr class="ppa-status-divider">
+
+                                    {{-- Signatories --}}
+                                    <div class="ppa-status-group">
+                                        <span class="ppa-status-item {{ $event->head_organization_signed ? 'ppa-status-item--ok' : 'ppa-status-item--warn' }}">
+                                            @if($event->head_organization_signed)
+                                                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                                            @else
+                                                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01"/></svg>
+                                            @endif
+                                            Head
+                                        </span>
+                                        <span class="ppa-status-item {{ $event->adviser_signed ? 'ppa-status-item--ok' : 'ppa-status-item--warn' }}">
+                                            @if($event->adviser_signed)
+                                                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                                            @else
+                                                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01"/></svg>
+                                            @endif
+                                            Adviser
+                                        </span>
                                     </div>
-                                @endif
-                            </div>
+
+                                    {{-- Scope counts --}}
+                                    <div class="ppa-status-group" style="margin-top: 0.125rem;">
+                                        <span class="ppa-scope-badge">{{ $approvedScopeCount }} scope{{ $approvedScopeCount !== 1 ? 's' : '' }}</span>
+                                        <span class="ppa-scope-badge">{{ $participantScopeCount }} participant{{ $participantScopeCount !== 1 ? 's' : '' }}</span>
+                                    </div>
+                                </div>
+                            @endif
                         </td>
                         <td>
                             <div class="space-y-1">

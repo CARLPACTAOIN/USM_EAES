@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:eaes_scanner/features/scanner/data/scanner_api_client.dart';
 import 'package:eaes_scanner/features/scanner/data/scanner_contracts.dart';
+import 'package:eaes_scanner/features/scanner/domain/event_schedule_day.dart';
 import 'package:eaes_scanner/features/scanner/domain/event_summary.dart';
 import 'package:eaes_scanner/features/scanner/domain/offline_scan.dart';
 import 'package:eaes_scanner/features/scanner/domain/roster_student.dart';
@@ -107,6 +108,15 @@ void main() {
       final remote = FakeRemoteApi(
         scanWindowStart: '2026-07-10T08:00:00Z',
         scanWindowEnd: '2026-07-10T12:00:00Z',
+        eventDays: [
+          EventScheduleDay(
+            id: 'day-1',
+            dayNumber: 1,
+            date: DateTime.utc(2026, 7, 10),
+            startTime: '08:00',
+            endTime: '12:00',
+          ),
+        ],
       );
       final controller = buildController(
         remoteApi: remote,
@@ -125,6 +135,8 @@ void main() {
       expect(snapshot, isNotNull);
       expect(snapshot!.eventTitle, 'Test Event');
       expect(snapshot.eventLifecyclePhase, 'active');
+      expect(controller.eventTimeRangeLabel, '8:00 AM - 12:00 PM');
+      expect(snapshot.eventDays.single.compactLabel, contains('Jul 10, 2026'));
       expect(snapshot.scanWindowStart, DateTime.utc(2026, 7, 10, 8));
       expect(snapshot.scanWindowEnd, DateTime.utc(2026, 7, 10, 12));
       expect(snapshot.savedAt, now);
@@ -271,6 +283,51 @@ void main() {
       },
     );
 
+    test('lists hydrated roster rows with local search only', () async {
+      final local = FakeLocalStore();
+      await local.upsertRoster(const [
+        RosterStudent(
+          studentId: 'student-1',
+          qrCodeValue: 'QR-ALPHA',
+          name: 'Alpha Student',
+          programCode: 'BSIS',
+          studentIdNumber: '23-72634',
+        ),
+        RosterStudent(
+          studentId: 'student-2',
+          qrCodeValue: 'QR-BETA',
+          name: 'Beta Student',
+          programCode: 'BSCS',
+          studentIdNumber: '23-80000',
+        ),
+      ]);
+      final controller = buildController(localStore: local);
+
+      expect(
+        await controller.rosterStudents(query: 'alpha'),
+        contains(
+          predicate<RosterStudent>(
+            (student) => student.name == 'Alpha Student',
+          ),
+        ),
+      );
+      expect(
+        await controller.rosterStudents(query: 'BSCS'),
+        contains(
+          predicate<RosterStudent>((student) => student.name == 'Beta Student'),
+        ),
+      );
+      expect(
+        await controller.rosterStudents(query: '23-72634'),
+        contains(
+          predicate<RosterStudent>(
+            (student) => student.name == 'Alpha Student',
+          ),
+        ),
+      );
+      expect(await controller.rosterStudents(query: 'QR-BETA'), isEmpty);
+    });
+
     test('does not keep session when backend validation fails', () async {
       final remote = FakeRemoteApi(
         validateError: ScannerApiException('Unauthorized', statusCode: 401),
@@ -340,6 +397,41 @@ void main() {
       expect(result.detail, contains('Event has not started yet'));
       expect(controller.canCaptureScans, isFalse);
     });
+
+    test(
+      'scheduled event start message includes date only when not today',
+      () async {
+        final controller = buildController(
+          remoteApi: FakeRemoteApi(
+            eventPhase: 'scheduled',
+            scanWindowStart: '2026-07-12T09:00:00+08:00',
+          ),
+          nowFactory: () => DateTime.parse('2026-07-11T10:00:00+08:00'),
+        );
+        await controller.activateSession(session);
+
+        final futureResult = await controller.recordQr('QR-1');
+
+        expect(futureResult.success, isFalse);
+        expect(futureResult.detail, contains('July 12, 9:00 AM'));
+        expect(futureResult.detail, isNot(contains('5:00 PM')));
+
+        final sameDayController = buildController(
+          remoteApi: FakeRemoteApi(
+            eventPhase: 'scheduled',
+            scanWindowStart: '2026-07-12T09:00:00+08:00',
+          ),
+          nowFactory: () => DateTime.parse('2026-07-12T07:00:00+08:00'),
+        );
+        await sameDayController.activateSession(session);
+
+        final sameDayResult = await sameDayController.recordQr('QR-1');
+
+        expect(sameDayResult.success, isFalse);
+        expect(sameDayResult.detail, contains('available at 9:00 AM'));
+        expect(sameDayResult.detail, isNot(contains('July 12')));
+      },
+    );
 
     test('ended event disables new scans but leaves sync available', () async {
       final local = FakeLocalStore();
@@ -653,6 +745,7 @@ class FakeRemoteApi implements ScannerRemoteApi {
     this.eventPhase,
     this.scanWindowStart,
     this.scanWindowEnd,
+    this.eventDays = const [],
     this.validateError,
   });
 
@@ -662,6 +755,7 @@ class FakeRemoteApi implements ScannerRemoteApi {
   final String? eventPhase;
   final String? scanWindowStart;
   final String? scanWindowEnd;
+  final List<EventScheduleDay> eventDays;
   final Object? validateError;
   final List<List<OfflineScan>> syncedBatches = [];
 
@@ -678,6 +772,7 @@ class FakeRemoteApi implements ScannerRemoteApi {
         'status': eventStatus,
         'lifecycle_phase':
             eventPhase ?? (eventStatus == 'completed' ? 'completed' : 'active'),
+        'event_days': eventDays.map((day) => day.toJson()).toList(),
       },
       'scanner_session': {
         'id': 'scanner-session-1',
@@ -741,6 +836,31 @@ class FakeLocalStore implements ScannerLocalStore {
   @override
   Future<RosterStudent?> findStudentByIdNumber(String studentIdNumber) async {
     return _rosterByIdNumber[studentIdNumber];
+  }
+
+  @override
+  Future<List<RosterStudent>> rosterStudents({
+    String? query,
+    int limit = 100,
+    int offset = 0,
+  }) async {
+    final trimmed = query?.trim().toLowerCase();
+    final students =
+        _rosterByQr.values.where((student) {
+          if (trimmed == null || trimmed.isEmpty) {
+            return true;
+          }
+
+          return student.name.toLowerCase().contains(trimmed) ||
+              (student.programCode ?? '').toLowerCase().contains(trimmed) ||
+              (student.studentIdNumber ?? '').toLowerCase().contains(trimmed);
+        }).toList()..sort(
+          (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+        );
+
+    final normalizedOffset = offset < 0 ? 0 : offset;
+    final normalizedLimit = limit < 1 ? 1 : limit;
+    return students.skip(normalizedOffset).take(normalizedLimit).toList();
   }
 
   void releaseInsert() {

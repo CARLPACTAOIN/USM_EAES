@@ -7,6 +7,7 @@ import '../data/scanner_api_client.dart';
 import '../data/scanner_contracts.dart';
 import '../data/scanner_local_database.dart';
 import '../domain/event_summary.dart';
+import '../domain/event_schedule_day.dart';
 import '../domain/offline_scan.dart';
 import '../domain/roster_student.dart';
 import '../domain/scan_sync_status.dart';
@@ -64,6 +65,7 @@ class ScannerController extends ChangeNotifier {
   String? eventLifecyclePhase;
   String? scannerSessionStatus;
   String? participationScopeName;
+  List<EventScheduleDay> eventDays = const [];
   DateTime? scanWindowStart;
   DateTime? scanWindowEnd;
   DateTime? syncGraceEndsAt;
@@ -97,6 +99,24 @@ class ScannerController extends ChangeNotifier {
   bool get syncGraceActive {
     final graceEnd = syncGraceEndsAt;
     return graceEnd != null && _nowFactory().toUtc().isBefore(graceEnd.toUtc());
+  }
+
+  String? get eventTimeRangeLabel {
+    if (eventDays.isEmpty) return null;
+    final first = eventDays.first;
+    final last = eventDays.last;
+
+    if (eventDays.length == 1 || first.dateLabel == last.dateLabel) {
+      return first.timeRangeLabel;
+    }
+
+    return '${first.dateLabel} ${first.startTimeLabel ?? 'Start TBA'} - '
+        '${last.dateLabel} ${last.endTimeLabel ?? 'End TBA'}';
+  }
+
+  String? get eventDaysDetailLabel {
+    if (eventDays.isEmpty) return null;
+    return eventDays.map((day) => day.compactLabel).join(' | ');
   }
 
   bool isOnline = false;
@@ -162,6 +182,7 @@ class ScannerController extends ChangeNotifier {
       eventStatus: eventStatus,
       eventLifecyclePhase: eventLifecyclePhase,
       scannerSessionStatus: scannerSessionStatus,
+      eventDays: eventDays,
       scanWindowStart: scanWindowStart,
       scanWindowEnd: scanWindowEnd,
       syncGraceEndsAt: syncGraceEndsAt,
@@ -175,6 +196,7 @@ class ScannerController extends ChangeNotifier {
     eventStatus = snapshot.eventStatus;
     eventLifecyclePhase = snapshot.eventLifecyclePhase;
     scannerSessionStatus = snapshot.scannerSessionStatus;
+    eventDays = snapshot.eventDays;
     participationScopeName =
         snapshot.participationScopeName ??
         snapshot.session.participationScopeName;
@@ -219,6 +241,7 @@ class ScannerController extends ChangeNotifier {
         eventParticipationScopeId:
             scannerSession?['event_participation_scope_id']?.toString(),
         participationScopeName: participationScope?['name']?.toString(),
+        eventDays: eventScheduleDaysFromJson(event?['event_days']),
       );
       eventTitle = event?['title']?.toString();
       eventStatus = event?['status']?.toString();
@@ -228,6 +251,9 @@ class ScannerController extends ChangeNotifier {
       participationScopeName =
           participationScope?['name']?.toString() ??
           nextSession.participationScopeName;
+      eventDays = session?.eventDays.isNotEmpty == true
+          ? session!.eventDays
+          : nextSession.eventDays;
       scanWindowStart = _parseDateTime(scannerSession?['scan_window_start']);
       scanWindowEnd = _parseDateTime(scannerSession?['scan_window_end']);
       syncGraceEndsAt = _parseDateTime(scannerSession?['sync_grace_ends_at']);
@@ -246,6 +272,7 @@ class ScannerController extends ChangeNotifier {
       eventLifecyclePhase = null;
       scannerSessionStatus = null;
       participationScopeName = null;
+      eventDays = const [];
       scanWindowStart = null;
       scanWindowEnd = null;
       syncGraceEndsAt = null;
@@ -288,6 +315,18 @@ class ScannerController extends ChangeNotifier {
       busy = false;
       notifyListeners();
     }
+  }
+
+  Future<List<RosterStudent>> rosterStudents({
+    String? query,
+    int limit = 100,
+    int offset = 0,
+  }) {
+    return _localDatabase.rosterStudents(
+      query: query,
+      limit: limit,
+      offset: offset,
+    );
   }
 
   String _duplicateKey({
@@ -606,6 +645,7 @@ class ScannerController extends ChangeNotifier {
       final participationScope =
           scannerSession?['participation_scope'] as Map<String, dynamic>?;
       final status = event?['status']?.toString();
+      eventTitle = event?['title']?.toString() ?? eventTitle;
       eventStatus = status;
       eventLifecyclePhase =
           event?['lifecycle_phase']?.toString() ?? eventStatus;
@@ -613,6 +653,10 @@ class ScannerController extends ChangeNotifier {
       participationScopeName =
           participationScope?['name']?.toString() ??
           activeSession.participationScopeName;
+      final updatedEventDays = eventScheduleDaysFromJson(event?['event_days']);
+      if (updatedEventDays.isNotEmpty) {
+        eventDays = updatedEventDays;
+      }
       scanWindowStart = _parseDateTime(scannerSession?['scan_window_start']);
       scanWindowEnd = _parseDateTime(scannerSession?['scan_window_end']);
       syncGraceEndsAt = _parseDateTime(scannerSession?['sync_grace_ends_at']);
@@ -659,6 +703,7 @@ class ScannerController extends ChangeNotifier {
       eventLifecyclePhase = null;
       scannerSessionStatus = null;
       participationScopeName = null;
+      eventDays = const [];
       scanWindowStart = null;
       scanWindowEnd = null;
       syncGraceEndsAt = null;
@@ -712,7 +757,7 @@ class ScannerController extends ChangeNotifier {
         final start = scanWindowStart;
         return start == null
             ? 'Event has not started yet.'
-            : 'Event has not started yet. Scanning will be available at ${_formatTime(start)}.';
+            : 'Event has not started yet. Scanning will be available at ${_formatAvailabilityDateTime(start)}.';
       case 'active':
         if (!_isInsideScanWindow()) {
           return _scanWindowBlockedMessage();
@@ -736,7 +781,7 @@ class ScannerController extends ChangeNotifier {
         final start = scanWindowStart;
         return start == null
             ? 'Event has not started yet.'
-            : 'Event has not started yet. Scanning will be available at ${_formatTime(start)}.';
+            : 'Event has not started yet. Scanning will be available at ${_formatAvailabilityDateTime(start)}.';
       case 'active':
         return _scanWindowBlockedMessage();
       case 'ended':
@@ -755,13 +800,25 @@ class ScannerController extends ChangeNotifier {
     final now = _nowFactory().toUtc();
     final start = scanWindowStart;
     if (start != null && now.isBefore(start.toUtc())) {
-      return 'Event has not started yet. Scanning will be available at ${_formatTime(start)}.';
+      return 'Event has not started yet. Scanning will be available at ${_formatAvailabilityDateTime(start)}.';
     }
     final end = scanWindowEnd;
     if (end != null && now.isAfter(end.toUtc())) {
       return 'Event scan window has ended. Please sync all pending scans.';
     }
     return 'Scanning is not available for this event phase.';
+  }
+
+  String _formatAvailabilityDateTime(DateTime value) {
+    final local = value.toLocal();
+    final today = _nowFactory().toLocal();
+    if (local.year == today.year &&
+        local.month == today.month &&
+        local.day == today.day) {
+      return _formatTime(local);
+    }
+
+    return '${_monthName(local.month)} ${local.day}, ${_formatTime(local)}';
   }
 
   String _formatTime(DateTime value) {
@@ -772,6 +829,26 @@ class ScannerController extends ChangeNotifier {
     final minute = local.minute.toString().padLeft(2, '0');
     final suffix = local.hour >= 12 ? 'PM' : 'AM';
     return '$hour:$minute $suffix';
+  }
+
+  String _monthName(int month) {
+    const months = [
+      'January',
+      'February',
+      'March',
+      'April',
+      'May',
+      'June',
+      'July',
+      'August',
+      'September',
+      'October',
+      'November',
+      'December',
+    ];
+
+    if (month < 1 || month > 12) return 'Date';
+    return months[month - 1];
   }
 
   Future<List<OfflineScan>> recentScans({int limit = 100}) async {

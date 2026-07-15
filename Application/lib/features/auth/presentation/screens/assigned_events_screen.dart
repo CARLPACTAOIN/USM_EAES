@@ -489,6 +489,33 @@ class _AssignmentCard extends StatelessWidget {
               ],
             ),
           ],
+          if (assignment.eventTimeRangeLabel != null) ...[
+            const SizedBox(height: 6),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  Icons.schedule_rounded,
+                  size: 14,
+                  color: AppColors.usmGold.withValues(alpha: 0.75),
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    assignment.eventTimeRangeLabel!,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontFamily: 'Inter',
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: c.onSurface,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
           const SizedBox(height: 4),
           Text(
             _helperText(assignment),

@@ -306,7 +306,7 @@ class _ScannerAppBar extends StatelessWidget implements PreferredSizeWidget {
           ),
           const SizedBox(height: 1),
           Text(
-            'USM EAES Scanner',
+            ctrl.eventTimeRangeLabel ?? 'USM EAES Scanner',
             style: theme.textTheme.labelSmall?.copyWith(
               color: c.isDark
                   ? AppColors.usmGold.withValues(alpha: 0.60)

@@ -140,7 +140,10 @@ class AttendanceSyncController extends Controller
             }
             $seenDedupKeys[] = $scan['dedup_key'];
 
-            $scannedAt = Carbon::parse($scan['scanned_at']);
+            $scannedAt = Carbon::parse(
+                $scan['scanned_at'],
+                config('services.eaes.event_timezone', 'Asia/Manila')
+            );
             $timestampGuard = $this->scannerSessions->validateScanTimestamp($event, $scannedAt);
             if ($timestampGuard) {
                 $rejectedScans[] = [

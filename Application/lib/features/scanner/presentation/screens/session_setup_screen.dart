@@ -9,6 +9,7 @@ import '../../domain/scan_type.dart';
 import '../scanner_controller.dart';
 import '../widgets/event_ready_card.dart';
 import '../widgets/sync_summary_strip.dart';
+import 'hydrated_roster_screen.dart';
 import 'live_scanner_screen.dart';
 
 class SessionSetupScreen extends StatefulWidget {
@@ -69,6 +70,14 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
     );
   }
 
+  void _pushHydratedRoster(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => HydratedRosterScreen(controller: widget.controller),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
@@ -100,6 +109,7 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                         key: const ValueKey('active'),
                         controller: widget.controller,
                         onHydrate: widget.onHydrate,
+                        onViewRoster: () => _pushHydratedRoster(context),
                         onTimeIn: () => _pushScanner(context, ScanType.timeIn),
                         onTimeOut: () =>
                             _pushScanner(context, ScanType.timeOut),
@@ -192,12 +202,14 @@ class _SessionActiveContent extends StatelessWidget {
     super.key,
     required this.controller,
     required this.onHydrate,
+    required this.onViewRoster,
     required this.onTimeIn,
     required this.onTimeOut,
   });
 
   final ScannerController controller;
   final VoidCallback onHydrate;
+  final VoidCallback onViewRoster;
   final VoidCallback onTimeIn;
   final VoidCallback onTimeOut;
 
@@ -217,27 +229,48 @@ class _SessionActiveContent extends StatelessWidget {
         ScanModeButtons(onTimeIn: onTimeIn, onTimeOut: onTimeOut),
         const SizedBox(height: 12),
         if (controller.rosterCount > 0)
-          TextButton.icon(
-            onPressed: controller.busy ? null : onHydrate,
-            icon: controller.busy
-                ? const SizedBox.square(
-                    dimension: 16,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: AppColors.usmGold,
-                    ),
-                  )
-                : Icon(
-                    Icons.refresh_rounded,
-                    size: 18,
+          Wrap(
+            alignment: WrapAlignment.center,
+            spacing: 8,
+            runSpacing: 4,
+            children: [
+              TextButton.icon(
+                onPressed: onViewRoster,
+                icon: Icon(
+                  Icons.groups_2_rounded,
+                  size: 18,
+                  color: AppColors.usmGold.withValues(alpha: 0.78),
+                ),
+                label: Text(
+                  'View hydrated roster',
+                  style: TextStyle(
+                    color: AppColors.usmGold.withValues(alpha: 0.78),
+                  ),
+                ),
+              ),
+              TextButton.icon(
+                onPressed: controller.busy ? null : onHydrate,
+                icon: controller.busy
+                    ? const SizedBox.square(
+                        dimension: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: AppColors.usmGold,
+                        ),
+                      )
+                    : Icon(
+                        Icons.refresh_rounded,
+                        size: 18,
+                        color: AppColors.usmGold.withValues(alpha: 0.70),
+                      ),
+                label: Text(
+                  controller.busy ? 'Refreshing...' : 'Refresh roster',
+                  style: TextStyle(
                     color: AppColors.usmGold.withValues(alpha: 0.70),
                   ),
-            label: Text(
-              controller.busy ? 'Refreshing...' : 'Refresh roster',
-              style: TextStyle(
-                color: AppColors.usmGold.withValues(alpha: 0.70),
+                ),
               ),
-            ),
+            ],
           ),
       ],
     );

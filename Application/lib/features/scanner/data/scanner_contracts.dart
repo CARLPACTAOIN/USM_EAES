@@ -25,6 +25,12 @@ abstract class ScannerLocalStore {
 
   Future<RosterStudent?> findStudentByIdNumber(String studentIdNumber);
 
+  Future<List<RosterStudent>> rosterStudents({
+    String? query,
+    int limit = 100,
+    int offset = 0,
+  });
+
   Future<int> insertScan(OfflineScan scan);
 
   Future<List<OfflineScan>> unsyncedScans(String eventId, {int limit = 200});

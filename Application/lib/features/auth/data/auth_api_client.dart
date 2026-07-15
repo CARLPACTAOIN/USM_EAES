@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import '../../scanner/domain/event_schedule_day.dart';
 import '../../scanner/domain/scanner_session.dart';
 import '../domain/mobile_user.dart';
 import '../domain/scanner_assignment.dart';
@@ -107,6 +108,10 @@ class AuthApiClient implements AuthRemoteApi {
       participationScopeName:
           participationScope['name']?.toString() ??
           assignment.participationScopeName,
+      eventDays: eventScheduleDaysFromJson(
+        event['event_days'] ??
+            assignment.eventDays.map((day) => day.toJson()).toList(),
+      ),
     );
   }
 

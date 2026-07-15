@@ -211,6 +211,34 @@ class ScannerLocalDatabase implements ScannerLocalStore {
   }
 
   @override
+  Future<List<RosterStudent>> rosterStudents({
+    String? query,
+    int limit = 100,
+    int offset = 0,
+  }) async {
+    final db = await database;
+    final normalizedLimit = limit < 1 ? 1 : limit;
+    final normalizedOffset = offset < 0 ? 0 : offset;
+    final trimmedQuery = query?.trim();
+
+    final rows = await db.query(
+      'roster_students',
+      where: trimmedQuery == null || trimmedQuery.isEmpty
+          ? null
+          : "(name LIKE ? ESCAPE '\\' OR program_code LIKE ? ESCAPE '\\' "
+                "OR student_id_number LIKE ? ESCAPE '\\')",
+      whereArgs: trimmedQuery == null || trimmedQuery.isEmpty
+          ? null
+          : List.filled(3, '%${_escapeLike(trimmedQuery)}%'),
+      orderBy: 'name COLLATE NOCASE ASC',
+      limit: normalizedLimit,
+      offset: normalizedOffset,
+    );
+
+    return rows.map(RosterStudent.fromDb).toList();
+  }
+
+  @override
   Future<int> insertScan(OfflineScan scan) async {
     final db = await database;
     return db.insert(
@@ -407,5 +435,12 @@ class ScannerLocalDatabase implements ScannerLocalStore {
       return null;
     }
     return EventSummary.fromDb(rows.first);
+  }
+
+  String _escapeLike(String value) {
+    return value
+        .replaceAll('\\', '\\\\')
+        .replaceAll('%', r'\%')
+        .replaceAll('_', r'\_');
   }
 }
