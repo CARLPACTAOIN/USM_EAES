@@ -11,7 +11,7 @@ use App\Models\Organization;
 use App\Models\OrganizationMembership;
 use App\Models\Program;
 use App\Models\User;
-use App\Support\EvaluationQuestions;
+use App\Support\EventEvaluationForm;
 use App\Support\EvaluationWindow;
 use App\Support\YearLevels;
 use Carbon\Carbon;
@@ -35,20 +35,7 @@ class PortalController extends Controller
             && $user->year_level
             && $user->organization_id;
 
-        // Events needing evaluation (attended but not yet evaluated)
-        $attendedEventIds = AttendanceRecord::where('student_id', $user->id)
-            ->pluck('event_id')
-            ->unique();
-
-        $evaluatedEventIds = Evaluation::where('student_id', $user->id)
-            ->pluck('event_id');
-
-        $pendingEvalEvents = Event::whereIn('id', $attendedEventIds)
-            ->whereNotIn('id', $evaluatedEventIds)
-            ->with('eventDays')
-            ->latest()
-            ->get()
-            ->filter(fn ($event) => EvaluationWindow::isOpen($event));
+        $pendingEvalEvents = $this->evaluationCollections($user)['pendingEvalEvents'];
 
         // Recent attendance
         $recentAttendance = AttendanceRecord::where('student_id', $user->id)
@@ -59,6 +46,17 @@ class PortalController extends Controller
 
         return view('portal.index', compact(
             'user', 'profileComplete', 'pendingEvalEvents', 'recentAttendance'
+        ));
+    }
+
+    /**
+     * Student evaluations task list.
+     */
+    public function evaluations(Request $request)
+    {
+        return view('portal.evaluations', array_merge(
+            ['user' => $request->user()],
+            $this->evaluationCollections($request->user())
         ));
     }
 
@@ -183,7 +181,7 @@ class PortalController extends Controller
     public function evaluation(Request $request, $eventId)
     {
         $user = $request->user();
-        $event = Event::with('eventDays')->findOrFail($eventId);
+        $event = Event::with(['eventDays', 'evaluationFormVersion'])->findOrFail($eventId);
 
         // Check if already submitted
         $existing = Evaluation::where('event_id', $eventId)
@@ -194,7 +192,7 @@ class PortalController extends Controller
         $windowCloseAt = EvaluationWindow::closesAt($event);
         $windowOpen = $windowCloseAt !== null && Carbon::now()->lte($windowCloseAt);
 
-        $categories = EvaluationQuestions::all();
+        $categories = EventEvaluationForm::questionMapForEvent($event);
 
         return view('portal.evaluation', compact(
             'event', 'existing', 'windowOpen', 'windowCloseAt', 'categories'
@@ -214,10 +212,6 @@ class PortalController extends Controller
             'open_comment' => 'nullable|string|max:2000',
         ];
 
-        foreach (EvaluationQuestions::keys() as $key) {
-            $rules["section_scores.{$key}"] = 'required|integer|min:1|max:5';
-        }
-
         $validator = Validator::make($request->all(), $rules);
 
         if ($validator->fails()) {
@@ -225,7 +219,31 @@ class PortalController extends Controller
         }
 
         $eventId = $request->input('event_id');
-        $event = Event::with('eventDays')->findOrFail($eventId);
+        $event = Event::with(['eventDays', 'evaluationFormVersion'])->findOrFail($eventId);
+        $questionMap = EventEvaluationForm::questionMapForEvent($event);
+        $scoreRules = [];
+
+        foreach ($questionMap as $key => $question) {
+            $scoreRules["section_scores.{$key}"] = [
+                $question['required'] ? 'required' : 'nullable',
+                'integer',
+                'min:' . $question['scale_min'],
+                'max:' . $question['scale_max'],
+            ];
+        }
+
+        $scoreValidator = Validator::make($request->all(), $scoreRules);
+        $scoreValidator->after(function ($validator) use ($request, $questionMap): void {
+            foreach (array_keys((array) $request->input('section_scores', [])) as $key) {
+                if (!array_key_exists($key, $questionMap)) {
+                    $validator->errors()->add("section_scores.{$key}", 'This evaluation question does not belong to this event.');
+                }
+            }
+        });
+
+        if ($scoreValidator->fails()) {
+            return redirect()->back()->withErrors($scoreValidator)->withInput();
+        }
 
         if (!AttendanceRecord::where('event_id', $eventId)->where('student_id', $user->id)->exists()) {
             abort(403, 'Only attendees can submit an evaluation.');
@@ -245,7 +263,8 @@ class PortalController extends Controller
         Evaluation::create([
             'event_id' => $eventId,
             'student_id' => $user->id,
-            'section_scores' => $request->input('section_scores'),
+            'evaluation_form_version_id' => $event->evaluation_form_version_id,
+            'section_scores' => collect($request->input('section_scores'))->only(array_keys($questionMap))->all(),
             'open_comment' => $request->input('open_comment'),
             'sentiment' => 'unprocessed',
             'submitted_at' => Carbon::now(),
@@ -258,5 +277,37 @@ class PortalController extends Controller
 
         return redirect()->route('portal')
             ->with('success', 'Evaluation submitted successfully. Your attendance has been validated.');
+    }
+
+    private function evaluationCollections(User $user): array
+    {
+        $attendedEventIds = AttendanceRecord::where('student_id', $user->id)
+            ->pluck('event_id')
+            ->unique();
+
+        $evaluatedEventIds = Evaluation::where('student_id', $user->id)
+            ->pluck('event_id')
+            ->unique();
+
+        $eventsNeedingEvaluation = Event::whereIn('id', $attendedEventIds)
+            ->whereNotIn('id', $evaluatedEventIds)
+            ->with(['eventDays', 'evaluationFormVersion'])
+            ->orderByDesc('start_date')
+            ->get();
+
+        $pendingEvalEvents = $eventsNeedingEvaluation
+            ->filter(fn (Event $event): bool => EvaluationWindow::isOpen($event))
+            ->values();
+
+        $missedEvalEvents = $eventsNeedingEvaluation
+            ->filter(fn (Event $event): bool => EvaluationWindow::isClosed($event))
+            ->values();
+
+        $submittedEvaluations = Evaluation::where('student_id', $user->id)
+            ->with(['event.eventDays'])
+            ->orderByDesc('submitted_at')
+            ->get();
+
+        return compact('pendingEvalEvents', 'missedEvalEvents', 'submittedEvaluations');
     }
 }

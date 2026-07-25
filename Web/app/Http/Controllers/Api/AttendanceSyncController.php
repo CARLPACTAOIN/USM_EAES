@@ -144,7 +144,7 @@ class AttendanceSyncController extends Controller
                 $scan['scanned_at'],
                 config('services.eaes.event_timezone', 'Asia/Manila')
             );
-            $timestampGuard = $this->scannerSessions->validateScanTimestamp($event, $scannedAt);
+            $timestampGuard = $this->scannerSessions->validateScanTimestamp($event, $scannedAt, $scan['scan_type']);
             if ($timestampGuard) {
                 $rejectedScans[] = [
                     'dedup_key' => $scan['dedup_key'],

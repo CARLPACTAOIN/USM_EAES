@@ -2,8 +2,6 @@
 Thumbs.db
 .sixth/
 
-# Local UI/UX skill junctions; source files are tracked under ui-ux-pro-max-skill/.
-/.agents/skills/ui-ux-pro-max/data/
-/.agents/skills/ui-ux-pro-max/scripts/
+# Local Cursor UI/UX skill junctions; source files are tracked under .agents/skills/.
 /.cursor/skills/ui-ux-pro-max/data/
 /.cursor/skills/ui-ux-pro-max/scripts/

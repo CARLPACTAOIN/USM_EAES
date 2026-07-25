@@ -21,9 +21,11 @@ use App\Models\User;
 use App\Services\AdminAssignmentService;
 use App\Services\EventAnalyticsService;
 use App\Services\ParticipationScopeService;
+use App\Support\EventEvaluationForm;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
+use Livewire\Livewire;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 use Tests\TestCase;
@@ -41,6 +43,7 @@ class EventAnalyticsPageTest extends TestCase
     public function test_authorized_admin_can_view_event_analytics_page(): void
     {
         $fixture = $this->createAnalyticsFixture();
+        $path = route('dashboard.events.analytics', $fixture['event']);
 
         $this->actingAs($fixture['admin'])
             ->get(route('dashboard.events.analytics', $fixture['event']))
@@ -49,10 +52,22 @@ class EventAnalyticsPageTest extends TestCase
             ->assertSee($fixture['event']->title)
             ->assertSee('Participant Scopes')
             ->assertSee('Scanner &amp; Sync', false)
-            ->assertSee('Attainment of objectives')
+            ->assertSee('Activity relevance')
             ->assertSee('Participant Drilldown')
             ->assertSee('Year Level Mix')
-            ->assertSee('All year levels');
+            ->assertSee('All year levels')
+            ->assertSee('method="GET"', false)
+            ->assertSee('action="'.$path.'"', false)
+            ->assertSee('wire:submit.prevent="applyFilters"', false)
+            ->assertSee('name="tab"', false)
+            ->assertSee('value="attendance"', false)
+            ->assertSee('name="q"', false)
+            ->assertSee('name="scope_id"', false)
+            ->assertSee('name="day_id"', false)
+            ->assertSee('name="status"', false)
+            ->assertSee('name="validation"', false)
+            ->assertSee('name="year_level"', false)
+            ->assertSee('name="per_page"', false);
     }
 
     public function test_students_and_cross_tenant_admins_are_denied_event_analytics(): void
@@ -91,7 +106,7 @@ class EventAnalyticsPageTest extends TestCase
             ->assertJsonPath('scanner_sync.raw_scans.manual_entries', 1)
             ->assertJsonPath('year_levels.0.label', '2nd Year')
             ->assertJsonPath('year_levels.0.count', 1)
-            ->assertJsonPath('evaluations.category_averages.0.label', 'Attainment of objectives');
+            ->assertJsonPath('evaluations.category_averages.0.label', 'Activity relevance');
 
         Sanctum::actingAs($fixture['admin']);
 
@@ -124,6 +139,87 @@ class EventAnalyticsPageTest extends TestCase
         );
     }
 
+    public function test_event_analytics_participant_filters_work_with_plain_get_reload(): void
+    {
+        $fixture = $this->createAnalyticsFixture();
+
+        $this->actingAs($fixture['admin'])
+            ->get(route('dashboard.events.analytics', [
+                'event' => $fixture['event'],
+                'tab' => 'attendance',
+                'year_level' => '2nd_year',
+                'status' => 'late',
+                'validation' => 'invalid',
+                'q' => 'Participant',
+                'per_page' => 10,
+            ]))
+            ->assertOk()
+            ->assertSee('method="GET"', false)
+            ->assertSee('name="tab"', false)
+            ->assertSee('value="attendance"', false)
+            ->assertSee('name="year_level"', false)
+            ->assertSee('value="2nd_year" selected', false)
+            ->assertSee('name="status"', false)
+            ->assertSee('value="late" selected', false)
+            ->assertSee('name="validation"', false)
+            ->assertSee('value="invalid" selected', false)
+            ->assertSee('name="q"', false)
+            ->assertSee('value="Participant"', false)
+            ->assertSee('name="per_page"', false)
+            ->assertSee('value="10" selected', false)
+            ->assertSee('href="'.route('dashboard.events.analytics', ['event' => $fixture['event'], 'tab' => 'attendance']).'"', false)
+            ->assertSee('Participant Attendee')
+            ->assertDontSee('Participant Missing');
+    }
+
+    public function test_livewire_participant_drilldown_filters_apply_without_full_page_reload(): void
+    {
+        $fixture = $this->createAnalyticsFixture();
+
+        Livewire::actingAs($fixture['admin'])
+            ->test(\App\Livewire\Dashboard\EventAnalyticsParticipantFilters::class, [
+                'eventId' => $fixture['event']->id,
+            ])
+            ->set('yearLevel', '2nd_year')
+            ->set('status', 'late')
+            ->set('validation', 'invalid')
+            ->set('search', 'Participant')
+            ->call('applyFilters')
+            ->assertSet('yearLevel', '2nd_year')
+            ->assertSet('status', 'late')
+            ->assertSet('validation', 'invalid')
+            ->assertSee('Participant Attendee')
+            ->assertDontSee('Participant Missing');
+    }
+
+    public function test_livewire_participant_drilldown_paginates_without_full_page_reload(): void
+    {
+        $fixture = $this->createAnalyticsFixture();
+        $org = $fixture['participantScope']->organization()->firstOrFail();
+        $program = $org->programs()->firstOrFail();
+
+        foreach (range(1, 28) as $index) {
+            $this->createStudent(
+                $org,
+                $program,
+                sprintf('Paged Participant %02d', $index),
+                sprintf('24-9%03d', $index),
+                '2nd_year'
+            );
+        }
+
+        Livewire::actingAs($fixture['admin'])
+            ->test(\App\Livewire\Dashboard\EventAnalyticsParticipantFilters::class, [
+                'eventId' => $fixture['event']->id,
+            ])
+            ->set('perPage', 10)
+            ->assertSee('Paged Participant 01')
+            ->assertDontSee('Paged Participant 19')
+            ->call('nextPage')
+            ->assertSee('Paged Participant 10')
+            ->assertDontSee('Paged Participant 01');
+    }
+
     public function test_participation_scope_denominators_daily_eilo_evaluations_and_sync_counts_are_correct(): void
     {
         $fixture = $this->createAnalyticsFixture();
@@ -147,7 +243,7 @@ class EventAnalyticsPageTest extends TestCase
         $this->assertSame(2, $response->json('daily_attendance.1.status_counts.absent'));
 
         $category = collect($response->json('evaluations.category_averages'))
-            ->firstWhere('key', 'attainment_of_objectives');
+            ->firstWhere('key', 'activity_relevance');
         $this->assertSame(2, $category['responses']);
         $this->assertSame(3.5, $category['average']);
         $this->assertSame(1, $category['distribution'][2]);
@@ -202,6 +298,28 @@ class EventAnalyticsPageTest extends TestCase
             'head_organization_signed' => true,
             'adviser_signed' => true,
         ]);
+        $form = EventEvaluationForm::createForEvent(
+            $event,
+            $admin,
+            [
+                [
+                    'id' => 'activity_relevance',
+                    'label' => 'Activity relevance',
+                    'description' => 'Was the activity relevant to the intended participants?',
+                ],
+                [
+                    'id' => 'facilitator_quality',
+                    'label' => 'Facilitator quality',
+                    'description' => 'Did the facilitator support the learning or activity flow?',
+                ],
+                [
+                    'id' => 'venue_readiness',
+                    'label' => 'Venue readiness',
+                    'description' => 'Was the venue prepared for the activity?',
+                ],
+            ],
+            'Evaluation - Analytics Evidence Event'
+        );
 
         $dayOne = EventDay::create([
             'event_id' => $event->id,
@@ -273,10 +391,11 @@ class EventAnalyticsPageTest extends TestCase
         Evaluation::create([
             'event_id' => $event->id,
             'student_id' => $organizerStudent->id,
+            'evaluation_form_version_id' => $form->id,
             'section_scores' => [
-                'attainment_of_objectives' => 5,
-                'speaker_mastery' => 4,
-                'venue_comfort' => 4,
+                'activity_relevance' => 5,
+                'facilitator_quality' => 4,
+                'venue_readiness' => 4,
             ],
             'open_comment' => 'Clear program flow and useful activity.',
             'sentiment' => 'positive',
@@ -286,10 +405,11 @@ class EventAnalyticsPageTest extends TestCase
         Evaluation::create([
             'event_id' => $event->id,
             'student_id' => $participantAttended->id,
+            'evaluation_form_version_id' => $form->id,
             'section_scores' => [
-                'attainment_of_objectives' => 2,
-                'speaker_mastery' => 3,
-                'venue_comfort' => 2,
+                'activity_relevance' => 2,
+                'facilitator_quality' => 3,
+                'venue_readiness' => 2,
             ],
             'open_comment' => 'The venue was crowded and the second activity started late.',
             'sentiment' => 'negative',

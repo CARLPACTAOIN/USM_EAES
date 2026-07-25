@@ -94,8 +94,11 @@ void main() {
       await controller.activateSession(session);
       expect(controller.hasSession, isTrue);
       expect(controller.eventTitle, 'Test Event');
-      expect(controller.statusMessage, contains('Event active'));
-      expect(controller.globalFeedback.message, contains('Scanning enabled'));
+      expect(controller.statusMessage, contains('Time-In scanning enabled'));
+      expect(
+        controller.globalFeedback.message,
+        contains('Time-In scanning enabled'),
+      );
 
       await controller.hydrateRoster();
       expect(controller.rosterCount, 1);
@@ -108,6 +111,10 @@ void main() {
       final remote = FakeRemoteApi(
         scanWindowStart: '2026-07-10T08:00:00Z',
         scanWindowEnd: '2026-07-10T12:00:00Z',
+        timeInWindowStart: '2026-07-10T07:00:00Z',
+        timeInWindowEnd: '2026-07-10T12:00:00Z',
+        timeOutWindowStart: '2026-07-10T08:00:00Z',
+        timeOutWindowEnd: '2026-07-10T13:00:00Z',
         eventDays: [
           EventScheduleDay(
             id: 'day-1',
@@ -139,6 +146,8 @@ void main() {
       expect(snapshot.eventDays.single.compactLabel, contains('Jul 10, 2026'));
       expect(snapshot.scanWindowStart, DateTime.utc(2026, 7, 10, 8));
       expect(snapshot.scanWindowEnd, DateTime.utc(2026, 7, 10, 12));
+      expect(snapshot.timeInWindowStart, DateTime.utc(2026, 7, 10, 7));
+      expect(snapshot.timeOutWindowEnd, DateTime.utc(2026, 7, 10, 13));
       expect(snapshot.savedAt, now);
     });
 
@@ -214,7 +223,7 @@ void main() {
     );
 
     test(
-      'saved scan window blocks offline captures after window end',
+      'saved time-in window blocks offline captures after event end',
       () async {
         final controller = buildController(
           nowFactory: () => DateTime.utc(2026, 7, 10, 13),
@@ -234,7 +243,49 @@ void main() {
         expect(controller.canCaptureScans, isFalse);
         final result = await controller.recordQr('QR-1');
         expect(result.success, isFalse);
-        expect(result.detail, contains('scan window has ended'));
+        expect(result.detail, contains('Time-In is closed'));
+      },
+    );
+
+    test(
+      'saved checkout window allows offline time-out after event end',
+      () async {
+        final local = FakeLocalStore();
+        final controller = buildController(
+          localStore: local,
+          nowFactory: () => DateTime.utc(2026, 7, 10, 12, 30),
+        );
+
+        await controller.restoreCachedSession(
+          ScannerSessionSnapshot(
+            token: 'token-1',
+            eventId: 'event-1',
+            eventLifecyclePhase: 'evaluation_open',
+            eventDays: [
+              EventScheduleDay(
+                id: 'day-1',
+                dayNumber: 1,
+                date: DateTime.utc(2026, 7, 10),
+                startTime: '08:00',
+                endTime: '12:00',
+              ),
+            ],
+            scanWindowStart: DateTime.utc(2026, 7, 10, 7),
+            scanWindowEnd: DateTime.utc(2026, 7, 10, 13),
+            timeInWindowStart: DateTime.utc(2026, 7, 10, 7),
+            timeInWindowEnd: DateTime.utc(2026, 7, 10, 12),
+            timeOutWindowStart: DateTime.utc(2026, 7, 10, 8),
+            timeOutWindowEnd: DateTime.utc(2026, 7, 10, 13),
+            savedAt: DateTime.utc(2026, 7, 10, 9),
+          ),
+        );
+
+        controller.setScanType(ScanType.timeOut);
+
+        expect(controller.canCaptureScans, isTrue);
+        final result = await controller.recordQr('99-99999', manual: true);
+        expect(result.success, isTrue);
+        expect(local.scans.single.scanType, ScanType.timeOut);
       },
     );
 
@@ -396,6 +447,142 @@ void main() {
       expect(result.success, isFalse);
       expect(result.detail, contains('Event has not started yet'));
       expect(controller.canCaptureScans, isFalse);
+    });
+
+    test(
+      'scheduled event permits time-in during early check-in window',
+      () async {
+        final local = FakeLocalStore();
+        final controller = buildController(
+          localStore: local,
+          remoteApi: FakeRemoteApi(
+            eventPhase: 'scheduled',
+            scanWindowStart: '2026-07-17T07:30:00+08:00',
+            scanWindowEnd: '2026-07-17T13:00:00+08:00',
+            timeInWindowStart: '2026-07-17T07:30:00+08:00',
+            timeInWindowEnd: '2026-07-17T12:00:00+08:00',
+            timeOutWindowStart: '2026-07-17T08:30:00+08:00',
+            timeOutWindowEnd: '2026-07-17T13:00:00+08:00',
+            eventDays: [
+              EventScheduleDay(
+                id: 'day-1',
+                dayNumber: 1,
+                date: DateTime(2026, 7, 17),
+                startTime: '08:30',
+                endTime: '12:00',
+              ),
+            ],
+          ),
+          nowFactory: () => DateTime(2026, 7, 17, 8),
+        );
+        await controller.activateSession(session);
+
+        final result = await controller.recordQr('99-99999', manual: true);
+
+        expect(controller.canCaptureScans, isTrue);
+        expect(result.success, isTrue);
+        expect(local.scans.single.scanType, ScanType.timeIn);
+      },
+    );
+
+    test('scheduled event blocks time-out before event start', () async {
+      final controller = buildController(
+        remoteApi: FakeRemoteApi(
+          eventPhase: 'scheduled',
+          scanWindowStart: '2026-07-17T07:30:00+08:00',
+          scanWindowEnd: '2026-07-17T13:00:00+08:00',
+          timeInWindowStart: '2026-07-17T07:30:00+08:00',
+          timeInWindowEnd: '2026-07-17T12:00:00+08:00',
+          timeOutWindowStart: '2026-07-17T08:30:00+08:00',
+          timeOutWindowEnd: '2026-07-17T13:00:00+08:00',
+          eventDays: [
+            EventScheduleDay(
+              id: 'day-1',
+              dayNumber: 1,
+              date: DateTime(2026, 7, 17),
+              startTime: '08:30',
+              endTime: '12:00',
+            ),
+          ],
+        ),
+        nowFactory: () => DateTime(2026, 7, 17, 8),
+      );
+      await controller.activateSession(session);
+      controller.setScanType(ScanType.timeOut);
+
+      final result = await controller.recordQr('99-99999', manual: true);
+
+      expect(controller.canCaptureScans, isFalse);
+      expect(result.success, isFalse);
+      expect(result.detail, contains('Time-Out will be available'));
+    });
+
+    test(
+      'scheduled same-day event unlocks at saved event-day start time',
+      () async {
+        final local = FakeLocalStore();
+        final controller = buildController(
+          localStore: local,
+          remoteApi: FakeRemoteApi(
+            eventPhase: 'scheduled',
+            scanWindowStart: '2026-07-17T08:30:00+08:00',
+            scanWindowEnd: '2026-07-17T12:00:00+08:00',
+            eventDays: [
+              EventScheduleDay(
+                id: 'day-1',
+                dayNumber: 1,
+                date: DateTime(2026, 7, 17),
+                startTime: '08:30',
+                endTime: '12:00',
+              ),
+            ],
+          ),
+          nowFactory: () => DateTime(2026, 7, 17, 8, 36),
+        );
+        await controller.activateSession(session);
+
+        final result = await controller.recordQr('99-99999', manual: true);
+
+        expect(controller.canCaptureScans, isTrue);
+        expect(result.success, isTrue);
+        expect(local.scans.single.qrCodeValue, '99-99999');
+      },
+    );
+
+    test('scheduled multi-day gap remains locally locked', () async {
+      final local = FakeLocalStore();
+      final controller = buildController(
+        localStore: local,
+        remoteApi: FakeRemoteApi(
+          eventPhase: 'scheduled',
+          scanWindowStart: '2026-07-17T08:00:00+08:00',
+          scanWindowEnd: '2026-07-18T17:00:00+08:00',
+          eventDays: [
+            EventScheduleDay(
+              id: 'day-1',
+              dayNumber: 1,
+              date: DateTime(2026, 7, 17),
+              startTime: '08:00',
+              endTime: '12:00',
+            ),
+            EventScheduleDay(
+              id: 'day-2',
+              dayNumber: 2,
+              date: DateTime(2026, 7, 18),
+              startTime: '08:00',
+              endTime: '17:00',
+            ),
+          ],
+        ),
+        nowFactory: () => DateTime(2026, 7, 17, 18),
+      );
+      await controller.activateSession(session);
+
+      final result = await controller.recordQr('99-99999', manual: true);
+
+      expect(controller.canCaptureScans, isFalse);
+      expect(result.success, isFalse);
+      expect(local.scans, isEmpty);
     });
 
     test(
@@ -745,6 +932,10 @@ class FakeRemoteApi implements ScannerRemoteApi {
     this.eventPhase,
     this.scanWindowStart,
     this.scanWindowEnd,
+    this.timeInWindowStart,
+    this.timeInWindowEnd,
+    this.timeOutWindowStart,
+    this.timeOutWindowEnd,
     this.eventDays = const [],
     this.validateError,
   });
@@ -755,6 +946,10 @@ class FakeRemoteApi implements ScannerRemoteApi {
   final String? eventPhase;
   final String? scanWindowStart;
   final String? scanWindowEnd;
+  final String? timeInWindowStart;
+  final String? timeInWindowEnd;
+  final String? timeOutWindowStart;
+  final String? timeOutWindowEnd;
   final List<EventScheduleDay> eventDays;
   final Object? validateError;
   final List<List<OfflineScan>> syncedBatches = [];
@@ -779,6 +974,10 @@ class FakeRemoteApi implements ScannerRemoteApi {
         'status': 'active',
         'scan_window_start': scanWindowStart,
         'scan_window_end': scanWindowEnd,
+        'time_in_window_start': timeInWindowStart,
+        'time_in_window_end': timeInWindowEnd,
+        'time_out_window_start': timeOutWindowStart,
+        'time_out_window_end': timeOutWindowEnd,
         'sync_grace_ends_at': '2026-01-04T12:00:00Z',
       },
     };

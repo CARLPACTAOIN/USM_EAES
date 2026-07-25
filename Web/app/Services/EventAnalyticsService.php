@@ -11,7 +11,7 @@ use App\Models\PendingStudentLink;
 use App\Models\RawScan;
 use App\Models\ScannerSession;
 use App\Models\User;
-use App\Support\EvaluationQuestions;
+use App\Support\EventEvaluationForm;
 use App\Support\YearLevels;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Collection;
@@ -29,6 +29,7 @@ class EventAnalyticsService
             'organization.college',
             'parentEvent',
             'eventDays' => fn ($query) => $query->orderBy('date')->orderBy('day_number'),
+            'evaluationFormVersion',
             'participationScopes.organization',
             'participationScopes.college',
             'participationScopes.program',
@@ -45,7 +46,7 @@ class EventAnalyticsService
         $scannerSync = $this->scannerSync($event);
 
         $attendance = $this->attendanceSummary($event, $attendanceRecords, $audience['ids']);
-        $evaluationSummary = $this->evaluationSummary($evaluations, $attendance['global_unique_attended'], $audience['count']);
+        $evaluationSummary = $this->evaluationSummary($event, $evaluations, $attendance['global_unique_attended'], $audience['count']);
 
         return [
             'event' => $this->eventPayload($event, $audience, $scannerSync),
@@ -218,7 +219,7 @@ class EventAnalyticsService
         return [
             'total_demographic' => $expected,
             'expected_audience' => $expected,
-            'denominator_label' => $expected.' expected audience',
+            'denominator_label' => $expected.' people expected',
             'attended' => $attendedIds->count(),
             'global_unique_attended' => $attendedIds->count(),
             'missing_expected' => $estimatedAbsent,
@@ -278,9 +279,9 @@ class EventAnalyticsService
         })->values();
     }
 
-    private function evaluationSummary(Collection $evaluations, int $attended, int $expected): array
+    private function evaluationSummary(Event $event, Collection $evaluations, int $attended, int $expected): array
     {
-        $questions = EvaluationQuestions::all();
+        $questions = EventEvaluationForm::questionMapForEvent($event);
         $uniqueEvaluators = $evaluations->pluck('student_id')->filter()->unique()->count();
         $allScores = collect();
         $categoryMetrics = collect($questions)->map(function (array $meta, string $key) use ($evaluations, $allScores) {

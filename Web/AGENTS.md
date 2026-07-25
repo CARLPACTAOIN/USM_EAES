@@ -21,7 +21,8 @@
 | `PRD_PROGRESS_AUDIT.md` | Implementation status vs PRD |
 | `Web/` | Laravel 12 backend (API, queues, admin/student web when built) |
 | `Application/` | Flutter scanner app (`eaes_scanner`; offline QR companion) |
-| `.agents/skills/` | Local agent skills (UI/UX and others) |
+| `.codex/skills/` | Codex-compatible local skill suite, including UI/UX, styling, design systems, brand, slides, and banner design |
+| `.agents/skills/` | Upstream skill source bundles and non-Codex local agent skills |
 
 ## Mirrored documentation (repo root ↔ `Web/`)
 
@@ -38,7 +39,7 @@ These files exist in **two identical copies**. Content must stay in sync wheneve
 - After editing **any** of the files above, update the paired copy in the **same task** (do not leave mirrors diverged).
 - From repo root, reconcile with: `.\scripts\sync-mirrored-docs.ps1` (newer file wins in `auto` mode).
 - Force direction if needed: `-Direction root-to-web` or `-Direction web-to-root`.
-- When working only inside `Web/`, local filenames apply (`PRD_V1.md` in this folder). Repo-wide assets remain at root: `../.agents/skills/`, `../.cursor/rules/`.
+- When working only inside `Web/`, local filenames apply (`PRD_V1.md` in this folder). Repo-wide assets remain at root: `../.codex/skills/`, `../.agents/skills/`, `../.cursor/rules/`.
 
 ## PRD-First Workflow
 
@@ -67,11 +68,14 @@ These files exist in **two identical copies**. Content must stay in sync wheneve
 
 ## UI/UX Skill Requirement
 
-- **Authoritative bundle:** `.agents/skills/ui-ux-pro-max-skill/` (or `Web/.agents/skills/ui-ux-pro-max-skill/` — full repo v2.5.0).
-- For any UI/UX task, read `.agents/skills/ui-ux-pro-max-skill/README.md` or `Web/.agents/skills/ui-ux-pro-max-skill/README.md` first before design decisions.
-- Search/scripts live under `.agents/skills/ui-ux-pro-max-skill/src/ui-ux-pro-max/`; use `.agents/skills/ui-ux-pro-max-skill/src/ui-ux-pro-max/scripts/search.py` (or the equivalent in `Web/`) at repo root (junctioned to that source).
+- **Authoritative Codex skill suite:** `.codex/skills/`.
+- **UI/UX routing entrypoint:** `.codex/skills/ui-ux-pro-max/SKILL.md`.
+- Related Codex design skills live beside it: `.codex/skills/ui-styling/`, `.codex/skills/design/`, `.codex/skills/design-system/`, `.codex/skills/brand/`, `.codex/skills/slides/`, and `.codex/skills/banner-design/`.
+- **Authoritative upstream bundle:** `.agents/skills/ui-ux-pro-max-skill/` (or `Web/.agents/skills/ui-ux-pro-max-skill/` if a Web mirror is restored — full repo v2.11.0).
+- For any UI/UX task, start with `.codex/skills/ui-ux-pro-max/SKILL.md`, then use the relevant specialized skill under `.codex/skills/` when the task involves styling implementation, brand assets, design systems, slides, or banners; consult `.agents/skills/ui-ux-pro-max-skill/README.md` only when upstream package details are needed.
+- Search/scripts live under `.codex/skills/ui-ux-pro-max/scripts/`; use `.codex/skills/ui-ux-pro-max/scripts/search.py` at repo root. Fallback source copies live under `.agents/skills/ui-ux-pro-max-skill/src/ui-ux-pro-max/`.
 - Use the skill before choosing layout, visual style, typography, color systems, interaction patterns, or UX recommendations.
-- Do not use the trimmed root `.cursor/skills/` copy alone if it is out of date; sync from `.agents/skills/ui-ux-pro-max-skill/` or `Web/.agents/skills/ui-ux-pro-max-skill/` when refreshing Cursor.
+- Do not use the trimmed root `.cursor/skills/` copy alone if it is out of date; sync UI/UX guidance from `.codex/skills/ui-ux-pro-max/` and source data from `.agents/skills/ui-ux-pro-max-skill/` when refreshing Cursor.
 - Keep UI work aligned with `PRD_V1.md` and the current project direction.
 - The UI/UX skill improves design quality and decision support, but it does not override product scope or PRD requirements.
 
@@ -87,7 +91,7 @@ When implementing backend work unless the PRD or an approved deviation says othe
 
 ## Practical Rules
 
-- Reference `PRD_V1.md`, `PRD_PROGRESS_AUDIT.md`, and `.agents/skills/ui-ux-pro-max-skill/README.md` (or `Web/.agents/skills/ui-ux-pro-max-skill/README.md`) directly when they are relevant to the task.
+- Reference `PRD_V1.md`, `PRD_PROGRESS_AUDIT.md`, and the relevant `.codex/skills/` skill entrypoint directly when they are relevant to the task; for UI/UX routing, start with `.codex/skills/ui-ux-pro-max/SKILL.md`.
 - Run Laravel commands from `Web/` (`composer`, `artisan`, `npm`).
 - Do not commit secrets (`.env`, API keys, OAuth client secrets).
 - If a task changes project progress in a meaningful way, update the audit in the same task before considering the work complete.

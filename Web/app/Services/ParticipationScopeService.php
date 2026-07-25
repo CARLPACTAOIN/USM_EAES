@@ -239,6 +239,7 @@ class ParticipationScopeService
             'capture_mode' => $scope->capture_mode,
             'ppa_status' => $scope->ppa_status,
             'status' => $scope->status,
+            'late_cutoff_min' => $scope->late_cutoff_min,
             'organization' => $scope->organization ? [
                 'id' => $scope->organization->id,
                 'name' => $scope->organization->name,

@@ -213,7 +213,7 @@ class ScannerAssignmentController extends Controller
             'max_devices' => $assignment->max_devices,
             'activation_allowed' => $activationAllowed,
             'session_available' => $assignment->scannerSessions
-                ->where('status', ScannerSession::STATUS_ACTIVE)
+                ->filter(fn (ScannerSession $session) => $this->sessionIsOpen($session))
                 ->isNotEmpty(),
             'activation_state' => $activationState,
             'active_session_device_matches' => $activeSessionDeviceMatches,
@@ -274,7 +274,7 @@ class ScannerAssignmentController extends Controller
     {
         if ($assignment->relationLoaded('scannerSessions')) {
             return $assignment->scannerSessions
-                ->where('status', ScannerSession::STATUS_ACTIVE)
+                ->filter(fn (ScannerSession $session) => $this->sessionIsOpen($session))
                 ->sortByDesc('updated_at')
                 ->first();
         }
@@ -283,6 +283,10 @@ class ScannerAssignmentController extends Controller
             ->where('assignment_id', $assignment->id)
             ->where('scanner_user_id', $assignment->scanner_user_id)
             ->where('status', ScannerSession::STATUS_ACTIVE)
+            ->where(function ($query): void {
+                $query->whereNull('expires_at')
+                    ->orWhere('expires_at', '>', now());
+            })
             ->latest('updated_at')
             ->first();
     }
@@ -294,10 +298,24 @@ class ScannerAssignmentController extends Controller
         return ScannerSession::query()
             ->where('scanner_user_id', $scannerUserId)
             ->where('status', ScannerSession::STATUS_ACTIVE)
+            ->where(function ($query): void {
+                $query->whereNull('expires_at')
+                    ->orWhere('expires_at', '>', now());
+            })
             ->whereNotNull('assignment_id')
             ->where('assignment_id', '!=', $assignment->id)
+            ->whereHas('assignment', fn ($query) => $query->active())
             ->latest('updated_at')
             ->first();
+    }
+
+    private function sessionIsOpen(ScannerSession $session): bool
+    {
+        if ($session->status !== ScannerSession::STATUS_ACTIVE) {
+            return false;
+        }
+
+        return !$session->expires_at || $session->expires_at->isFuture();
     }
 
     private function sessionDeviceMatches(ScannerSession $session, string $deviceId): ?bool

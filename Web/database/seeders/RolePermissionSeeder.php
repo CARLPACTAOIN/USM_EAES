@@ -29,6 +29,7 @@ class RolePermissionSeeder extends Seeder
             // Organizational administrative
             'create-proposals',
             'assign-scanners-own',
+            'set-attendance-policy',
             'set-late-threshold',
             'view-own-analytics',
             'view-college-analytics',
@@ -93,12 +94,14 @@ class RolePermissionSeeder extends Seeder
         $usgAdmin->syncPermissions([
             'create-proposals',
             'assign-scanners-own',
+            'set-attendance-policy',
             'view-own-analytics',
         ]);
         $usgAdminApi = Role::firstOrCreate(['name' => 'USG Admin', 'guard_name' => 'api']);
         $usgAdminApi->syncPermissions([
             'create-proposals',
             'assign-scanners-own',
+            'set-attendance-policy',
             'view-own-analytics',
         ]);
 
@@ -107,6 +110,7 @@ class RolePermissionSeeder extends Seeder
         $lsgAdmin->syncPermissions([
             'create-proposals',
             'assign-scanners-own',
+            'set-attendance-policy',
             'view-college-analytics',
             'view-constituent-data',
         ]);
@@ -114,6 +118,7 @@ class RolePermissionSeeder extends Seeder
         $lsgAdminApi->syncPermissions([
             'create-proposals',
             'assign-scanners-own',
+            'set-attendance-policy',
             'view-college-analytics',
             'view-constituent-data',
         ]);
@@ -123,6 +128,7 @@ class RolePermissionSeeder extends Seeder
         $societyAdmin->syncPermissions([
             'create-proposals',
             'assign-scanners-own',
+            'set-attendance-policy',
             'set-late-threshold',
             'view-own-analytics',
             'force-validate-own',
@@ -131,6 +137,7 @@ class RolePermissionSeeder extends Seeder
         $societyAdminApi->syncPermissions([
             'create-proposals',
             'assign-scanners-own',
+            'set-attendance-policy',
             'set-late-threshold',
             'view-own-analytics',
             'force-validate-own',
@@ -141,6 +148,7 @@ class RolePermissionSeeder extends Seeder
         $academicUnitAdmin->syncPermissions([
             'create-proposals',
             'assign-scanners-own',
+            'set-attendance-policy',
             'invite-participant-scopes',
             'view-college-analytics',
             'view-constituent-data',
@@ -150,6 +158,7 @@ class RolePermissionSeeder extends Seeder
         $academicUnitAdminApi->syncPermissions([
             'create-proposals',
             'assign-scanners-own',
+            'set-attendance-policy',
             'invite-participant-scopes',
             'view-college-analytics',
             'view-constituent-data',
@@ -161,6 +170,7 @@ class RolePermissionSeeder extends Seeder
         $officeEventAdmin->syncPermissions([
             'create-proposals',
             'assign-scanners-own',
+            'set-attendance-policy',
             'invite-participant-scopes',
             'view-own-analytics',
             'force-validate-own',
@@ -169,6 +179,7 @@ class RolePermissionSeeder extends Seeder
         $officeEventAdminApi->syncPermissions([
             'create-proposals',
             'assign-scanners-own',
+            'set-attendance-policy',
             'invite-participant-scopes',
             'view-own-analytics',
             'force-validate-own',
@@ -179,6 +190,7 @@ class RolePermissionSeeder extends Seeder
         $hrAdmin->syncPermissions([
             'create-proposals',
             'assign-scanners-own',
+            'set-attendance-policy',
             'create-hr-events',
             'manage-faculty-roster',
             'assign-hr-scanners',
@@ -191,6 +203,7 @@ class RolePermissionSeeder extends Seeder
         $hrAdminApi->syncPermissions([
             'create-proposals',
             'assign-scanners-own',
+            'set-attendance-policy',
             'create-hr-events',
             'manage-faculty-roster',
             'assign-hr-scanners',

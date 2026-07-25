@@ -22,7 +22,9 @@ use App\Services\ParticipationScopeService;
 use App\Services\ScannerAssignmentService;
 use App\Services\ScannerSessionService;
 use App\Support\AdminScope;
+use App\Support\EventEvaluationForm;
 use App\Support\EventTenantScope;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -88,84 +90,10 @@ class DashboardController extends Controller
     {
         $user = $request->user();
         $canCreateProposals = $user->can('create-proposals');
-        $workspace = $request->input('workspace') === 'participating' ? 'participating' : 'organized';
-        $currentAdminScope = $this->adminScopes->forUser($user);
-        $query = Event::with([
-            'organization',
-            'eventDays',
-            'parentEvent.organization',
-            'participationScopes.organization',
-            'participationScopes.college',
-            'participationScopes.delegatedOrganization',
-            'scannerSessions' => function ($query): void {
-                $query->with(['scannerUser', 'participationScope.organization'])
-                    ->withCount([
-                        'rawScans as pending_scans_count' => fn ($query) => $query->whereNull('processed_at'),
-                        'rawScans as synced_scans_count',
-                        'rawScans as failed_scans_count' => fn ($query) => $query->whereNotNull('rejection_reason'),
-                    ])
-                    ->latest();
-            },
-            'scannerAssignments' => function ($query): void {
-                $query->with(['participationScope.organization', 'scannerUser.organization', 'assignedBy', 'revokedBy', 'scannerSessions'])
-                    ->latest();
-            },
-        ])
-            ->withCount([
-                'evaluations as unprocessed_comment_count' => function ($query): void {
-                    $query->where('sentiment', 'unprocessed')
-                        ->whereNotNull('open_comment')
-                        ->whereRaw("trim(coalesce(open_comment, '')) <> ''");
-                },
-            ]);
-        if ($workspace === 'participating') {
-            $this->applyParticipatingEventScope($query, $user);
-        } else {
-            $this->applyEventTenantScope($query, $user);
-        }
-
-        // Optional status filter
-        if ($request->filled('status')) {
-            $query->where('status', $request->status);
-        }
-
-        $events = $query->latest()->paginate(15);
-        $this->ensureOrganizerScopesForDashboard($events->getCollection());
-        $this->annotateEventsForDashboard($events->getCollection(), $user, $workspace);
-
-        $organizedEventsCount = Event::query()
-            ->tap(fn ($query) => $this->applyEventTenantScope($query, $user))
-            ->count();
-        $participatingEventsCount = Event::query()
-            ->tap(fn ($query) => $this->applyParticipatingEventScope($query, $user))
-            ->count();
-        $colleges = College::orderBy('name')->get();
-        $organizations = Organization::with('college')
-            ->whereIn('type', ['society', 'usg', 'lsg', 'academic_unit', 'administrative_office', 'non_academic_org', 'hr_unit'])
-            ->orderBy('name')
-            ->get();
-        $eligibleScannerUsers = $this->scannerAssignments->eligibleUsers(
-            search: $request->input('scanner_search'),
-            admin: $user
-        );
-        $parentEvents = Event::with('organization')
-            ->whereHas('organization', fn ($query) => $query->whereIn('type', ['usg', 'lsg', 'academic_unit', 'administrative_office']))
-            ->whereIn('status', ['draft', 'submitted', 'under_review', 'approved'])
-            ->orderByDesc('created_at')
-            ->get();
 
         return view('dashboard.events.index', compact(
-            'events',
             'user',
-            'colleges',
-            'organizations',
-            'eligibleScannerUsers',
-            'parentEvents',
-            'canCreateProposals',
-            'workspace',
-            'currentAdminScope',
-            'organizedEventsCount',
-            'participatingEventsCount'
+            'canCreateProposals'
         ));
     }
 
@@ -240,8 +168,71 @@ class DashboardController extends Controller
             'event_days' => 'required|array|min:1',
             'event_days.*.date' => 'required|date',
             'event_days.*.start_time' => 'required|date_format:H:i',
-            'event_days.*.end_time' => 'required|date_format:H:i|after:event_days.*.start_time',
+            'event_days.*.end_time' => 'required|date_format:H:i',
+            'evaluation_questions' => 'required|array|min:1|max:10',
+            'evaluation_questions.*.id' => 'nullable|string|max:80',
+            'evaluation_questions.*.label' => 'required|string|max:180',
+            'evaluation_questions.*.description' => 'nullable|string|max:500',
+        ], [], [
+            'organization_id' => 'organizer',
+            'proposal_category' => 'PPA category',
+            'start_date' => 'start date',
+            'end_date' => 'end date',
+            'location_type' => 'location type',
+            'location_details' => 'location details',
+            'implementing_office' => 'implementing office',
+            'collaborating_office' => 'collaborating office',
+            'target_participants' => 'target participants',
+            'source_of_fund' => 'source of fund',
+            'budget_cost' => 'budget cost',
+            'resolution_number' => 'resolution number',
+            'proposal_document' => 'official PPA proposal softcopy',
+            'event_days' => 'event days',
+            'event_days.*.date' => 'event day date',
+            'event_days.*.start_time' => 'event day start time',
+            'event_days.*.end_time' => 'event day end time',
+            'evaluation_questions' => 'evaluation questions',
+            'evaluation_questions.*.label' => 'evaluation question',
+            'evaluation_questions.*.description' => 'evaluation question description',
         ]);
+
+        $validator->after(function ($validator) use ($request): void {
+            try {
+                $startDate = Carbon::parse($request->input('start_date'))->startOfDay();
+                $endDate = Carbon::parse($request->input('end_date'))->startOfDay();
+            } catch (\Throwable) {
+                return;
+            }
+
+            foreach ((array) $request->input('event_days', []) as $index => $dayData) {
+                if (empty($dayData['date'])) {
+                    continue;
+                }
+
+                try {
+                    $dayDate = Carbon::parse($dayData['date'])->startOfDay();
+                } catch (\Throwable) {
+                    continue;
+                }
+
+                if ($dayDate->lt($startDate) || $dayDate->gt($endDate)) {
+                    $validator->errors()->add(
+                        "event_days.$index.date",
+                        sprintf('Day %d date must be within the event start and end dates.', $index + 1)
+                    );
+                }
+
+                $startTime = (string) ($dayData['start_time'] ?? '');
+                $endTime = (string) ($dayData['end_time'] ?? '');
+
+                if ($startTime !== '' && $endTime !== '' && $endTime <= $startTime) {
+                    $validator->errors()->add(
+                        "event_days.$index.end_time",
+                        sprintf('Day %d end time must be later than the start time.', $index + 1)
+                    );
+                }
+            }
+        });
 
         if ($validator->fails()) {
             return redirect()->back()->withErrors($validator)->withInput();
@@ -327,6 +318,13 @@ class DashboardController extends Controller
                     'end_time' => $dayData['end_time'],
                 ]);
             }
+
+            EventEvaluationForm::createForEvent(
+                $event,
+                $user,
+                $request->input('evaluation_questions', []),
+                'Evaluation - ' . $event->title
+            );
 
             $this->participationScopes->ensureOrganizerScope($event->fresh(['organization']));
 
@@ -447,6 +445,10 @@ class DashboardController extends Controller
 
         if (!$event->proposal_document_path || !$event->hardcopy_submitted) {
             return redirect()->back()->with('error', 'Proposal softcopy and hardcopy submission must be recorded before approval.');
+        }
+
+        if (!EventEvaluationForm::hasLockedForm($event)) {
+            return redirect()->back()->with('error', 'A locked evaluation form with at least one question is required before approval.');
         }
 
         $event->update(['status' => 'approved']);
@@ -758,6 +760,69 @@ class DashboardController extends Controller
         $this->eventNotifications->notifyParticipantScopeSubmitted($participationScope->fresh(['event.organization', 'organization', 'delegatedOrganization']));
 
         return redirect()->back()->with('success', 'Participant PPA submitted for OSA review.');
+    }
+
+    public function updateParticipantScopeAttendancePolicy(Request $request, Event $event, EventParticipationScope $participationScope)
+    {
+        abort_unless(!$request->user()->hasRole('Super Admin (OSA)'), 403);
+        $this->authorizeParticipantScopeAccess($event, $participationScope, $request->user());
+
+        if ($this->attendancePolicyLocked($event)) {
+            return redirect()->back()->with('error', 'Attendance rules are locked after the event starts.');
+        }
+
+        if ($event->event_late_cutoff_min !== null) {
+            return redirect()->back()->with('error', 'This event already has an organizer late cutoff. Participant scope cutoffs are available only when the organizer leaves the event cutoff unset.');
+        }
+
+        $validated = $request->validate([
+            'late_cutoff_min' => 'nullable|integer|min:0|max:240',
+        ]);
+
+        $participationScope->update([
+            'late_cutoff_min' => filled($validated['late_cutoff_min'] ?? null)
+                ? (int) $validated['late_cutoff_min']
+                : null,
+        ]);
+
+        $studentIds = RawScan::query()
+            ->where('event_id', $event->id)
+            ->where('event_participation_scope_id', $participationScope->id)
+            ->whereNotNull('student_id')
+            ->distinct()
+            ->pluck('student_id')
+            ->all();
+
+        if ($studentIds) {
+            ResolveAttendanceJob::dispatch($event->id, $studentIds, $participationScope->id);
+        }
+
+        return redirect()->back()->with('success', 'Participant late cutoff updated.');
+    }
+
+    public function updateEventAttendancePolicy(Request $request, Event $event)
+    {
+        $user = $request->user();
+        abort_unless(!$user->hasRole('Super Admin (OSA)') && $user->can('create-proposals'), 403);
+        $this->authorizeEventAccess($event, $user);
+        $adminScope = $this->adminScopes->forUser($user);
+        abort_unless($adminScope?->organizationId && $event->organization_id === $adminScope->organizationId, 403, 'Only the event organizer can update attendance rules.');
+
+        if ($this->attendancePolicyLocked($event)) {
+            return redirect()->back()->with('error', 'Attendance rules are locked after the event starts.');
+        }
+
+        $validated = $request->validate([
+            'event_late_cutoff_min' => 'nullable|integer|min:0|max:240',
+        ]);
+
+        $event->update([
+            'event_late_cutoff_min' => filled($validated['event_late_cutoff_min'] ?? null)
+                ? (int) $validated['event_late_cutoff_min']
+                : null,
+        ]);
+
+        return redirect()->back()->with('success', 'Attendance rules updated.');
     }
 
     public function reviewParticipantScope(Request $request, Event $event, EventParticipationScope $participationScope)
@@ -1208,6 +1273,8 @@ class DashboardController extends Controller
         $adminScope = $this->adminScopes->forUser($user);
 
         $events->each(function (Event $event) use ($adminScope, $user, $workspace): void {
+            $event->setAttribute('attendance_policy_locked', $this->attendancePolicyLocked($event));
+
             $event->participationScopes->each(function (EventParticipationScope $scope) use ($adminScope, $user): void {
                 $scope->setAttribute('current_admin_owns_scope', $this->adminScopeMatchesParticipantScope($adminScope, $scope));
                 $scope->setAttribute('current_admin_can_manage_scope', $this->participationScopes->canManageScope($user, $scope));
@@ -1232,6 +1299,62 @@ class DashboardController extends Controller
                 ->filter(fn ($session) => in_array($session->event_participation_scope_id, $visibleScopeIds, true))
                 ->values());
         });
+    }
+
+    private function attendancePolicyLocked(Event $event): bool
+    {
+        $event->loadMissing('eventDays');
+        $timezone = config('services.eaes.event_timezone', 'Asia/Manila');
+        $eventStartDate = $event->start_date?->copy()->startOfDay();
+        $eventEndDate = $event->end_date?->copy()->startOfDay() ?? $eventStartDate;
+        $startsAt = $event->eventDays
+            ->filter(function (EventDay $day) use ($eventStartDate, $eventEndDate): bool {
+                if (!$eventStartDate || !$eventEndDate || !$day->date) {
+                    return true;
+                }
+
+                $dayDate = $day->date->copy()->startOfDay();
+
+                return $dayDate->betweenIncluded($eventStartDate, $eventEndDate);
+            })
+            ->map(function (EventDay $day) use ($timezone): ?Carbon {
+                if (!$day->date || !$day->start_time) {
+                    return null;
+                }
+
+                return Carbon::parse($day->date->toDateString() . ' ' . $day->start_time, $timezone);
+            })
+            ->filter()
+            ->sortBy(fn (Carbon $date) => $date->timestamp)
+            ->first();
+
+        if (!$startsAt && $event->start_date) {
+            $firstStartTime = $event->eventDays
+                ->sortBy('day_number')
+                ->first(fn (EventDay $day) => filled($day->start_time))
+                ?->start_time;
+
+            if ($firstStartTime) {
+                $startsAt = Carbon::parse($event->start_date->toDateString() . ' ' . $firstStartTime, $timezone);
+            }
+        }
+
+        if (!$startsAt && $event->start_date) {
+            $startsAt = Carbon::parse($event->start_date->toDateString(), $timezone)->startOfDay();
+        }
+
+        if ($startsAt) {
+            return Carbon::now($timezone)->greaterThanOrEqualTo($startsAt);
+        }
+
+        return in_array($event->lifecycle_phase, [
+            'active',
+            'ended',
+            'processing',
+            'evaluation_open',
+            'evaluation_closed',
+            'completed',
+        ], true);
     }
 
     private function ensureOrganizerScopesForDashboard($events): void
@@ -1384,6 +1507,7 @@ class DashboardController extends Controller
                 'hardcopy_submitted' => (bool) $linkedEvent->hardcopy_submitted,
                 'org_head_signed' => (bool) $linkedEvent->head_organization_signed,
                 'adviser_signed' => (bool) $linkedEvent->adviser_signed,
+                'late_cutoff_min' => $linkedEvent->event_late_cutoff_min,
                 'approved_at' => in_array($linkedEvent->status, ['approved', 'completed'], true) ? now() : null,
                 'capture_mode' => 'self_scanning',
                 'analytics_rollup_enabled' => true,

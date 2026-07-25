@@ -26,6 +26,7 @@ use App\Services\GeminiService;
 use App\Services\Contracts\AiServiceInterface;
 use App\Services\ScannerAssignmentService;
 use App\Services\ScannerSessionService;
+use App\Support\EvaluationQuestions;
 use Database\Seeders\RolePermissionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Auth;
@@ -333,6 +334,7 @@ class UsmEaesTest extends TestCase
                 'location_details' => 'University Auditorium',
                 'target_demographics' => ['all_students' => true],
                 'budget_allocations' => ['program_materials' => 10000],
+                'evaluation_questions' => EvaluationQuestions::defaultSchema(),
                 'event_days' => [[
                     'day_number' => 1,
                     'date' => Carbon::today()->toDateString(),
@@ -1069,6 +1071,69 @@ class UsmEaesTest extends TestCase
         $this->assertSame(0, ScannerSession::where('event_id', $secondEvent->id)->count());
     }
 
+    public function test_stale_session_from_closed_assignment_does_not_block_new_assignment_activation()
+    {
+        [$org, $admin, $college] = $this->createOrganizationWithScanner();
+        $program = Program::create([
+            'college_id' => $college->id,
+            'name' => 'BS Information Systems',
+            'code' => 'BSIS',
+        ]);
+        $org->programs()->attach($program->id);
+
+        $student = User::create([
+            'name' => 'Stale Session Scanner Student',
+            'email' => 'stale.session.scanner.student@usm.edu.ph',
+            'organization_id' => $org->id,
+            'college_id' => $college->id,
+            'program_id' => $program->id,
+            'student_id_number' => '24-3314',
+            'qr_code_value' => 'QR_STALE_SESSION_STUDENT',
+            'program_code' => 'BSIS',
+        ]);
+        $student->assignRole('Student');
+
+        $firstEvent = $this->createApprovedEvent($org);
+        $secondEvent = $this->createApprovedEvent($org);
+        $secondEvent->update(['title' => 'Second Scanner Event']);
+        $firstAssignment = app(ScannerAssignmentService::class)->assign(
+            event: $firstEvent,
+            scannerUser: $student,
+            assignedBy: $admin,
+            label: 'Gate 1'
+        );
+        $secondAssignment = app(ScannerAssignmentService::class)->assign(
+            event: $secondEvent,
+            scannerUser: $student,
+            assignedBy: $admin,
+            label: 'Gate 2'
+        );
+        $mobileToken = $student->createToken('scanner-phone', ['scanner-assignments'])->plainTextToken;
+
+        $firstActivation = $this->withHeaders(['Authorization' => 'Bearer ' . $mobileToken])
+            ->postJson("/api/v1/scanner/assignments/{$firstAssignment->id}/activate", [
+                'device_id' => 'gate-1-device',
+            ])
+            ->assertStatus(200);
+
+        $firstSession = ScannerSession::findOrFail($firstActivation->json('scanner_session.id'));
+        $firstAssignment->markRevoked($admin, 'Interrupted dashboard revoke left session stale.');
+
+        Auth::forgetGuards();
+
+        $secondActivation = $this->withHeaders(['Authorization' => 'Bearer ' . $mobileToken])
+            ->postJson("/api/v1/scanner/assignments/{$secondAssignment->id}/activate", [
+                'device_id' => 'gate-2-device',
+            ])
+            ->assertStatus(200)
+            ->assertJsonPath('resumed', false);
+
+        $firstSession->refresh();
+        $this->assertSame(ScannerSession::STATUS_ACTIVE, $firstSession->status);
+        $this->assertNotSame($firstSession->id, $secondActivation->json('scanner_session.id'));
+        $this->assertSame(1, ScannerSession::where('event_id', $secondEvent->id)->where('status', ScannerSession::STATUS_ACTIVE)->count());
+    }
+
     public function test_device_bound_scanner_session_rejects_different_device()
     {
         [$org, $scanner] = $this->createOrganizationWithScanner();
@@ -1087,19 +1152,53 @@ class UsmEaesTest extends TestCase
 
     public function test_scanner_validation_serializes_event_local_scan_window()
     {
-        [$org, $scanner] = $this->createOrganizationWithScanner();
-        $event = $this->createApprovedEvent($org, Carbon::parse('2026-07-12', 'Asia/Manila'));
-        $event->eventDays()->update([
-            'start_time' => '09:00:00',
-            'end_time' => '12:00:00',
+        config([
+            'services.eaes.scan_early_checkin_buffer_min' => 60,
+            'services.eaes.checkout_grace_period_min' => 60,
         ]);
-        $token = $this->scannerTokenForEvent($event, $scanner);
 
-        $this->withHeaders(['Authorization' => 'Bearer ' . $token])
-            ->postJson('/api/v1/scanner/validate', ['event_id' => $event->id, 'device_id' => 'device-a'])
-            ->assertStatus(200)
-            ->assertJsonPath('scanner_session.scan_window_start', '2026-07-12T09:00:00+08:00')
-            ->assertJsonPath('scanner_session.scan_window_end', '2026-07-12T12:00:00+08:00');
+        $eventDate = Carbon::today('Asia/Manila');
+        Carbon::setTestNow($eventDate->copy()->setTime(10, 0));
+
+        try {
+            [$org, $scanner] = $this->createOrganizationWithScanner();
+            $event = $this->createApprovedEvent($org, $eventDate);
+            $event->eventDays()->update([
+                'start_time' => '09:00:00',
+                'end_time' => '12:00:00',
+            ]);
+            $token = $this->scannerTokenForEvent($event, $scanner);
+            $eventDay = $event->eventDays()->firstOrFail();
+            $eventTimezone = config('services.eaes.event_timezone', 'Asia/Manila');
+            $expectedScanWindowStart = Carbon::parse(
+                $eventDay->date->toDateString() . ' ' . $eventDay->start_time,
+                $eventTimezone
+            )->subHour()->toIso8601String();
+            $expectedScanWindowEnd = Carbon::parse(
+                $eventDay->date->toDateString() . ' ' . $eventDay->end_time,
+                $eventTimezone
+            )->addHour()->toIso8601String();
+            $expectedTimeInWindowEnd = Carbon::parse(
+                $eventDay->date->toDateString() . ' ' . $eventDay->end_time,
+                $eventTimezone
+            )->toIso8601String();
+            $expectedTimeOutWindowStart = Carbon::parse(
+                $eventDay->date->toDateString() . ' ' . $eventDay->start_time,
+                $eventTimezone
+            )->toIso8601String();
+
+            $this->withHeaders(['Authorization' => 'Bearer ' . $token])
+                ->postJson('/api/v1/scanner/validate', ['event_id' => $event->id, 'device_id' => 'device-a'])
+                ->assertStatus(200)
+                ->assertJsonPath('scanner_session.scan_window_start', $expectedScanWindowStart)
+                ->assertJsonPath('scanner_session.scan_window_end', $expectedScanWindowEnd)
+                ->assertJsonPath('scanner_session.time_in_window_start', $expectedScanWindowStart)
+                ->assertJsonPath('scanner_session.time_in_window_end', $expectedTimeInWindowEnd)
+                ->assertJsonPath('scanner_session.time_out_window_start', $expectedTimeOutWindowStart)
+                ->assertJsonPath('scanner_session.time_out_window_end', $expectedScanWindowEnd);
+        } finally {
+            Carbon::setTestNow();
+        }
     }
 
     public function test_expired_scanner_session_rejects_sync_with_clear_response()
@@ -1130,6 +1229,11 @@ class UsmEaesTest extends TestCase
 
     public function test_sync_rejects_scans_outside_event_window_per_scan()
     {
+        config([
+            'services.eaes.scan_early_checkin_buffer_min' => 60,
+            'services.eaes.checkout_grace_period_min' => 60,
+        ]);
+
         [$org, $scanner] = $this->createOrganizationWithScanner();
         $event = $this->createApprovedEvent($org);
         $token = $this->scannerTokenForEvent($event, $scanner);
@@ -1141,10 +1245,18 @@ class UsmEaesTest extends TestCase
                     [
                         'dedup_key' => 'too-early',
                         'scan_type' => 'time_in',
-                        'scanned_at' => Carbon::today()->setTime(7, 59)->toDateTimeString(),
+                        'scanned_at' => Carbon::today()->setTime(6, 59)->toDateTimeString(),
                         'device_id' => 'window-device',
                         'manual_entry' => false,
                         'qr_code_value' => 'QR_TOO_EARLY',
+                    ],
+                    [
+                        'dedup_key' => 'valid-early-checkin',
+                        'scan_type' => 'time_in',
+                        'scanned_at' => Carbon::today()->setTime(7, 30)->toDateTimeString(),
+                        'device_id' => 'window-device',
+                        'manual_entry' => false,
+                        'qr_code_value' => 'QR_VALID_EARLY_CHECKIN',
                     ],
                     [
                         'dedup_key' => 'valid-window',
@@ -1155,24 +1267,43 @@ class UsmEaesTest extends TestCase
                         'qr_code_value' => 'QR_VALID_WINDOW',
                     ],
                     [
-                        'dedup_key' => 'too-late',
+                        'dedup_key' => 'time-in-after-end',
+                        'scan_type' => 'time_in',
+                        'scanned_at' => Carbon::today()->setTime(12, 1)->toDateTimeString(),
+                        'device_id' => 'window-device',
+                        'manual_entry' => false,
+                        'qr_code_value' => 'QR_TIME_IN_AFTER_END',
+                    ],
+                    [
+                        'dedup_key' => 'valid-late-timeout',
                         'scan_type' => 'time_out',
                         'scanned_at' => Carbon::today()->setTime(12, 1)->toDateTimeString(),
                         'device_id' => 'window-device',
                         'manual_entry' => false,
-                        'qr_code_value' => 'QR_TOO_LATE',
+                        'qr_code_value' => 'QR_VALID_LATE_TIMEOUT',
+                    ],
+                    [
+                        'dedup_key' => 'too-late-timeout',
+                        'scan_type' => 'time_out',
+                        'scanned_at' => Carbon::today()->setTime(13, 1)->toDateTimeString(),
+                        'device_id' => 'window-device',
+                        'manual_entry' => false,
+                        'qr_code_value' => 'QR_TOO_LATE_TIMEOUT',
                     ],
                 ],
             ])
             ->assertStatus(200)
             ->assertJsonFragment([
-                'ingested_count' => 1,
-                'rejected_count' => 2,
+                'ingested_count' => 3,
+                'rejected_count' => 3,
             ]);
 
+        $this->assertDatabaseHas('raw_scans', ['dedup_key' => 'valid-early-checkin']);
         $this->assertDatabaseHas('raw_scans', ['dedup_key' => 'valid-window']);
+        $this->assertDatabaseHas('raw_scans', ['dedup_key' => 'valid-late-timeout']);
         $this->assertDatabaseMissing('raw_scans', ['dedup_key' => 'too-early']);
-        $this->assertDatabaseMissing('raw_scans', ['dedup_key' => 'too-late']);
+        $this->assertDatabaseMissing('raw_scans', ['dedup_key' => 'time-in-after-end']);
+        $this->assertDatabaseMissing('raw_scans', ['dedup_key' => 'too-late-timeout']);
     }
 
     public function test_lifecycle_command_transitions_event_phases_and_completion()
@@ -1443,6 +1574,7 @@ class UsmEaesTest extends TestCase
                 'end_date' => Carbon::today()->toDateString(),
                 'location_type' => 'on-campus',
                 'location_details' => 'HR Training Room',
+                'evaluation_questions' => EvaluationQuestions::defaultSchema(),
                 'event_days' => [[
                     'day_number' => 1,
                     'date' => Carbon::today()->toDateString(),
@@ -1891,6 +2023,152 @@ class UsmEaesTest extends TestCase
             ->assertSuccessful();
 
         Bus::assertDispatched(AnalyzeEventSentimentsJob::class, 1);
+    }
+
+    public function test_organizer_event_late_cutoff_overrides_participant_scope_cutoff(): void
+    {
+        [$organizerOrg,, $college] = $this->createOrganizationWithScanner();
+
+        $participantOrg = Organization::create([
+            'college_id' => $college->id,
+            'name' => 'Participant Society',
+            'acronym' => 'PART',
+            'type' => 'society',
+        ]);
+
+        $student = User::create([
+            'name' => 'Participant Student',
+            'email' => 'participant.student@usm.edu.ph',
+            'organization_id' => $participantOrg->id,
+            'college_id' => $college->id,
+            'student_id_number' => '26-1001',
+            'qr_code_value' => 'QR-PARTICIPANT-CUTOFF',
+            'program_code' => 'BSIS',
+        ]);
+        $student->assignRole('Student');
+
+        $event = Event::create([
+            'organization_id' => $organizerOrg->id,
+            'title' => 'Organizer Cutoff Event',
+            'status' => 'approved',
+            'start_date' => Carbon::today(),
+            'end_date' => Carbon::today(),
+            'event_late_cutoff_min' => 30,
+        ]);
+
+        $day = EventDay::create([
+            'event_id' => $event->id,
+            'day_number' => 1,
+            'date' => Carbon::today(),
+            'start_time' => '08:00:00',
+            'end_time' => '12:00:00',
+        ]);
+
+        $scope = $event->participationScopes()->create([
+            'participation_role' => EventParticipationScope::ROLE_PARTICIPANT,
+            'participant_type' => 'society',
+            'organization_id' => $participantOrg->id,
+            'college_id' => $college->id,
+            'participant_name_snapshot' => 'PART - Participant Society',
+            'ppa_required' => false,
+            'ppa_status' => EventParticipationScope::PPA_NOT_REQUIRED,
+            'capture_mode' => 'self_scanning',
+            'analytics_rollup_enabled' => true,
+            'late_cutoff_min' => 10,
+            'status' => EventParticipationScope::STATUS_ACTIVE,
+        ]);
+
+        RawScan::create([
+            'event_id' => $event->id,
+            'event_participation_scope_id' => $scope->id,
+            'event_day_id' => $day->id,
+            'student_id' => $student->id,
+            'scan_type' => 'time_in',
+            'scanned_at' => Carbon::today()->setTime(8, 20),
+            'server_received_at' => now(),
+            'device_id' => 'policy-test-device',
+            'manual_entry' => false,
+            'dedup_key' => 'policy-event-wins',
+        ]);
+
+        (new ResolveAttendanceJob($event->id, [$student->id], $scope->id))->handle();
+
+        $record = AttendanceRecord::firstOrFail();
+        $this->assertSame('late', $record->society_status);
+        $this->assertSame('late', $record->competition_status);
+    }
+
+    public function test_participant_scope_late_cutoff_applies_when_event_cutoff_is_unset(): void
+    {
+        [$organizerOrg,, $college] = $this->createOrganizationWithScanner();
+
+        $participantOrg = Organization::create([
+            'college_id' => $college->id,
+            'name' => 'Fallback Society',
+            'acronym' => 'FALL',
+            'type' => 'society',
+        ]);
+
+        $student = User::create([
+            'name' => 'Fallback Student',
+            'email' => 'fallback.student@usm.edu.ph',
+            'organization_id' => $participantOrg->id,
+            'college_id' => $college->id,
+            'student_id_number' => '26-1002',
+            'qr_code_value' => 'QR-FALLBACK-CUTOFF',
+            'program_code' => 'BSIS',
+        ]);
+        $student->assignRole('Student');
+
+        $event = Event::create([
+            'organization_id' => $organizerOrg->id,
+            'title' => 'Scope Cutoff Event',
+            'status' => 'approved',
+            'start_date' => Carbon::today(),
+            'end_date' => Carbon::today(),
+            'event_late_cutoff_min' => null,
+        ]);
+
+        $day = EventDay::create([
+            'event_id' => $event->id,
+            'day_number' => 1,
+            'date' => Carbon::today(),
+            'start_time' => '08:00:00',
+            'end_time' => '12:00:00',
+        ]);
+
+        $scope = $event->participationScopes()->create([
+            'participation_role' => EventParticipationScope::ROLE_PARTICIPANT,
+            'participant_type' => 'society',
+            'organization_id' => $participantOrg->id,
+            'college_id' => $college->id,
+            'participant_name_snapshot' => 'FALL - Fallback Society',
+            'ppa_required' => false,
+            'ppa_status' => EventParticipationScope::PPA_NOT_REQUIRED,
+            'capture_mode' => 'self_scanning',
+            'analytics_rollup_enabled' => true,
+            'late_cutoff_min' => 10,
+            'status' => EventParticipationScope::STATUS_ACTIVE,
+        ]);
+
+        RawScan::create([
+            'event_id' => $event->id,
+            'event_participation_scope_id' => $scope->id,
+            'event_day_id' => $day->id,
+            'student_id' => $student->id,
+            'scan_type' => 'time_in',
+            'scanned_at' => Carbon::today()->setTime(8, 20),
+            'server_received_at' => now(),
+            'device_id' => 'policy-test-device',
+            'manual_entry' => false,
+            'dedup_key' => 'policy-scope-fallback',
+        ]);
+
+        (new ResolveAttendanceJob($event->id, [$student->id], $scope->id))->handle();
+
+        $record = AttendanceRecord::firstOrFail();
+        $this->assertSame('late_cutoff', $record->society_status);
+        $this->assertSame('late_cutoff', $record->competition_status);
     }
 
     private function createOrganizationWithScanner(

@@ -14,10 +14,12 @@ use App\Models\Organization;
 use App\Models\OrganizationMembership;
 use App\Models\PendingStudentLink;
 use App\Models\Program;
+use App\Models\RawScan;
 use App\Models\ScannerSession;
 use App\Models\University;
 use App\Models\User;
 use App\Jobs\AnalyzeEventSentimentsJob;
+use App\Jobs\ResolveAttendanceJob;
 use App\Notifications\EventWorkflowNotification;
 use App\Services\AdminAssignmentService;
 use App\Services\ScannerAssignmentService;
@@ -25,12 +27,16 @@ use App\Services\ScannerSessionService;
 use App\Services\GeminiService;
 use App\Services\ParticipationScopeService;
 use App\Services\Contracts\AiServiceInterface;
+use App\Support\EventEvaluationForm;
 use App\Support\EventExportData;
+use App\Support\EvaluationQuestions;
+use App\Support\EvaluationWindow;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Storage;
+use Livewire\Livewire;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 use Tests\TestCase;
@@ -53,7 +59,7 @@ class WebPortalTest extends TestCase
         $permissions = [
             'manage-organizations', 'approve-proposals', 'view-all-analytics',
             'force-validate-any', 'manage-global-settings', 'create-proposals',
-            'assign-scanners-own', 'set-late-threshold', 'view-own-analytics',
+            'assign-scanners-own', 'set-attendance-policy', 'set-late-threshold', 'view-own-analytics',
             'view-college-analytics', 'view-constituent-data', 'force-validate-own',
             'scan-qr-codes', 'manual-entry-id', 'register-profile',
             'view-own-history', 'submit-evaluations',
@@ -66,13 +72,13 @@ class WebPortalTest extends TestCase
         Role::firstOrCreate(['name' => 'Super Admin (OSA)', 'guard_name' => 'web'])
             ->syncPermissions(['manage-organizations', 'approve-proposals', 'view-all-analytics', 'force-validate-any', 'manage-global-settings']);
         Role::firstOrCreate(['name' => 'Society Admin', 'guard_name' => 'web'])
-            ->syncPermissions(['create-proposals', 'assign-scanners-own', 'set-late-threshold', 'view-own-analytics', 'force-validate-own']);
+            ->syncPermissions(['create-proposals', 'assign-scanners-own', 'set-attendance-policy', 'set-late-threshold', 'view-own-analytics', 'force-validate-own']);
         Role::firstOrCreate(['name' => 'Student', 'guard_name' => 'web'])
             ->syncPermissions(['register-profile', 'view-own-history', 'submit-evaluations']);
         Role::firstOrCreate(['name' => 'USG Admin', 'guard_name' => 'web'])
-            ->syncPermissions(['create-proposals', 'assign-scanners-own', 'view-own-analytics']);
+            ->syncPermissions(['create-proposals', 'assign-scanners-own', 'set-attendance-policy', 'view-own-analytics']);
         Role::firstOrCreate(['name' => 'LSG Admin', 'guard_name' => 'web'])
-            ->syncPermissions(['create-proposals', 'view-college-analytics', 'view-constituent-data']);
+            ->syncPermissions(['create-proposals', 'set-attendance-policy', 'view-college-analytics', 'view-constituent-data']);
     }
 
     private function createHierarchy(): array
@@ -212,6 +218,12 @@ class WebPortalTest extends TestCase
             'head_organization_signed' => true,
             'adviser_signed' => true,
         ]);
+        $form = EventEvaluationForm::createForEvent(
+            $event,
+            null,
+            EvaluationQuestions::defaultSchema(),
+            'Evaluation - ' . $event->title
+        );
 
         $eventDay = EventDay::create([
             'event_id' => $event->id,
@@ -235,6 +247,7 @@ class WebPortalTest extends TestCase
         Evaluation::create([
             'event_id' => $event->id,
             'student_id' => $student->id,
+            'evaluation_form_version_id' => $form->id,
             'section_scores' => [
                 'attainment_of_objectives' => 5,
                 'speaker_mastery' => 4,
@@ -247,6 +260,22 @@ class WebPortalTest extends TestCase
         ]);
 
         return $event;
+    }
+
+    private function customEvaluationQuestions(): array
+    {
+        return [
+            [
+                'id' => 'activity_relevance',
+                'label' => 'Activity relevance',
+                'description' => 'Was the activity relevant to the stated audience?',
+            ],
+            [
+                'id' => 'facilitator_quality',
+                'label' => 'Facilitator quality',
+                'description' => 'Did the facilitator support the session effectively?',
+            ],
+        ];
     }
 
     // ─── Auth Tests ────────────────────────────────────────
@@ -304,7 +333,10 @@ class WebPortalTest extends TestCase
             ->get(route('dashboard'))
             ->assertOk()
             ->assertSee('notification-bell--dashboard', false)
+            ->assertSee('notification-bell-badge', false)
             ->assertSee('Open notification menu')
+            ->assertSee('sidebar-count-unread', false)
+            ->assertSee('1 unread notifications')
             ->assertSee('Dashboard Header Notice')
             ->assertSee('Needs action');
 
@@ -314,6 +346,100 @@ class WebPortalTest extends TestCase
             ->assertDontSee('notification-bell--dashboard', false)
             ->assertDontSee('Open notification menu')
             ->assertDontSee('Dashboard Header Notice');
+    }
+
+    public function test_livewire_notification_bell_marks_items_read_without_page_redirect(): void
+    {
+        $h = $this->createHierarchy();
+        $admin = $this->createAdmin('Society Admin', $h['org']);
+
+        $this->notifyWorkflow($admin, [
+            'title' => 'Async Notification',
+            'body' => 'This notification should be marked read in-place.',
+            'needs_action' => true,
+        ]);
+
+        $notification = $admin->fresh()->notifications()->first();
+        $this->assertNull($notification->read_at);
+
+        Livewire::actingAs($admin)
+            ->test(\App\Livewire\Dashboard\NotificationBell::class, ['variant' => 'dashboard'])
+            ->assertSee('Async Notification')
+            ->call('markRead', $notification->id)
+            ->assertDispatched('notifications-updated');
+
+        $this->assertNotNull($notification->fresh()->read_at);
+    }
+
+    public function test_livewire_notification_bell_marks_all_read_and_refreshes_sidebar_badge(): void
+    {
+        $h = $this->createHierarchy();
+        $admin = $this->createAdmin('Society Admin', $h['org']);
+
+        $this->notifyWorkflow($admin, ['title' => 'First unread notice']);
+        $this->notifyWorkflow($admin, ['title' => 'Second unread notice']);
+
+        Livewire::actingAs($admin)
+            ->test(\App\Livewire\Dashboard\NotificationBell::class, ['variant' => 'dashboard'])
+            ->assertSee('First unread notice')
+            ->call('markAllRead')
+            ->assertDispatched('notifications-updated');
+
+        $this->assertSame(0, $admin->fresh()->unreadNotifications()->count());
+
+        Livewire::actingAs($admin)
+            ->test(\App\Livewire\Dashboard\NotificationSidebarBadge::class, ['type' => 'unread'])
+            ->assertDontSee('sidebar-count-unread');
+    }
+
+    public function test_livewire_notification_center_marks_items_read_without_page_redirect(): void
+    {
+        $h = $this->createHierarchy();
+        $admin = $this->createAdmin('Society Admin', $h['org']);
+
+        $this->notifyWorkflow($admin, [
+            'title' => 'Center Async Notification',
+            'body' => 'This notification should be handled from the notification center.',
+            'needs_action' => true,
+        ]);
+
+        $notification = $admin->fresh()->notifications()->first();
+        $this->assertNull($notification->read_at);
+
+        Livewire::actingAs($admin)
+            ->test(\App\Livewire\Dashboard\NotificationCenter::class)
+            ->assertSee('Center Async Notification')
+            ->call('markRead', $notification->id)
+            ->assertDispatched('notifications-updated');
+
+        $this->assertNotNull($notification->fresh()->read_at);
+    }
+
+    public function test_livewire_notification_center_marks_all_read_and_uses_livewire_pagination(): void
+    {
+        $h = $this->createHierarchy();
+        $admin = $this->createAdmin('Society Admin', $h['org']);
+
+        foreach (range(1, 22) as $index) {
+            $this->notifyWorkflow($admin, [
+                'notification_key' => 'notification_center_page:' . $index,
+                'title' => 'Paged Notification ' . $index,
+                'body' => 'Notification center pagination coverage.',
+            ]);
+        }
+
+        Livewire::actingAs($admin)
+            ->test(\App\Livewire\Dashboard\NotificationCenter::class)
+            ->assertSee('Paged Notification 1')
+            ->assertDontSee('Paged Notification 21')
+            ->assertSee('wire:click="gotoPage', false)
+            ->call('gotoPage', 2, 'page')
+            ->assertSee('Paged Notification 21')
+            ->assertSee('Paged Notification 22')
+            ->call('markAllRead')
+            ->assertDispatched('notifications-updated');
+
+        $this->assertSame(0, $admin->fresh()->unreadNotifications()->count());
     }
 
     public function test_osa_admin_is_not_given_student_portal_access(): void
@@ -430,6 +556,141 @@ class WebPortalTest extends TestCase
 
     // ─── Evaluation Tests ──────────────────────────────────
 
+    public function test_student_evaluations_index_renders_empty_pending_submitted_and_closed_states(): void
+    {
+        $h = $this->createHierarchy();
+        $student = $this->createStudent($h['org']);
+
+        $this->actingAs($student)
+            ->get(route('portal.evaluations'))
+            ->assertOk()
+            ->assertSee('My Evaluations')
+            ->assertSee('No evaluations to complete')
+            ->assertSee('No submitted evaluations yet');
+
+        $pendingEvent = Event::create([
+            'organization_id' => $h['org']->id,
+            'title' => 'Pending Evaluation Center Event',
+            'status' => 'approved',
+            'start_date' => today(),
+            'end_date' => today(),
+        ]);
+        EventEvaluationForm::createForEvent($pendingEvent, null, $this->customEvaluationQuestions(), 'Evaluation - Pending Center Event');
+        $pendingDay = EventDay::create([
+            'event_id' => $pendingEvent->id,
+            'day_number' => 1,
+            'date' => today(),
+            'start_time' => '08:00',
+            'end_time' => '17:00',
+        ]);
+        AttendanceRecord::create([
+            'event_id' => $pendingEvent->id,
+            'event_day_id' => $pendingDay->id,
+            'student_id' => $student->id,
+            'time_in' => now(),
+            'society_status' => 'present_on_time',
+            'competition_status' => 'present_on_time',
+            'valid' => false,
+        ]);
+
+        $submittedEvent = Event::create([
+            'organization_id' => $h['org']->id,
+            'title' => 'Submitted Evaluation Center Event',
+            'status' => 'completed',
+            'start_date' => today()->subDay(),
+            'end_date' => today()->subDay(),
+        ]);
+        $submittedForm = EventEvaluationForm::createForEvent($submittedEvent, null, $this->customEvaluationQuestions(), 'Evaluation - Submitted Center Event');
+        $submittedDay = EventDay::create([
+            'event_id' => $submittedEvent->id,
+            'day_number' => 1,
+            'date' => today()->subDay(),
+            'start_time' => '08:00',
+            'end_time' => '17:00',
+        ]);
+        AttendanceRecord::create([
+            'event_id' => $submittedEvent->id,
+            'event_day_id' => $submittedDay->id,
+            'student_id' => $student->id,
+            'time_in' => now()->subDay(),
+            'society_status' => 'present_on_time',
+            'competition_status' => 'present_on_time',
+            'valid' => true,
+        ]);
+        Evaluation::create([
+            'event_id' => $submittedEvent->id,
+            'student_id' => $student->id,
+            'evaluation_form_version_id' => $submittedForm->id,
+            'section_scores' => [
+                'activity_relevance' => 5,
+                'facilitator_quality' => 4,
+            ],
+            'open_comment' => 'Useful event.',
+            'sentiment' => 'unprocessed',
+            'submitted_at' => now()->subHours(2),
+        ]);
+
+        $closedEvent = Event::create([
+            'organization_id' => $h['org']->id,
+            'title' => 'Closed Evaluation Center Event',
+            'status' => 'completed',
+            'start_date' => today()->subDays(5),
+            'end_date' => today()->subDays(5),
+        ]);
+        EventEvaluationForm::createForEvent($closedEvent, null, $this->customEvaluationQuestions(), 'Evaluation - Closed Center Event');
+        $closedDay = EventDay::create([
+            'event_id' => $closedEvent->id,
+            'day_number' => 1,
+            'date' => today()->subDays(5),
+            'start_time' => '08:00',
+            'end_time' => '17:00',
+        ]);
+        AttendanceRecord::create([
+            'event_id' => $closedEvent->id,
+            'event_day_id' => $closedDay->id,
+            'student_id' => $student->id,
+            'time_in' => now()->subDays(5),
+            'society_status' => 'present_on_time',
+            'competition_status' => 'present_on_time',
+            'valid' => false,
+        ]);
+
+        $this->actingAs($student)
+            ->get(route('portal.evaluations'))
+            ->assertOk()
+            ->assertSee('Pending Evaluation Center Event')
+            ->assertSee('Evaluate now')
+            ->assertSee('Submitted Evaluation Center Event')
+            ->assertSee('Validated')
+            ->assertSee('Closed Evaluation Center Event')
+            ->assertSee('Closed Evaluation Windows');
+    }
+
+    public function test_route_errors_render_friendly_pages_for_wrong_web_requests(): void
+    {
+        $h = $this->createHierarchy();
+        $student = $this->createStudent($h['org']);
+
+        $this->actingAs($student)
+            ->get('/logout')
+            ->assertStatus(405)
+            ->assertSee('This action cannot be opened directly')
+            ->assertSee('GET /logout')
+            ->assertSee('Return to Portal');
+
+        $this->actingAs($student)
+            ->get('/portal/not-a-real-page')
+            ->assertNotFound()
+            ->assertSee('Page not found')
+            ->assertSee('Return to Portal');
+
+        $this->actingAs($student)
+            ->get('/dashboard')
+            ->assertForbidden()
+            ->assertSee('Access restricted')
+            ->assertSee('Return to Portal');
+    }
+
     public function test_evaluation_submission(): void
     {
         $h = $this->createHierarchy();
@@ -442,6 +703,7 @@ class WebPortalTest extends TestCase
             'start_date' => today(),
             'end_date' => today(),
         ]);
+        $form = EventEvaluationForm::createForEvent($event, null, $this->customEvaluationQuestions(), 'Evaluation - Test Event');
 
         $eventDay = EventDay::create([
             'event_id' => $event->id,
@@ -462,13 +724,26 @@ class WebPortalTest extends TestCase
             'valid' => false,
         ]);
 
+        $windowCloseAt = EvaluationWindow::closesAt($event);
+
+        $this->actingAs($student)
+            ->get(route('portal.evaluation', $event))
+            ->assertOk()
+            ->assertSee('Student evaluation')
+            ->assertSee('Activity relevance')
+            ->assertSee('Facilitator quality')
+            ->assertSee('Evaluation window')
+            ->assertSee('Time remaining')
+            ->assertSee('Closes')
+            ->assertSee($windowCloseAt->format('M d, Y g:i A'))
+            ->assertSee('Pending evaluation');
+
         $this->actingAs($student)
             ->post(route('portal.evaluation.submit'), [
                 'event_id' => $event->id,
                 'section_scores' => [
-                    'attainment_of_objectives' => 4,
-                    'speaker_mastery' => 5,
-                    'venue_comfort' => 3,
+                    'activity_relevance' => 4,
+                    'facilitator_quality' => 5,
                 ],
                 'open_comment' => 'Great event!',
             ])
@@ -479,6 +754,7 @@ class WebPortalTest extends TestCase
         $this->assertDatabaseHas('evaluations', [
             'event_id' => $event->id,
             'student_id' => $student->id,
+            'evaluation_form_version_id' => $form->id,
         ]);
 
         // Verify evaluation gate toggled validity
@@ -486,6 +762,92 @@ class WebPortalTest extends TestCase
             'event_id' => $event->id,
             'student_id' => $student->id,
             'valid' => true,
+        ]);
+
+        $this->actingAs($student)
+            ->get(route('portal.evaluation', $event))
+            ->assertOk()
+            ->assertSee('Evaluation Submitted')
+            ->assertSee('Attendance validated')
+            ->assertSee('Submitted')
+            ->assertSee($windowCloseAt->format('M d, Y g:i A'));
+
+        $this->actingAs($student)
+            ->post(route('portal.evaluation.submit'), [
+                'event_id' => $event->id,
+                'section_scores' => [
+                    'activity_relevance' => 4,
+                    'facilitator_quality' => 5,
+                ],
+            ])
+            ->assertSessionHas('error', 'You have already submitted an evaluation for this event.');
+    }
+
+    public function test_evaluation_submission_validates_event_specific_questions(): void
+    {
+        $h = $this->createHierarchy();
+        $student = $this->createStudent($h['org']);
+
+        $event = Event::create([
+            'organization_id' => $h['org']->id,
+            'title' => 'Custom Evaluation Event',
+            'status' => 'approved',
+            'start_date' => today(),
+            'end_date' => today(),
+        ]);
+        EventEvaluationForm::createForEvent($event, null, $this->customEvaluationQuestions(), 'Evaluation - Custom Evaluation Event');
+
+        $eventDay = EventDay::create([
+            'event_id' => $event->id,
+            'day_number' => 1,
+            'date' => today(),
+            'start_time' => '08:00',
+            'end_time' => '17:00',
+        ]);
+
+        AttendanceRecord::create([
+            'event_id' => $event->id,
+            'event_day_id' => $eventDay->id,
+            'student_id' => $student->id,
+            'time_in' => now(),
+            'society_status' => 'present_on_time',
+            'competition_status' => 'present_on_time',
+            'valid' => false,
+        ]);
+
+        $this->actingAs($student)
+            ->post(route('portal.evaluation.submit'), [
+                'event_id' => $event->id,
+                'section_scores' => [
+                    'activity_relevance' => 4,
+                ],
+            ])
+            ->assertSessionHasErrors('section_scores.facilitator_quality');
+
+        $this->actingAs($student)
+            ->post(route('portal.evaluation.submit'), [
+                'event_id' => $event->id,
+                'section_scores' => [
+                    'activity_relevance' => 6,
+                    'facilitator_quality' => 5,
+                ],
+            ])
+            ->assertSessionHasErrors('section_scores.activity_relevance');
+
+        $this->actingAs($student)
+            ->post(route('portal.evaluation.submit'), [
+                'event_id' => $event->id,
+                'section_scores' => [
+                    'activity_relevance' => 4,
+                    'facilitator_quality' => 5,
+                    'speaker_mastery' => 5,
+                ],
+            ])
+            ->assertSessionHasErrors('section_scores.speaker_mastery');
+
+        $this->assertDatabaseMissing('evaluations', [
+            'event_id' => $event->id,
+            'student_id' => $student->id,
         ]);
     }
 
@@ -519,6 +881,17 @@ class WebPortalTest extends TestCase
             'competition_status' => 'present_on_time',
             'valid' => false,
         ]);
+
+        $windowCloseAt = EvaluationWindow::closesAt($event);
+
+        $this->actingAs($student)
+            ->get(route('portal.evaluation', $event))
+            ->assertOk()
+            ->assertSee('Window Closed')
+            ->assertSee('Evaluation window')
+            ->assertSee('No time remaining')
+            ->assertSee('The deadline was')
+            ->assertSee($windowCloseAt->format('M d, Y g:i A'));
 
         $this->actingAs($student)
             ->post(route('portal.evaluation.submit'), [
@@ -560,6 +933,7 @@ class WebPortalTest extends TestCase
             'head_organization_signed' => true,
             'adviser_signed' => true,
         ]);
+        EventEvaluationForm::createForEvent($event, $societyAdmin, $this->customEvaluationQuestions(), 'Evaluation - ' . $event->title);
 
         // Submit
         $this->actingAs($societyAdmin)
@@ -581,6 +955,172 @@ class WebPortalTest extends TestCase
             ->assertSessionHas('success');
         $event->refresh();
         $this->assertEquals('approved', $event->status);
+    }
+
+    public function test_livewire_event_proposal_workflow_submits_draft_without_page_reload(): void
+    {
+        $h = $this->createHierarchy();
+        $societyAdmin = $this->createAdmin('Society Admin', $h['org']);
+
+        $event = Event::create([
+            'organization_id' => $h['org']->id,
+            'title' => 'Livewire Submit Proposal',
+            'proposal_category' => 'activity',
+            'status' => 'draft',
+            'start_date' => today()->addDays(7),
+            'end_date' => today()->addDays(7),
+            'proposal_document_path' => 'proposal-documents/livewire-submit.docx',
+            'proposal_document_original_name' => 'livewire-submit.docx',
+            'hardcopy_submitted' => true,
+            'hardcopy_submitted_at' => now(),
+            'head_organization_signed' => true,
+            'adviser_signed' => true,
+        ]);
+        EventEvaluationForm::createForEvent($event, $societyAdmin, $this->customEvaluationQuestions(), 'Evaluation - ' . $event->title);
+
+        Livewire::actingAs($societyAdmin)
+            ->test(\App\Livewire\Dashboard\EventProposalWorkflow::class, ['eventId' => $event->id])
+            ->assertSee('Submit')
+            ->call('submitProposal')
+            ->assertSet('notice', 'Proposal submitted for review.')
+            ->assertSee('Proposal submitted for review.');
+
+        $this->assertDatabaseHas('events', [
+            'id' => $event->id,
+            'status' => 'submitted',
+        ]);
+        $this->assertDatabaseHas('event_participation_scopes', [
+            'event_id' => $event->id,
+            'participation_role' => EventParticipationScope::ROLE_ORGANIZER,
+            'ppa_status' => EventParticipationScope::PPA_SUBMITTED,
+        ]);
+    }
+
+    public function test_livewire_event_proposal_workflow_records_hardcopy_and_refreshes_packet_status(): void
+    {
+        $h = $this->createHierarchy();
+        $societyAdmin = $this->createAdmin('Society Admin', $h['org']);
+
+        $event = Event::create([
+            'organization_id' => $h['org']->id,
+            'title' => 'Livewire Hardcopy Proposal',
+            'proposal_category' => 'activity',
+            'status' => 'draft',
+            'start_date' => today()->addDays(7),
+            'end_date' => today()->addDays(7),
+            'proposal_document_path' => 'proposal-documents/livewire-hardcopy.docx',
+            'proposal_document_original_name' => 'livewire-hardcopy.docx',
+            'hardcopy_submitted' => false,
+            'head_organization_signed' => false,
+            'adviser_signed' => false,
+        ]);
+
+        Livewire::actingAs($societyAdmin)
+            ->test(\App\Livewire\Dashboard\EventProposalWorkflow::class, ['eventId' => $event->id])
+            ->assertSee('Hardcopy')
+            ->call('markHardcopy')
+            ->assertSet('notice', 'Hardcopy status recorded.');
+
+        $this->assertTrue((bool) $event->fresh()->hardcopy_submitted);
+
+        Livewire::actingAs($societyAdmin)
+            ->test(\App\Livewire\Dashboard\EventProposalPacket::class, ['eventId' => $event->id])
+            ->assertSee('Hardcopy')
+            ->assertSee('ppa-status-item--ok', false);
+    }
+
+    public function test_livewire_event_proposal_workflow_osa_reviews_and_approves_without_page_reload(): void
+    {
+        $h = $this->createHierarchy();
+        $societyAdmin = $this->createAdmin('Society Admin', $h['org']);
+        $osaAdmin = $this->createAdmin('Super Admin (OSA)');
+
+        $event = Event::create([
+            'organization_id' => $h['org']->id,
+            'title' => 'Livewire OSA Review Proposal',
+            'proposal_category' => 'activity',
+            'status' => 'submitted',
+            'start_date' => today()->addDays(7),
+            'end_date' => today()->addDays(7),
+            'proposal_document_path' => 'proposal-documents/livewire-review.docx',
+            'proposal_document_original_name' => 'livewire-review.docx',
+            'hardcopy_submitted' => true,
+            'hardcopy_submitted_at' => now(),
+            'head_organization_signed' => true,
+            'adviser_signed' => true,
+        ]);
+        EventEvaluationForm::createForEvent($event, $societyAdmin, $this->customEvaluationQuestions(), 'Evaluation - ' . $event->title);
+
+        Livewire::actingAs($osaAdmin)
+            ->test(\App\Livewire\Dashboard\EventProposalWorkflow::class, ['eventId' => $event->id])
+            ->assertSee('Review')
+            ->call('startReview')
+            ->assertSet('notice', 'Proposal is now under review.')
+            ->assertSee('Approve')
+            ->call('approveProposal')
+            ->assertSet('notice', 'Event proposal approved. Scanning is now unlocked.')
+            ->assertSee('Analytics');
+
+        $this->assertDatabaseHas('events', [
+            'id' => $event->id,
+            'status' => 'approved',
+        ]);
+        $this->assertDatabaseHas('event_participation_scopes', [
+            'event_id' => $event->id,
+            'participation_role' => EventParticipationScope::ROLE_ORGANIZER,
+            'ppa_status' => EventParticipationScope::PPA_APPROVED,
+        ]);
+    }
+
+    public function test_livewire_event_proposal_workflow_keeps_locked_evaluation_form_approval_guard(): void
+    {
+        $h = $this->createHierarchy();
+        $osaAdmin = $this->createAdmin('Super Admin (OSA)');
+
+        $event = Event::create([
+            'organization_id' => $h['org']->id,
+            'title' => 'Livewire Missing Form Proposal',
+            'proposal_category' => 'activity',
+            'status' => 'submitted',
+            'start_date' => today()->addDays(7),
+            'end_date' => today()->addDays(7),
+            'proposal_document_path' => 'proposal-documents/livewire-missing-form.docx',
+            'proposal_document_original_name' => 'livewire-missing-form.docx',
+            'hardcopy_submitted' => true,
+            'hardcopy_submitted_at' => now(),
+        ]);
+
+        Livewire::actingAs($osaAdmin)
+            ->test(\App\Livewire\Dashboard\EventProposalWorkflow::class, ['eventId' => $event->id])
+            ->call('approveProposal')
+            ->assertSet('errorNotice', 'A locked evaluation form with at least one question is required before approval.');
+
+        $this->assertSame('submitted', $event->fresh()->status);
+    }
+
+    public function test_osa_cannot_approve_proposal_without_locked_evaluation_form(): void
+    {
+        $h = $this->createHierarchy();
+        $osaAdmin = $this->createAdmin('Super Admin (OSA)');
+
+        $event = Event::create([
+            'organization_id' => $h['org']->id,
+            'title' => 'Missing Evaluation Form Event',
+            'proposal_category' => 'activity',
+            'status' => 'submitted',
+            'start_date' => today()->addDays(7),
+            'end_date' => today()->addDays(7),
+            'proposal_document_path' => 'proposal-documents/missing-evaluation.docx',
+            'proposal_document_original_name' => 'missing-evaluation.docx',
+            'hardcopy_submitted' => true,
+            'hardcopy_submitted_at' => now(),
+        ]);
+
+        $this->actingAs($osaAdmin)
+            ->post(route('dashboard.events.approve', $event->id))
+            ->assertSessionHas('error', 'A locked evaluation form with at least one question is required before approval.');
+
+        $this->assertSame('submitted', $event->fresh()->status);
     }
 
     public function test_osa_event_list_hides_organizer_drafts(): void
@@ -642,6 +1182,160 @@ class WebPortalTest extends TestCase
         }
     }
 
+    public function test_events_filters_search_and_pagination_use_livewire_workspace(): void
+    {
+        $h = $this->createHierarchy();
+        $societyAdmin = $this->createAdmin('Society Admin', $h['org']);
+
+        foreach (range(1, 16) as $index) {
+            Event::create([
+                'organization_id' => $h['org']->id,
+                'title' => 'Navigable Event ' . $index,
+                'status' => $index === 1 ? 'submitted' : 'draft',
+                'start_date' => today()->addDays($index),
+                'end_date' => today()->addDays($index),
+            ]);
+        }
+
+        $content = $this->actingAs($societyAdmin)
+            ->get(route('dashboard.events'))
+            ->assertOk()
+            ->getContent();
+
+        $this->assertStringContainsString('dashboard.events-workspace', $content);
+        $this->assertStringContainsString('events-nav-row', $content);
+        $this->assertStringContainsString('events-status-row', $content);
+        $this->assertStringContainsString('events-search-inline', $content);
+        $this->assertStringContainsString('wire:click.prevent="setWorkspace', $content);
+        $this->assertStringContainsString('wire:submit.prevent="applyFilters"', $content);
+        $this->assertStringContainsString('eventRowVisible', $content);
+        $this->assertStringContainsString('x-model.debounce.150ms="eventSearch"', $content);
+        $this->assertStringContainsString('data-event-search=', $content);
+        $this->assertStringContainsString('wire:model="search"', $content);
+        $this->assertStringContainsString('wire:input.debounce.350ms="searchTyped', $content);
+        $this->assertStringContainsString('name="workspace"', $content);
+        $this->assertStringContainsString('name="status"', $content);
+        $this->assertStringContainsString('name="q"', $content);
+        $this->assertStringNotContainsString('wire:model.live.debounce.400ms="search"', $content);
+        $this->assertStringNotContainsString('selectSearchSuggestion', $content);
+        $this->assertStringNotContainsString('events-search-results', $content);
+        $this->assertStringNotContainsString('name="per_page"', $content);
+        $this->assertStringNotContainsString('events-workspace-per-page', $content);
+        $this->assertStringNotContainsString('tailwind-navigate', $content);
+        $this->assertStringContainsString('initEventsDashboard', $content);
+        $this->assertStringContainsString('livewire:navigated', $content);
+
+        Livewire::actingAs($societyAdmin)
+            ->test(\App\Livewire\Dashboard\EventsWorkspace::class)
+            ->call('searchTyped', 'Navigable Event 1')
+            ->assertSee('events-search-summary', false)
+            ->assertSee('Navigable Event 1')
+            ->assertDontSee('Navigable Event 2')
+            ->set('search', '')
+            ->call('setStatus', 'submitted')
+            ->assertSee('Navigable Event 1')
+            ->assertDontSee('Navigable Event 2')
+            ->call('setStatus', null)
+            ->set('perPage', 10)
+            ->assertSee('Navigable Event 1')
+            ->assertDontSee('Navigable Event 16')
+            ->call('nextPage')
+            ->assertSee('Navigable Event 16');
+    }
+
+    public function test_events_workspace_refreshes_stale_lifecycle_on_page_open(): void
+    {
+        $h = $this->createHierarchy();
+        $societyAdmin = $this->createAdmin('Society Admin', $h['org']);
+
+        Carbon::setTestNow(Carbon::parse('2026-07-22 15:00:00', 'Asia/Manila'));
+
+        try {
+            $event = Event::create([
+                'organization_id' => $h['org']->id,
+                'title' => 'Stale Lifecycle Event',
+                'proposal_category' => 'activity',
+                'status' => 'approved',
+                'lifecycle_phase' => 'evaluation_open',
+                'evaluation_open' => true,
+                'start_date' => Carbon::parse('2026-07-17', 'Asia/Manila'),
+                'end_date' => Carbon::parse('2026-07-17', 'Asia/Manila'),
+            ]);
+
+            EventDay::create([
+                'event_id' => $event->id,
+                'day_number' => 1,
+                'date' => Carbon::parse('2026-07-17', 'Asia/Manila'),
+                'start_time' => '20:30:00',
+                'end_time' => '23:00:00',
+            ]);
+
+            $this->actingAs($societyAdmin)
+                ->get(route('dashboard.events'))
+                ->assertOk()
+                ->assertSee('Stale Lifecycle Event')
+                ->assertSee('Completed')
+                ->assertSee('Phase: Completed');
+
+            $event->refresh();
+
+            $this->assertSame('completed', $event->status);
+            $this->assertSame('completed', $event->lifecycle_phase);
+            $this->assertFalse($event->evaluation_open);
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    public function test_events_workspace_counts_pending_sentiment_comments_without_render_error(): void
+    {
+        $h = $this->createHierarchy();
+        $societyAdmin = $this->createAdmin('Society Admin', $h['org']);
+        $student = $this->createStudent($h['org']);
+
+        $event = Event::create([
+            'organization_id' => $h['org']->id,
+            'title' => 'Pending Sentiment Count Event',
+            'proposal_category' => 'activity',
+            'status' => 'completed',
+            'start_date' => today()->subDays(3),
+            'end_date' => today()->subDays(3),
+        ]);
+
+        EventDay::create([
+            'event_id' => $event->id,
+            'day_number' => 1,
+            'date' => today()->subDays(3),
+            'start_time' => '08:00',
+            'end_time' => '12:00',
+        ]);
+
+        Evaluation::create([
+            'event_id' => $event->id,
+            'student_id' => $student->id,
+            'section_scores' => ['activity_relevance' => 5],
+            'open_comment' => 'Needs sentiment processing.',
+            'sentiment' => 'unprocessed',
+            'submitted_at' => now(),
+        ]);
+
+        Evaluation::create([
+            'event_id' => $event->id,
+            'student_id' => $student->id,
+            'section_scores' => ['activity_relevance' => 4],
+            'open_comment' => '   ',
+            'sentiment' => 'unprocessed',
+            'submitted_at' => now(),
+        ]);
+
+        $this->assertSame(1, Evaluation::query()->pendingSentimentComments()->count());
+
+        Livewire::actingAs($societyAdmin)
+            ->test(\App\Livewire\Dashboard\EventsWorkspace::class)
+            ->assertSee('Pending Sentiment Count Event')
+            ->assertSee('AI');
+    }
+
     public function test_osa_cannot_create_or_submit_organizer_drafts(): void
     {
         $h = $this->createHierarchy();
@@ -691,6 +1385,19 @@ class WebPortalTest extends TestCase
             ->assertOk()
             ->assertSee('Society Private Draft')
             ->assertSee('New Event')
+            ->assertSee('wire:submit.prevent="createProposal"', false)
+            ->assertSee('method="POST"', false)
+            ->assertSee('enctype="multipart/form-data"', false)
+            ->assertSee('name="_token"', false)
+            ->assertSee('name="proposal_document"', false)
+            ->assertSee('name="event_days[0][date]"', false)
+            ->assertSee('name="same_time_for_all_days"', false)
+            ->assertSee('name="evaluation_questions[0][label]"', false)
+            ->assertSee('Schedule and attendance')
+            ->assertSee('Daily attendance schedule')
+            ->assertSee('Same time for all days')
+            ->assertSee('Customize questions')
+            ->assertSee('Save Draft Proposal')
             ->assertSee('Draft');
 
         $this->actingAs($societyAdmin)
@@ -755,6 +1462,7 @@ class WebPortalTest extends TestCase
             'head_organization_signed' => true,
             'adviser_signed' => true,
         ]);
+        EventEvaluationForm::createForEvent($event, null, $this->customEvaluationQuestions(), 'Evaluation - Metadata Review Event');
 
         EventDay::create([
             'event_id' => $event->id,
@@ -777,6 +1485,9 @@ class WebPortalTest extends TestCase
             ->assertSee('metadata.docx')
             ->assertSee('data-detail-start-time="8:00 AM"', false)
             ->assertSee('data-detail-end-time="12:00 PM"', false)
+            ->assertSee('data-detail-evaluation-questions', false)
+            ->assertSee('Activity relevance')
+            ->assertSee('Facilitator quality')
             ->assertSee('Start time')
             ->assertSee('End time')
             ->assertSee('D1:')
@@ -810,11 +1521,19 @@ class WebPortalTest extends TestCase
                 'start_time' => '08:00',
                 'end_time' => '12:00',
             ]],
+            'evaluation_questions' => $this->customEvaluationQuestions(),
         ];
 
         $this->actingAs($societyAdmin)
             ->post(route('dashboard.events.create'), $basePayload)
             ->assertSessionHasErrors('proposal_document');
+
+        $this->actingAs($societyAdmin)
+            ->post(route('dashboard.events.create'), array_merge($basePayload, [
+                'proposal_document' => UploadedFile::fake()->create('official-ppa.docx', 128, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'),
+                'evaluation_questions' => [],
+            ]))
+            ->assertSessionHasErrors('evaluation_questions');
 
         $this->actingAs($societyAdmin)
             ->post(route('dashboard.events.create'), array_merge($basePayload, [
@@ -830,7 +1549,285 @@ class WebPortalTest extends TestCase
         $this->assertTrue($event->head_organization_signed);
         $this->assertTrue($event->adviser_signed);
         $this->assertSame('official-ppa.docx', $event->proposal_document_original_name);
+        $this->assertNotNull($event->evaluation_form_version_id);
+        $this->assertDatabaseHas('evaluation_form_versions', [
+            'event_id' => $event->id,
+            'title' => 'Evaluation - Documented PPA Event',
+        ]);
         Storage::disk('local')->assertExists($event->proposal_document_path);
+    }
+
+    public function test_event_creation_fallback_preserves_typed_modal_values(): void
+    {
+        Storage::fake('local');
+
+        $h = $this->createHierarchy();
+        $societyAdmin = $this->createAdmin('Society Admin', $h['org']);
+
+        $this->actingAs($societyAdmin)
+            ->from(route('dashboard.events'))
+            ->post(route('dashboard.events.create'), [
+                'title' => 'Fallback Preserved Event',
+                'proposal_category' => 'activity',
+                'start_date' => '2026-07-17',
+                'end_date' => '2026-07-18',
+                'location_type' => 'off-campus',
+                'location_details' => 'Kabacan Training Center',
+                'implementing_office' => 'PSITS',
+                'collaborating_office' => 'Guidance Office',
+                'target_participants' => 'All BSIS students',
+                'source_of_fund' => 'Organization fund',
+                'budget_cost' => 2500,
+                'resolution_number' => 'RES-2026-010',
+                'hardcopy_submitted' => '1',
+                'head_organization_signed' => '1',
+                'adviser_signed' => '1',
+                'same_time_for_all_days' => '1',
+                'event_days' => [
+                    [
+                        'date' => '2026-07-17',
+                        'start_time' => '09:00',
+                        'end_time' => '13:00',
+                    ],
+                    [
+                        'date' => '2026-07-18',
+                        'start_time' => '09:00',
+                        'end_time' => '13:00',
+                    ],
+                ],
+                'evaluation_questions' => $this->customEvaluationQuestions(),
+            ])
+            ->assertRedirect(route('dashboard.events'))
+            ->assertSessionHasErrors('proposal_document');
+
+        $this->actingAs($societyAdmin)
+            ->get(route('dashboard.events'))
+            ->assertOk()
+            ->assertSee('value="Fallback Preserved Event"', false)
+            ->assertSee('value="2026-07-17"', false)
+            ->assertSee('value="2026-07-18"', false)
+            ->assertSee('value="09:00"', false)
+            ->assertSee('value="13:00"', false)
+            ->assertSee('Kabacan Training Center')
+            ->assertSee('Guidance Office')
+            ->assertSee('RES-2026-010')
+            ->assertSee('Activity relevance')
+            ->assertSee('Facilitator quality');
+    }
+
+    public function test_event_creation_rejects_event_day_outside_event_date_range(): void
+    {
+        Storage::fake('local');
+
+        $h = $this->createHierarchy();
+        $societyAdmin = $this->createAdmin('Society Admin', $h['org']);
+
+        $this->actingAs($societyAdmin)
+            ->post(route('dashboard.events.create'), [
+                'title' => 'Mismatched Date Event',
+                'proposal_category' => 'activity',
+                'start_date' => '2026-07-17',
+                'end_date' => '2026-07-17',
+                'location_type' => 'on-campus',
+                'location_details' => 'USM Gymnasium',
+                'implementing_office' => 'PSITS',
+                'target_participants' => 'All BSIS students',
+                'source_of_fund' => 'Organization fund',
+                'budget_cost' => 2500,
+                'resolution_number' => 'RES-2026-002',
+                'hardcopy_submitted' => '1',
+                'head_organization_signed' => '1',
+                'adviser_signed' => '1',
+                'proposal_document' => UploadedFile::fake()->create('official-ppa.docx', 128, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'),
+                'event_days' => [[
+                    'date' => '2026-01-17',
+                    'start_time' => '20:30',
+                    'end_time' => '23:00',
+                ]],
+                'evaluation_questions' => $this->customEvaluationQuestions(),
+            ])
+            ->assertSessionHasErrors('event_days.0.date');
+
+        $this->assertDatabaseMissing('events', [
+            'title' => 'Mismatched Date Event',
+        ]);
+    }
+
+    public function test_event_creation_uses_friendly_event_day_time_errors(): void
+    {
+        Storage::fake('local');
+
+        $h = $this->createHierarchy();
+        $societyAdmin = $this->createAdmin('Society Admin', $h['org']);
+
+        $this->actingAs($societyAdmin)
+            ->post(route('dashboard.events.create'), [
+                'title' => 'Invalid Day Time Event',
+                'proposal_category' => 'activity',
+                'start_date' => '2026-07-17',
+                'end_date' => '2026-07-17',
+                'location_type' => 'on-campus',
+                'location_details' => 'USM Gymnasium',
+                'implementing_office' => 'PSITS',
+                'target_participants' => 'All BSIS students',
+                'source_of_fund' => 'Organization fund',
+                'budget_cost' => 2500,
+                'resolution_number' => 'RES-2026-003',
+                'hardcopy_submitted' => '1',
+                'head_organization_signed' => '1',
+                'adviser_signed' => '1',
+                'proposal_document' => UploadedFile::fake()->create('official-ppa.docx', 128, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'),
+                'event_days' => [[
+                    'date' => '2026-07-17',
+                    'start_time' => '20:30',
+                    'end_time' => '08:30',
+                ]],
+                'evaluation_questions' => $this->customEvaluationQuestions(),
+            ])
+            ->assertSessionHasErrors([
+                'event_days.0.end_time' => 'Day 1 end time must be later than the start time.',
+            ]);
+
+        $this->assertDatabaseMissing('events', [
+            'title' => 'Invalid Day Time Event',
+        ]);
+    }
+
+    public function test_livewire_event_proposal_create_saves_draft_with_softcopy_and_evaluation_form(): void
+    {
+        Storage::fake('local');
+
+        $h = $this->createHierarchy();
+        $societyAdmin = $this->createAdmin('Society Admin', $h['org']);
+
+        Livewire::actingAs($societyAdmin)
+            ->test(\App\Livewire\Dashboard\EventProposalCreate::class)
+            ->set('title', 'Livewire Created PPA Event')
+            ->set('proposalCategory', 'activity')
+            ->set('startDate', today()->addDays(10)->toDateString())
+            ->set('endDate', today()->addDays(10)->toDateString())
+            ->set('locationType', 'on-campus')
+            ->set('locationDetails', 'USM Gymnasium')
+            ->set('implementingOffice', 'PSITS')
+            ->set('targetParticipants', 'All BSIS students')
+            ->set('sourceOfFund', 'Organization fund')
+            ->set('budgetCost', '2500')
+            ->set('resolutionNumber', 'RES-LW-2026')
+            ->set('hardcopySubmitted', true)
+            ->set('headOrganizationSigned', true)
+            ->set('adviserSigned', true)
+            ->set('proposalDocument', UploadedFile::fake()->create('livewire-official-ppa.docx', 128, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'))
+            ->set('eventDays', [[
+                'date' => today()->addDays(10)->toDateString(),
+                'start_time' => '08:00',
+                'end_time' => '12:00',
+            ]])
+            ->set('evaluationQuestions', $this->customEvaluationQuestions())
+            ->call('createProposal')
+            ->assertRedirect(route('dashboard.events'));
+
+        $event = Event::where('title', 'Livewire Created PPA Event')->first();
+
+        $this->assertNotNull($event);
+        $this->assertSame($h['org']->id, $event->organization_id);
+        $this->assertSame('draft', $event->status);
+        $this->assertSame('student_affairs', $event->event_domain);
+        $this->assertTrue($event->hardcopy_submitted);
+        $this->assertTrue($event->head_organization_signed);
+        $this->assertTrue($event->adviser_signed);
+        $this->assertSame('livewire-official-ppa.docx', $event->proposal_document_original_name);
+        $this->assertNotNull($event->evaluation_form_version_id);
+        $this->assertDatabaseHas('event_days', [
+            'event_id' => $event->id,
+            'day_number' => 1,
+            'start_time' => '08:00',
+            'end_time' => '12:00',
+        ]);
+        $this->assertDatabaseHas('event_participation_scopes', [
+            'event_id' => $event->id,
+            'participation_role' => EventParticipationScope::ROLE_ORGANIZER,
+            'organization_id' => $h['org']->id,
+        ]);
+        $this->assertDatabaseHas('evaluation_form_versions', [
+            'event_id' => $event->id,
+            'title' => 'Evaluation - Livewire Created PPA Event',
+        ]);
+        Storage::disk('local')->assertExists($event->proposal_document_path);
+    }
+
+    public function test_livewire_event_proposal_create_generates_daily_attendance_schedule(): void
+    {
+        $h = $this->createHierarchy();
+        $societyAdmin = $this->createAdmin('Society Admin', $h['org']);
+
+        Livewire::actingAs($societyAdmin)
+            ->test(\App\Livewire\Dashboard\EventProposalCreate::class)
+            ->set('startDate', '2026-07-17')
+            ->set('eventDays.0.start_time', '08:30')
+            ->set('eventDays.0.end_time', '11:00')
+            ->set('endDate', '2026-07-19')
+            ->assertSet('eventDays.0.date', '2026-07-17')
+            ->assertSet('eventDays.1.date', '2026-07-18')
+            ->assertSet('eventDays.2.date', '2026-07-19')
+            ->assertSet('eventDays.1.start_time', '08:30')
+            ->assertSet('eventDays.2.end_time', '11:00')
+            ->assertSee('Daily attendance schedule')
+            ->assertSee('Same time for all days')
+            ->assertSee('Save Draft Proposal');
+    }
+
+    public function test_livewire_event_proposal_create_validates_softcopy_questions_and_day_range(): void
+    {
+        Storage::fake('local');
+
+        $h = $this->createHierarchy();
+        $societyAdmin = $this->createAdmin('Society Admin', $h['org']);
+
+        $component = Livewire::actingAs($societyAdmin)
+            ->test(\App\Livewire\Dashboard\EventProposalCreate::class)
+            ->set('title', 'Invalid Livewire PPA Event')
+            ->set('proposalCategory', 'activity')
+            ->set('startDate', '2026-07-17')
+            ->set('endDate', '2026-07-17')
+            ->set('locationType', 'on-campus')
+            ->set('eventDays', [[
+                'date' => '2026-07-17',
+                'start_time' => '08:00',
+                'end_time' => '12:00',
+            ]])
+            ->set('evaluationQuestions', $this->customEvaluationQuestions())
+            ->call('createProposal')
+            ->assertHasErrors(['proposalDocument']);
+
+        $component
+            ->set('proposalDocument', UploadedFile::fake()->create('livewire-invalid-ppa.docx', 128, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'))
+            ->set('evaluationQuestions', [])
+            ->call('createProposal')
+            ->assertHasErrors(['evaluationQuestions']);
+
+        $component
+            ->set('evaluationQuestions', $this->customEvaluationQuestions())
+            ->set('eventDays', [[
+                'date' => '2026-01-17',
+                'start_time' => '20:30',
+                'end_time' => '23:00',
+            ]])
+            ->call('createProposal')
+            ->assertHasErrors(['eventDays.0.date']);
+
+        $component
+            ->set('eventDays', [[
+                'date' => '2026-07-17',
+                'start_time' => '20:30',
+                'end_time' => '08:30',
+            ]])
+            ->call('createProposal')
+            ->assertHasErrors(['eventDays.0.end_time'])
+            ->assertSee('Day 1 end time must be later than the start time.');
+
+        $this->assertDatabaseMissing('events', [
+            'title' => 'Invalid Livewire PPA Event',
+        ]);
     }
 
     public function test_draft_without_hardcopy_cannot_be_submitted(): void
@@ -1023,11 +2020,49 @@ class WebPortalTest extends TestCase
             ->assertSee('All can participate')
             ->assertSee('College')
             ->assertSee('Specific org')
-            ->assertSee('name="audience_mode"', false)
-            ->assertSee('name="college_ids[]"', false)
-            ->assertSee('name="organization_ids[]"', false)
-            ->assertSee('Search College name or code')
-            ->assertDontSee('Participant organization</option>', false);
+            ->assertSee('wire:submit="addParticipantScopes"', false)
+            ->assertSee('wire:click="setAudienceMode(\'all\')"', false)
+            ->assertSee('wire:model.live.debounce.250ms="organizationQuery"', false)
+            ->assertSee('Search org acronym, name, or College')
+            ->assertDontSee('name="audience_mode"', false)
+            ->assertDontSee('name="college_ids[]"', false)
+            ->assertDontSee('name="organization_ids[]"', false);
+    }
+
+    public function test_attendance_rules_modal_renders_cutoff_suggestions(): void
+    {
+        $h = $this->createHierarchy();
+        $organizerAdmin = $this->createAdmin('Society Admin', $h['org']);
+
+        $event = Event::create([
+            'organization_id' => $h['org']->id,
+            'title' => 'Cutoff Suggestions Event',
+            'proposal_category' => 'activity',
+            'status' => 'submitted',
+            'start_date' => today()->addDays(5),
+            'end_date' => today()->addDays(5),
+            'event_late_cutoff_min' => null,
+        ]);
+
+        EventDay::create([
+            'event_id' => $event->id,
+            'day_number' => 1,
+            'date' => today()->addDays(5),
+            'start_time' => '08:30',
+            'end_time' => '12:00',
+        ]);
+
+        $this->actingAs($organizerAdmin)
+            ->get(route('dashboard.events'))
+            ->assertOk()
+            ->assertSee('Cutoff Suggestions Event')
+            ->assertSee('Current rule')
+            ->assertSee('Participant fallback')
+            ->assertSee('wire:submit="saveEventCutoff"', false)
+            ->assertSee('data-cutoff-value="10"', false)
+            ->assertSee('data-cutoff-value="15"', false)
+            ->assertSee('data-cutoff-value="30"', false)
+            ->assertSee('Standard');
     }
 
     public function test_participant_audience_builder_creates_org_college_and_all_scopes(): void
@@ -1179,6 +2214,399 @@ class WebPortalTest extends TestCase
             ->where('participant_type', 'college')
             ->whereNull('organization_id')
             ->count());
+    }
+
+    public function test_participant_org_can_set_scope_cutoff_only_when_event_cutoff_is_unset(): void
+    {
+        $h = $this->createHierarchy();
+        $participantOrg = Organization::create([
+            'college_id' => $h['college']->id,
+            'name' => 'Scope Cutoff Society',
+            'acronym' => 'SCS',
+            'type' => 'society',
+        ]);
+        $participantAdmin = $this->createAdmin('Society Admin', $participantOrg);
+
+        $event = Event::create([
+            'organization_id' => $h['org']->id,
+            'title' => 'Scope Policy Event',
+            'proposal_category' => 'activity',
+            'status' => 'submitted',
+            'start_date' => today()->addDays(3),
+            'end_date' => today()->addDays(3),
+            'event_late_cutoff_min' => null,
+        ]);
+        $scope = $this->createParticipantScope($event, $participantOrg, EventParticipationScope::PPA_DRAFT);
+
+        $this->actingAs($participantAdmin)
+            ->post(route('dashboard.events.participant-scopes.attendance-policy', [$event->id, $scope->id]), [
+                'late_cutoff_min' => 12,
+            ])
+            ->assertSessionHas('success', 'Participant late cutoff updated.');
+
+        $this->assertDatabaseHas('event_participation_scopes', [
+            'id' => $scope->id,
+            'late_cutoff_min' => 12,
+        ]);
+
+        $event->update(['event_late_cutoff_min' => 30]);
+
+        $this->actingAs($participantAdmin)
+            ->post(route('dashboard.events.participant-scopes.attendance-policy', [$event->id, $scope->id]), [
+                'late_cutoff_min' => 5,
+            ])
+            ->assertSessionHas('error', 'This event already has an organizer late cutoff. Participant scope cutoffs are available only when the organizer leaves the event cutoff unset.');
+
+        $this->assertDatabaseHas('event_participation_scopes', [
+            'id' => $scope->id,
+            'late_cutoff_min' => 12,
+        ]);
+    }
+
+    public function test_organizer_can_update_attendance_rules_before_event_starts(): void
+    {
+        $h = $this->createHierarchy();
+        $organizerAdmin = $this->createAdmin('Society Admin', $h['org']);
+
+        $event = Event::create([
+            'organization_id' => $h['org']->id,
+            'title' => 'Editable Rules Event',
+            'proposal_category' => 'activity',
+            'status' => 'submitted',
+            'start_date' => today()->addDays(5),
+            'end_date' => today()->addDays(5),
+            'event_late_cutoff_min' => null,
+        ]);
+
+        EventDay::create([
+            'event_id' => $event->id,
+            'day_number' => 1,
+            'date' => today()->addDays(5),
+            'start_time' => '08:00',
+            'end_time' => '12:00',
+        ]);
+
+        $this->actingAs($organizerAdmin)
+            ->post(route('dashboard.events.attendance-policy', $event->id), [
+                'event_late_cutoff_min' => 25,
+            ])
+            ->assertSessionHas('success', 'Attendance rules updated.');
+
+        $this->assertDatabaseHas('events', [
+            'id' => $event->id,
+            'event_late_cutoff_min' => 25,
+        ]);
+
+        $this->actingAs($organizerAdmin)
+            ->post(route('dashboard.events.attendance-policy', $event->id), [
+                'event_late_cutoff_min' => null,
+            ])
+            ->assertSessionHas('success', 'Attendance rules updated.');
+
+        $this->assertDatabaseHas('events', [
+            'id' => $event->id,
+            'event_late_cutoff_min' => null,
+        ]);
+    }
+
+    public function test_livewire_attendance_rules_updates_event_cutoff_without_page_reload(): void
+    {
+        $h = $this->createHierarchy();
+        $organizerAdmin = $this->createAdmin('Society Admin', $h['org']);
+
+        $event = Event::create([
+            'organization_id' => $h['org']->id,
+            'title' => 'Livewire Editable Rules Event',
+            'proposal_category' => 'activity',
+            'status' => 'submitted',
+            'start_date' => today()->addDays(5),
+            'end_date' => today()->addDays(5),
+            'event_late_cutoff_min' => null,
+        ]);
+
+        EventDay::create([
+            'event_id' => $event->id,
+            'day_number' => 1,
+            'date' => today()->addDays(5),
+            'start_time' => '08:00',
+            'end_time' => '12:00',
+        ]);
+
+        Livewire::actingAs($organizerAdmin)
+            ->test(\App\Livewire\Dashboard\EventAttendanceRules::class, ['eventId' => $event->id])
+            ->assertSee('Participant fallback')
+            ->call('setEventPreset', 25)
+            ->assertSet('eventLateCutoffMin', '25')
+            ->call('saveEventCutoff')
+            ->assertSet('notice', 'Attendance rules updated.')
+            ->assertSee('25 min after start')
+            ->call('setEventPreset', null)
+            ->call('saveEventCutoff')
+            ->assertSet('notice', 'Attendance rules updated.')
+            ->assertSee('Participant fallback');
+
+        $this->assertDatabaseHas('events', [
+            'id' => $event->id,
+            'event_late_cutoff_min' => null,
+        ]);
+    }
+
+    public function test_college_visible_admin_cannot_update_another_organizers_attendance_rules(): void
+    {
+        $h = $this->createHierarchy();
+        $lsgOrg = Organization::create([
+            'college_id' => $h['college']->id,
+            'name' => 'CEIT LSG',
+            'acronym' => 'CEIT-LSG',
+            'type' => 'lsg',
+        ]);
+        $lsgAdmin = $this->createAdmin('LSG Admin', $lsgOrg);
+
+        $event = Event::create([
+            'organization_id' => $h['org']->id,
+            'title' => 'Another Organizer Event',
+            'proposal_category' => 'activity',
+            'status' => 'submitted',
+            'start_date' => today()->addDays(5),
+            'end_date' => today()->addDays(5),
+            'event_late_cutoff_min' => null,
+        ]);
+
+        $this->actingAs($lsgAdmin)
+            ->post(route('dashboard.events.attendance-policy', $event->id), [
+                'event_late_cutoff_min' => 25,
+            ])
+            ->assertForbidden();
+
+        $this->assertDatabaseHas('events', [
+            'id' => $event->id,
+            'event_late_cutoff_min' => null,
+        ]);
+    }
+
+    public function test_attendance_rules_remain_editable_before_start_even_with_existing_scans(): void
+    {
+        $h = $this->createHierarchy();
+        $organizerAdmin = $this->createAdmin('Society Admin', $h['org']);
+        Carbon::setTestNow(Carbon::parse('2026-07-17 07:10:00', 'Asia/Manila'));
+
+        $event = Event::create([
+            'organization_id' => $h['org']->id,
+            'title' => 'Pre Start Rules Event',
+            'proposal_category' => 'activity',
+            'status' => 'submitted',
+            'start_date' => Carbon::parse('2026-07-17', 'Asia/Manila'),
+            'end_date' => Carbon::parse('2026-07-17', 'Asia/Manila'),
+            'event_late_cutoff_min' => 15,
+        ]);
+
+        EventDay::create([
+            'event_id' => $event->id,
+            'day_number' => 1,
+            'date' => Carbon::parse('2026-07-17', 'Asia/Manila'),
+            'start_time' => '08:30',
+            'end_time' => '12:00',
+        ]);
+
+        RawScan::create([
+            'event_id' => $event->id,
+            'scan_type' => 'time_in',
+            'scanned_at' => now(),
+            'server_received_at' => now(),
+            'device_id' => 'rules-lock-device',
+            'manual_entry' => false,
+            'dedup_key' => 'rules-lock-scan',
+        ]);
+
+        $this->actingAs($organizerAdmin)
+            ->post(route('dashboard.events.attendance-policy', $event->id), [
+                'event_late_cutoff_min' => 30,
+            ])
+            ->assertSessionHas('success', 'Attendance rules updated.');
+
+        $this->assertDatabaseHas('events', [
+            'id' => $event->id,
+            'event_late_cutoff_min' => 30,
+        ]);
+
+        Carbon::setTestNow();
+    }
+
+    public function test_attendance_rules_use_event_start_date_when_event_day_date_is_outside_range(): void
+    {
+        $h = $this->createHierarchy();
+        $organizerAdmin = $this->createAdmin('Society Admin', $h['org']);
+        Carbon::setTestNow(Carbon::parse('2026-07-17 19:10:00', 'Asia/Manila'));
+
+        $event = Event::create([
+            'organization_id' => $h['org']->id,
+            'title' => 'Mismatched Stored Date Rules Event',
+            'proposal_category' => 'activity',
+            'status' => 'submitted',
+            'start_date' => Carbon::parse('2026-07-17', 'Asia/Manila'),
+            'end_date' => Carbon::parse('2026-07-17', 'Asia/Manila'),
+            'event_late_cutoff_min' => 15,
+        ]);
+
+        EventDay::create([
+            'event_id' => $event->id,
+            'day_number' => 1,
+            'date' => Carbon::parse('2026-01-17', 'Asia/Manila'),
+            'start_time' => '20:30',
+            'end_time' => '23:00',
+        ]);
+
+        $this->actingAs($organizerAdmin)
+            ->post(route('dashboard.events.attendance-policy', $event->id), [
+                'event_late_cutoff_min' => 30,
+            ])
+            ->assertSessionHas('success', 'Attendance rules updated.');
+
+        $this->assertDatabaseHas('events', [
+            'id' => $event->id,
+            'event_late_cutoff_min' => 30,
+        ]);
+
+        Carbon::setTestNow();
+    }
+
+    public function test_livewire_attendance_rules_updates_participant_scope_cutoff_and_dispatches_reprocessing(): void
+    {
+        Bus::fake();
+
+        $h = $this->createHierarchy();
+        $participantOrg = Organization::create([
+            'college_id' => $h['college']->id,
+            'name' => 'Livewire Scope Cutoff Society',
+            'acronym' => 'LSCS',
+            'type' => 'society',
+        ]);
+        $participantAdmin = $this->createAdmin('Society Admin', $participantOrg);
+        $student = $this->createStudent($participantOrg);
+
+        $event = Event::create([
+            'organization_id' => $h['org']->id,
+            'title' => 'Livewire Scope Policy Event',
+            'proposal_category' => 'activity',
+            'status' => 'submitted',
+            'start_date' => today()->addDays(3),
+            'end_date' => today()->addDays(3),
+            'event_late_cutoff_min' => null,
+        ]);
+        $scope = $this->createParticipantScope($event, $participantOrg, EventParticipationScope::PPA_DRAFT);
+
+        RawScan::create([
+            'event_id' => $event->id,
+            'event_participation_scope_id' => $scope->id,
+            'student_id' => $student->id,
+            'scan_type' => 'time_in',
+            'scanned_at' => now(),
+            'server_received_at' => now(),
+            'device_id' => 'livewire-scope-rules-device',
+            'manual_entry' => false,
+            'dedup_key' => 'livewire-scope-rules-scan',
+        ]);
+
+        Livewire::actingAs($participantAdmin)
+            ->test(\App\Livewire\Dashboard\EventAttendanceRules::class, [
+                'eventId' => $event->id,
+                'isParticipatingWorkspace' => true,
+            ])
+            ->assertSee('Default 15 min fallback')
+            ->call('setScopePreset', $scope->id, 12)
+            ->assertSet("scopeLateCutoffMins.{$scope->id}", '12')
+            ->call('saveScopeCutoff', $scope->id)
+            ->assertSet('notice', 'Participant late cutoff updated.')
+            ->assertSee('12 min scope fallback');
+
+        $this->assertDatabaseHas('event_participation_scopes', [
+            'id' => $scope->id,
+            'late_cutoff_min' => 12,
+        ]);
+
+        Bus::assertDispatched(ResolveAttendanceJob::class);
+    }
+
+    public function test_attendance_rules_lock_after_start(): void
+    {
+        $h = $this->createHierarchy();
+        $participantOrg = Organization::create([
+            'college_id' => $h['college']->id,
+            'name' => 'Locked Scope Society',
+            'acronym' => 'LSS',
+            'type' => 'society',
+        ]);
+        $participantAdmin = $this->createAdmin('Society Admin', $participantOrg);
+        Carbon::setTestNow(Carbon::parse('2026-07-17 08:31:00', 'Asia/Manila'));
+
+        $startedEvent = Event::create([
+            'organization_id' => $h['org']->id,
+            'title' => 'Started Scope Rules Event',
+            'proposal_category' => 'activity',
+            'status' => 'submitted',
+            'start_date' => Carbon::parse('2026-07-17', 'Asia/Manila'),
+            'end_date' => Carbon::parse('2026-07-17', 'Asia/Manila'),
+            'event_late_cutoff_min' => null,
+        ]);
+        EventDay::create([
+            'event_id' => $startedEvent->id,
+            'day_number' => 1,
+            'date' => Carbon::parse('2026-07-17', 'Asia/Manila'),
+            'start_time' => '08:30',
+            'end_time' => '12:00',
+        ]);
+        $scope = $this->createParticipantScope($startedEvent, $participantOrg, EventParticipationScope::PPA_DRAFT);
+
+        $this->actingAs($participantAdmin)
+            ->post(route('dashboard.events.participant-scopes.attendance-policy', [$startedEvent->id, $scope->id]), [
+                'late_cutoff_min' => 20,
+            ])
+            ->assertSessionHas('error', 'Attendance rules are locked after the event starts.');
+
+        $this->assertDatabaseHas('event_participation_scopes', [
+            'id' => $scope->id,
+            'late_cutoff_min' => null,
+        ]);
+
+        Carbon::setTestNow();
+    }
+
+    public function test_livewire_attendance_rules_lock_after_start(): void
+    {
+        $h = $this->createHierarchy();
+        $organizerAdmin = $this->createAdmin('Society Admin', $h['org']);
+        Carbon::setTestNow(Carbon::parse('2026-07-17 08:31:00', 'Asia/Manila'));
+
+        $event = Event::create([
+            'organization_id' => $h['org']->id,
+            'title' => 'Livewire Locked Rules Event',
+            'proposal_category' => 'activity',
+            'status' => 'submitted',
+            'start_date' => Carbon::parse('2026-07-17', 'Asia/Manila'),
+            'end_date' => Carbon::parse('2026-07-17', 'Asia/Manila'),
+            'event_late_cutoff_min' => null,
+        ]);
+
+        EventDay::create([
+            'event_id' => $event->id,
+            'day_number' => 1,
+            'date' => Carbon::parse('2026-07-17', 'Asia/Manila'),
+            'start_time' => '08:30',
+            'end_time' => '12:00',
+        ]);
+
+        Livewire::actingAs($organizerAdmin)
+            ->test(\App\Livewire\Dashboard\EventAttendanceRules::class, ['eventId' => $event->id])
+            ->set('eventLateCutoffMin', '20')
+            ->call('saveEventCutoff')
+            ->assertSet('errorNotice', 'Attendance rules are locked after the event starts.');
+
+        $this->assertDatabaseHas('events', [
+            'id' => $event->id,
+            'event_late_cutoff_min' => null,
+        ]);
+
+        Carbon::setTestNow();
     }
 
     public function test_invited_org_can_submit_only_own_participant_ppa(): void
@@ -1407,6 +2835,268 @@ class WebPortalTest extends TestCase
         $this->assertTrue($notification->data['needs_action']);
     }
 
+    public function test_livewire_participant_scope_register_acknowledges_invitation(): void
+    {
+        $h = $this->createHierarchy();
+        $organizerAdmin = $this->createAdmin('Society Admin', $h['org']);
+        $partnerOrg = Organization::create([
+            'college_id' => $h['college']->id,
+            'name' => 'Livewire Acknowledging Partner',
+            'acronym' => 'LAP',
+            'type' => 'society',
+        ]);
+        $partnerOrg->programs()->attach($h['program']->id);
+        $partnerAdmin = $this->createAdmin('Society Admin', $partnerOrg);
+
+        $event = Event::create([
+            'organization_id' => $h['org']->id,
+            'title' => 'Livewire Acknowledgement Event',
+            'proposal_category' => 'activity',
+            'status' => 'submitted',
+            'start_date' => today()->addDays(5),
+            'end_date' => today()->addDays(5),
+        ]);
+        $scope = $this->createParticipantScope($event, $partnerOrg);
+
+        Livewire::actingAs($partnerAdmin)
+            ->test(\App\Livewire\Dashboard\EventParticipantScopes::class, [
+                'eventId' => $event->id,
+                'isParticipatingWorkspace' => true,
+            ])
+            ->assertSee('Acknowledge Invitation')
+            ->call('acknowledgeInvitation', $scope->id)
+            ->assertSet('notice', 'Participant invitation acknowledged.')
+            ->assertDispatched('notifications-updated');
+
+        $this->assertDatabaseHas('event_participation_scopes', [
+            'id' => $scope->id,
+            'invitation_acknowledged_by' => $partnerAdmin->id,
+        ]);
+
+        $receipt = $organizerAdmin->fresh()->notifications()->first();
+
+        $this->assertNotNull($receipt);
+        $this->assertSame('participant_scope_acknowledged', $receipt->data['kind']);
+    }
+
+    public function test_livewire_participant_scope_register_submits_own_ppa_upload(): void
+    {
+        Storage::fake('local');
+
+        $h = $this->createHierarchy();
+        $partnerOrg = Organization::create([
+            'college_id' => $h['college']->id,
+            'name' => 'Livewire Submit Partner',
+            'acronym' => 'LSP',
+            'type' => 'society',
+        ]);
+        $partnerOrg->programs()->attach($h['program']->id);
+        $partnerAdmin = $this->createAdmin('Society Admin', $partnerOrg);
+
+        $event = Event::create([
+            'organization_id' => $h['org']->id,
+            'title' => 'Livewire PPA Submission Event',
+            'proposal_category' => 'activity',
+            'status' => 'submitted',
+            'start_date' => today()->addDays(5),
+            'end_date' => today()->addDays(5),
+        ]);
+        $scope = $this->createParticipantScope($event, $partnerOrg);
+
+        Livewire::actingAs($partnerAdmin)
+            ->test(\App\Livewire\Dashboard\EventParticipantScopes::class, [
+                'eventId' => $event->id,
+                'isParticipatingWorkspace' => true,
+            ])
+            ->set('ppaSoftcopies.' . $scope->id, UploadedFile::fake()->create('livewire-partner-ppa.pdf', 128, 'application/pdf'))
+            ->call('submitParticipantPpa', $scope->id)
+            ->assertSet('notice', 'Participant PPA submitted for OSA review.')
+            ->assertDispatched('notifications-updated');
+
+        $scope->refresh();
+
+        $this->assertSame(EventParticipationScope::PPA_SUBMITTED, $scope->ppa_status);
+        $this->assertSame($partnerAdmin->id, $scope->submitted_by);
+        $this->assertTrue($scope->hardcopy_submitted);
+        $this->assertTrue($scope->org_head_signed);
+        $this->assertTrue($scope->adviser_signed);
+        $this->assertNotNull($scope->ppa_softcopy_path);
+    }
+
+    public function test_livewire_participant_scope_register_handles_osa_review_decisions(): void
+    {
+        $h = $this->createHierarchy();
+        $osa = $this->createAdmin('Super Admin (OSA)');
+        $partnerOrg = Organization::create([
+            'college_id' => $h['college']->id,
+            'name' => 'Livewire Review Partner',
+            'acronym' => 'LRP',
+            'type' => 'society',
+        ]);
+        $partnerOrg->programs()->attach($h['program']->id);
+
+        $event = Event::create([
+            'organization_id' => $h['org']->id,
+            'title' => 'Livewire OSA Review Event',
+            'proposal_category' => 'activity',
+            'status' => 'submitted',
+            'start_date' => today()->addDays(5),
+            'end_date' => today()->addDays(5),
+        ]);
+        $scope = $this->createParticipantScope($event, $partnerOrg, EventParticipationScope::PPA_SUBMITTED);
+        $scope->update([
+            'ppa_softcopy_path' => 'participant-ppa-documents/livewire-review.pdf',
+            'ppa_softcopy_original_name' => 'livewire-review.pdf',
+            'hardcopy_submitted' => true,
+        ]);
+
+        Livewire::actingAs($osa)
+            ->test(\App\Livewire\Dashboard\EventParticipantScopes::class, ['eventId' => $event->id])
+            ->call('reviewParticipantPpa', $scope->id)
+            ->assertSet('notice', 'Participant PPA is now under review.')
+            ->call('approveParticipantPpa', $scope->id)
+            ->assertSet('notice', 'Participant PPA approved. Scoped scanner access is now available.')
+            ->assertDispatched('notifications-updated');
+
+        $this->assertDatabaseHas('event_participation_scopes', [
+            'id' => $scope->id,
+            'ppa_status' => EventParticipationScope::PPA_APPROVED,
+            'reviewed_by' => $osa->id,
+        ]);
+
+        $rejectedScope = $this->createParticipantScope($event, $partnerOrg, EventParticipationScope::PPA_UNDER_REVIEW);
+        $rejectedScope->update([
+            'ppa_softcopy_path' => 'participant-ppa-documents/livewire-reject.pdf',
+            'ppa_softcopy_original_name' => 'livewire-reject.pdf',
+            'hardcopy_submitted' => true,
+        ]);
+
+        Livewire::actingAs($osa)
+            ->test(\App\Livewire\Dashboard\EventParticipantScopes::class, ['eventId' => $event->id])
+            ->set('reviewRemarks.' . $rejectedScope->id, 'Missing adviser signature.')
+            ->call('rejectParticipantPpa', $rejectedScope->id)
+            ->assertSet('notice', 'Participant PPA rejected.');
+
+        $this->assertDatabaseHas('event_participation_scopes', [
+            'id' => $rejectedScope->id,
+            'ppa_status' => EventParticipationScope::PPA_REJECTED,
+            'review_remarks' => 'Missing adviser signature.',
+        ]);
+    }
+
+    public function test_livewire_participant_scope_builder_creates_organization_scopes(): void
+    {
+        $h = $this->createHierarchy();
+        $organizerAdmin = $this->createAdmin('Society Admin', $h['org']);
+        $partnerOrg = Organization::create([
+            'college_id' => $h['college']->id,
+            'name' => 'Livewire Builder Partner',
+            'acronym' => 'LBP',
+            'type' => 'society',
+        ]);
+        $partnerOrg->programs()->attach($h['program']->id);
+
+        $event = Event::create([
+            'organization_id' => $h['org']->id,
+            'title' => 'Livewire Builder Organization Event',
+            'proposal_category' => 'activity',
+            'status' => 'submitted',
+            'start_date' => today()->addDays(5),
+            'end_date' => today()->addDays(5),
+        ]);
+
+        Livewire::actingAs($organizerAdmin)
+            ->test(\App\Livewire\Dashboard\EventParticipantScopes::class, ['eventId' => $event->id])
+            ->set('selectedOrganizationIds', [$partnerOrg->id, $h['org']->id])
+            ->call('addParticipantScopes')
+            ->assertSet('notice', 'Participant scope added. Organizer audience was skipped because it is already included.')
+            ->assertDispatched('participant-scopes-updated')
+            ->assertDispatched('notifications-updated');
+
+        $this->assertDatabaseHas('event_participation_scopes', [
+            'event_id' => $event->id,
+            'participation_role' => EventParticipationScope::ROLE_PARTICIPANT,
+            'organization_id' => $partnerOrg->id,
+            'participant_type' => 'society',
+            'ppa_status' => EventParticipationScope::PPA_DRAFT,
+        ]);
+        $this->assertDatabaseMissing('event_participation_scopes', [
+            'event_id' => $event->id,
+            'participation_role' => EventParticipationScope::ROLE_PARTICIPANT,
+            'organization_id' => $h['org']->id,
+        ]);
+
+        Livewire::actingAs($organizerAdmin)
+            ->test(\App\Livewire\Dashboard\EventParticipantScopes::class, ['eventId' => $event->id])
+            ->set('selectedOrganizationIds', [$partnerOrg->id])
+            ->call('addParticipantScopes')
+            ->assertSet('errorNotice', 'Every selected audience already has an active participant scope for the event.');
+    }
+
+    public function test_livewire_participant_scope_builder_creates_college_and_all_scopes(): void
+    {
+        $h = $this->createHierarchy();
+        $organizerAdmin = $this->createAdmin('Society Admin', $h['org']);
+        $otherCollege = College::create([
+            'university_id' => $h['uni']->id,
+            'name' => 'College of Livewire Arts',
+            'code' => 'CLA',
+        ]);
+
+        $collegeEvent = Event::create([
+            'organization_id' => $h['org']->id,
+            'title' => 'Livewire Builder College Event',
+            'proposal_category' => 'activity',
+            'status' => 'submitted',
+            'start_date' => today()->addDays(6),
+            'end_date' => today()->addDays(6),
+        ]);
+
+        Livewire::actingAs($organizerAdmin)
+            ->test(\App\Livewire\Dashboard\EventParticipantScopes::class, ['eventId' => $collegeEvent->id])
+            ->call('setAudienceMode', 'college')
+            ->set('selectedCollegeIds', [$h['college']->id, $otherCollege->id])
+            ->set('captureMode', 'central_gate')
+            ->set('ppaRequired', false)
+            ->call('addParticipantScopes')
+            ->assertSet('notice', '2 participant scopes added.');
+
+        $this->assertDatabaseHas('event_participation_scopes', [
+            'event_id' => $collegeEvent->id,
+            'participation_role' => EventParticipationScope::ROLE_PARTICIPANT,
+            'participant_type' => 'college',
+            'organization_id' => null,
+            'college_id' => $h['college']->id,
+            'ppa_status' => EventParticipationScope::PPA_NOT_REQUIRED,
+            'capture_mode' => 'central_gate',
+        ]);
+
+        $allEvent = Event::create([
+            'organization_id' => $h['org']->id,
+            'title' => 'Livewire Builder All Colleges Event',
+            'proposal_category' => 'activity',
+            'status' => 'submitted',
+            'start_date' => today()->addDays(7),
+            'end_date' => today()->addDays(7),
+        ]);
+        $expectedCollegeScopes = College::count();
+
+        Livewire::actingAs($organizerAdmin)
+            ->test(\App\Livewire\Dashboard\EventParticipantScopes::class, ['eventId' => $allEvent->id])
+            ->call('setAudienceMode', 'all')
+            ->set('captureMode', 'central_gate')
+            ->set('ppaRequired', false)
+            ->call('addParticipantScopes')
+            ->assertSet('notice', "{$expectedCollegeScopes} participant scopes added.");
+
+        $this->assertSame($expectedCollegeScopes, EventParticipationScope::query()
+            ->where('event_id', $allEvent->id)
+            ->where('participation_role', EventParticipationScope::ROLE_PARTICIPANT)
+            ->where('participant_type', 'college')
+            ->whereNull('organization_id')
+            ->count());
+    }
+
     public function test_participant_scope_reminder_command_is_idempotent_per_day(): void
     {
         $h = $this->createHierarchy();
@@ -1498,6 +3188,112 @@ class WebPortalTest extends TestCase
             'id' => $assignment->id,
             'status' => EventScannerAssignment::STATUS_REVOKED,
             'revoked_by_user_id' => $partnerAdmin->id,
+        ]);
+    }
+
+    public function test_livewire_scanner_access_assigns_and_revokes_without_page_redirect(): void
+    {
+        $h = $this->createHierarchy();
+        $admin = $this->createAdmin('Society Admin', $h['org']);
+        $scanner = $this->createStudent($h['org']);
+        $scanner->update([
+            'student_id_number' => '2024-04001',
+            'qr_code_value' => 'QR-LIVEWIRE-SCANNER',
+        ]);
+
+        $event = Event::create([
+            'organization_id' => $h['org']->id,
+            'title' => 'Livewire Scanner Event',
+            'proposal_category' => 'activity',
+            'status' => 'approved',
+            'start_date' => today(),
+            'end_date' => today(),
+        ]);
+        EventDay::create([
+            'event_id' => $event->id,
+            'day_number' => 1,
+            'date' => today(),
+            'start_time' => '08:00',
+            'end_time' => '12:00',
+        ]);
+        $scope = app(ParticipationScopeService::class)->ensureOrganizerScope($event->fresh(['organization']));
+
+        $component = Livewire::actingAs($admin)
+            ->test(\App\Livewire\Dashboard\EventScannerAccess::class, ['eventId' => $event->id])
+            ->set('scopeId', $scope->id)
+            ->call('addScanner', $scanner->id)
+            ->set('label', 'Main Gate')
+            ->call('assignScanners')
+            ->assertSee('Scanner assignment created.');
+
+        $assignment = EventScannerAssignment::where('event_id', $event->id)
+            ->where('scanner_user_id', $scanner->id)
+            ->firstOrFail();
+
+        $this->assertSame(EventScannerAssignment::STATUS_ACTIVE, $assignment->status);
+
+        $component
+            ->call('revokeAssignment', $assignment->id)
+            ->assertSee('Scanner assignment revoked.');
+
+        $this->assertDatabaseHas('event_scanner_assignments', [
+            'id' => $assignment->id,
+            'status' => EventScannerAssignment::STATUS_REVOKED,
+            'revoked_by_user_id' => $admin->id,
+        ]);
+    }
+
+    public function test_livewire_scanner_access_revokes_session_without_page_redirect(): void
+    {
+        $h = $this->createHierarchy();
+        $admin = $this->createAdmin('Society Admin', $h['org']);
+        $scanner = $this->createStudent($h['org']);
+        $scanner->update([
+            'student_id_number' => '2024-04002',
+            'qr_code_value' => 'QR-LIVEWIRE-SESSION',
+        ]);
+
+        $event = Event::create([
+            'organization_id' => $h['org']->id,
+            'title' => 'Livewire Session Event',
+            'proposal_category' => 'activity',
+            'status' => 'approved',
+            'start_date' => today(),
+            'end_date' => today(),
+        ]);
+        EventDay::create([
+            'event_id' => $event->id,
+            'day_number' => 1,
+            'date' => today(),
+            'start_time' => '08:00',
+            'end_time' => '12:00',
+        ]);
+        $scope = app(ParticipationScopeService::class)->ensureOrganizerScope($event->fresh(['organization']));
+        $assignment = app(ScannerAssignmentService::class)->assign(
+            event: $event,
+            scannerUser: $scanner,
+            assignedBy: $admin,
+            label: 'Main Gate',
+            participationScope: $scope
+        );
+        [$session] = app(ScannerSessionService::class)->createSession(
+            event: $event,
+            scannerUser: $scanner,
+            issuedBy: $admin,
+            label: 'Main Gate',
+            revokeExisting: false,
+            assignment: $assignment
+        );
+
+        Livewire::actingAs($admin)
+            ->test(\App\Livewire\Dashboard\EventScannerAccess::class, ['eventId' => $event->id])
+            ->call('revokeSession', $session->id)
+            ->assertSee('Scanner session revoked.');
+
+        $this->assertDatabaseHas('scanner_sessions', [
+            'id' => $session->id,
+            'status' => ScannerSession::STATUS_REVOKED,
+            'revoked_by' => $admin->id,
         ]);
     }
 
@@ -1770,12 +3566,12 @@ class WebPortalTest extends TestCase
             ->get(route('dashboard.events'))
             ->assertOk()
             ->assertSee('Legacy Organizer Scope Event')
-            ->assertSee('data-scanner-search-url', false)
-            ->assertSee('x-data="scannerAssignmentPicker()"', false)
-            ->assertSee('name="scanner_user_ids[]"', false)
-            ->assertSee('selectedScanners.length === 0', false)
-            ->assertSee('Selected scanners')
-            ->assertSee('Clear selection')
+            ->assertSee('wire:submit="assignScanners"', false)
+            ->assertSee('wire:model.live.debounce.300ms="scannerQuery"', false)
+            ->assertSee('Search and add scanners')
+            ->assertSee('Attendance scope')
+            ->assertDontSee('data-scanner-search-url', false)
+            ->assertDontSee('x-data="scannerAssignmentPicker()"', false)
             ->assertDontSee('scannerAssignmentPicker(@js', false);
 
         $scope = EventParticipationScope::where('event_id', $event->id)
@@ -1900,6 +3696,30 @@ class WebPortalTest extends TestCase
         $this->assertSame('4th Year', $payload['evaluation_rows'][1][3]);
     }
 
+    public function test_event_export_payload_uses_event_specific_evaluation_questions(): void
+    {
+        $h = $this->createHierarchy();
+        $student = $this->createStudent($h['org']);
+        $admin = $this->createAdmin('Society Admin', $h['org']);
+        $event = $this->createExportableEvent($h['org'], $student);
+        $form = EventEvaluationForm::createForEvent($event, $admin, $this->customEvaluationQuestions(), 'Evaluation - Custom Export');
+
+        $event->evaluations()->update([
+            'evaluation_form_version_id' => $form->id,
+            'section_scores' => [
+                'activity_relevance' => 5,
+                'facilitator_quality' => 4,
+            ],
+        ]);
+
+        $payload = EventExportData::build($event->fresh(), $admin);
+
+        $this->assertContains('Activity relevance', $payload['evaluation_rows'][0]);
+        $this->assertContains('Facilitator quality', $payload['evaluation_rows'][0]);
+        $this->assertSame('5', $payload['evaluation_rows'][1][7]);
+        $this->assertSame('4', $payload['evaluation_rows'][1][8]);
+    }
+
     public function test_organization_analytics_filters_students_by_year_level(): void
     {
         $h = $this->createHierarchy();
@@ -1921,11 +3741,33 @@ class WebPortalTest extends TestCase
             ->get(route('dashboard.analytics', ['year_level' => '3rd_year']))
             ->assertOk()
             ->assertViewHas('selectedYearLevel', '3rd_year')
+            ->assertSee('method="GET"', false)
+            ->assertSee('name="year_level"', false)
+            ->assertSee('value="3rd_year" selected', false)
+            ->assertSee('Year: 3rd Year')
             ->assertViewHas('orgMetrics', function (array $orgMetrics) use ($h) {
                 return ($orgMetrics[$h['org']->id]['total_members'] ?? null) === 1;
             });
 
         $this->assertSame('3rd_year', $thirdYear->fresh()->year_level);
+    }
+
+    public function test_livewire_organization_analytics_filters_apply_without_full_page_reload(): void
+    {
+        $h = $this->createHierarchy();
+        $admin = $this->createAdmin('Society Admin', $h['org']);
+
+        Livewire::actingAs($admin)
+            ->test(\App\Livewire\Dashboard\AnalyticsOverviewFilters::class)
+            ->set('yearLevel', '3rd_year')
+            ->set('eventType', 'activity')
+            ->call('applyFilters')
+            ->assertSet('collegeId', (string) $h['college']->id)
+            ->assertSet('organizationId', (string) $h['org']->id)
+            ->assertSet('yearLevel', '3rd_year')
+            ->assertSet('eventType', 'activity')
+            ->assertSee('Year: 3rd Year')
+            ->assertSee('Type: Activity');
     }
 
     public function test_event_export_blocks_cross_tenant_admin(): void
@@ -2077,6 +3919,91 @@ class WebPortalTest extends TestCase
         Bus::assertNotDispatched(AnalyzeEventSentimentsJob::class);
     }
 
+    public function test_livewire_sentiment_action_dispatches_for_closed_scoped_event(): void
+    {
+        Bus::fake([AnalyzeEventSentimentsJob::class]);
+
+        $h = $this->createHierarchy();
+        $admin = $this->createAdmin('Society Admin', $h['org']);
+        $student = $this->createStudent($h['org']);
+
+        $event = Event::create([
+            'organization_id' => $h['org']->id,
+            'title' => 'Livewire Closed Sentiment Event',
+            'status' => 'completed',
+            'start_date' => today()->subDays(3),
+            'end_date' => today()->subDays(3),
+        ]);
+        EventDay::create([
+            'event_id' => $event->id,
+            'day_number' => 1,
+            'date' => today()->subDays(3),
+            'start_time' => '08:00',
+            'end_time' => '12:00',
+        ]);
+        Evaluation::create([
+            'event_id' => $event->id,
+            'student_id' => $student->id,
+            'section_scores' => ['speaker_mastery' => 5],
+            'open_comment' => 'Good facilitation.',
+            'sentiment' => 'unprocessed',
+            'submitted_at' => now(),
+        ]);
+
+        Livewire::actingAs($admin)
+            ->test(\App\Livewire\Dashboard\EventSentimentAction::class, [
+                'eventId' => $event->id,
+                'pendingComments' => 1,
+            ])
+            ->call('analyze')
+            ->assertSet('queued', true)
+            ->assertSet('notice', 'Queued sentiment analysis for 1 evaluation comment(s).');
+
+        Bus::assertDispatched(AnalyzeEventSentimentsJob::class, 1);
+    }
+
+    public function test_livewire_sentiment_action_rejects_open_event(): void
+    {
+        Bus::fake([AnalyzeEventSentimentsJob::class]);
+
+        $h = $this->createHierarchy();
+        $admin = $this->createAdmin('Society Admin', $h['org']);
+        $student = $this->createStudent($h['org']);
+
+        $event = Event::create([
+            'organization_id' => $h['org']->id,
+            'title' => 'Livewire Open Sentiment Event',
+            'status' => 'completed',
+            'start_date' => today(),
+            'end_date' => today(),
+        ]);
+        EventDay::create([
+            'event_id' => $event->id,
+            'day_number' => 1,
+            'date' => today(),
+            'start_time' => '08:00',
+            'end_time' => '23:00',
+        ]);
+        Evaluation::create([
+            'event_id' => $event->id,
+            'student_id' => $student->id,
+            'section_scores' => ['speaker_mastery' => 5],
+            'open_comment' => 'Still accepting evaluations.',
+            'sentiment' => 'unprocessed',
+            'submitted_at' => now(),
+        ]);
+
+        Livewire::actingAs($admin)
+            ->test(\App\Livewire\Dashboard\EventSentimentAction::class, [
+                'eventId' => $event->id,
+                'pendingComments' => 1,
+            ])
+            ->call('analyze')
+            ->assertSet('errorNotice', 'Sentiment analysis is available after the evaluation window closes.');
+
+        Bus::assertNotDispatched(AnalyzeEventSentimentsJob::class);
+    }
+
     public function test_manual_sentiment_action_blocks_cross_tenant_admin(): void
     {
         $h = $this->createHierarchy();
@@ -2168,6 +4095,60 @@ class WebPortalTest extends TestCase
             ->assertStatus(200)
             ->assertSee('Own AI Event')
             ->assertDontSee('Other AI Event')
+            ->assertSee('qr_code_value');
+    }
+
+    public function test_livewire_ai_query_is_scoped_like_api_query(): void
+    {
+        $h = $this->createHierarchy();
+        $admin = $this->createAdmin('Society Admin', $h['org']);
+
+        Event::create([
+            'organization_id' => $h['org']->id,
+            'title' => 'Livewire Own AI Event',
+            'status' => 'completed',
+            'start_date' => today()->subDay(),
+            'end_date' => today()->subDay(),
+        ]);
+
+        $otherOrg = Organization::create([
+            'college_id' => $h['college']->id,
+            'name' => 'Livewire Other AI Society',
+            'acronym' => 'LOAI',
+            'type' => 'society',
+        ]);
+        Event::create([
+            'organization_id' => $otherOrg->id,
+            'title' => 'Livewire Other AI Event',
+            'status' => 'completed',
+            'start_date' => today()->subDay(),
+            'end_date' => today()->subDay(),
+        ]);
+
+        $this->app->instance(AiServiceInterface::class, new class extends GeminiService {
+            public function __construct()
+            {
+            }
+
+            public function parseNaturalLanguageQuery(string $query, User $user): array
+            {
+                return [
+                    'target_table' => 'events',
+                    'filters' => [
+                        ['field' => 'title', 'operator' => 'LIKE', 'value' => 'Livewire'],
+                        ['field' => 'qr_code_value', 'operator' => '=', 'value' => 'unsafe'],
+                    ],
+                ];
+            }
+        });
+
+        Livewire::actingAs($admin)
+            ->test(\App\Livewire\Dashboard\AiInsightsQuery::class)
+            ->set('query', 'Show Livewire AI events')
+            ->call('runQuery')
+            ->assertSet('aiError', null)
+            ->assertSee('Livewire Own AI Event')
+            ->assertDontSee('Livewire Other AI Event')
             ->assertSee('qr_code_value');
     }
 
@@ -2267,6 +4248,102 @@ class WebPortalTest extends TestCase
 
         $link->refresh();
         $this->assertEquals('flagged', $link->status);
+    }
+
+    public function test_livewire_pending_qr_links_filter_without_page_redirect(): void
+    {
+        $h = $this->createHierarchy();
+        $admin = $this->createAdmin('Super Admin (OSA)');
+
+        $event = Event::create([
+            'organization_id' => $h['org']->id,
+            'title' => 'Pending Filter Event',
+            'status' => 'approved',
+            'start_date' => today(),
+            'end_date' => today(),
+        ]);
+
+        $manualScan = RawScan::create([
+            'event_id' => $event->id,
+            'scanner_user_id' => $admin->id,
+            'qr_code_value' => 'MANUAL-UNKNOWN-QR',
+            'scan_type' => 'time_in',
+            'scanned_at' => now(),
+            'server_received_at' => now(),
+            'device_id' => 'manual-filter-device',
+            'manual_entry' => true,
+            'dedup_key' => 'manual-filter-test',
+        ]);
+
+        PendingStudentLink::create([
+            'event_id' => $event->id,
+            'organization_id' => $h['org']->id,
+            'raw_scan_id' => $manualScan->id,
+            'qr_code_value' => 'MANUAL-UNKNOWN-QR',
+            'status' => 'pending',
+        ]);
+
+        PendingStudentLink::create([
+            'event_id' => $event->id,
+            'organization_id' => $h['org']->id,
+            'qr_code_value' => 'SCANNED-UNKNOWN-QR',
+            'status' => 'pending',
+        ]);
+
+        Livewire::actingAs($admin)
+            ->test(\App\Livewire\Dashboard\PendingQrLinks::class)
+            ->assertSee('MANUAL-UNKNOWN-QR')
+            ->assertSee('SCANNED-UNKNOWN-QR')
+            ->set('source', 'manual')
+            ->assertSee('MANUAL-UNKNOWN-QR')
+            ->assertDontSee('SCANNED-UNKNOWN-QR')
+            ->set('search', 'filter')
+            ->assertSee('Pending Filter Event');
+    }
+
+    public function test_livewire_pending_qr_links_resolve_and_flag_without_page_redirect(): void
+    {
+        $h = $this->createHierarchy();
+        $admin = $this->createAdmin('Super Admin (OSA)');
+        $student = $this->createStudent($h['org']);
+
+        $event = Event::create([
+            'organization_id' => $h['org']->id,
+            'title' => 'Livewire QR Actions',
+            'status' => 'approved',
+            'start_date' => today(),
+            'end_date' => today(),
+        ]);
+
+        $resolveLink = PendingStudentLink::create([
+            'event_id' => $event->id,
+            'organization_id' => $h['org']->id,
+            'qr_code_value' => 'RESOLVE-LIVEWIRE-QR',
+            'status' => 'pending',
+        ]);
+
+        $flagLink = PendingStudentLink::create([
+            'event_id' => $event->id,
+            'organization_id' => $h['org']->id,
+            'qr_code_value' => 'FLAG-LIVEWIRE-QR',
+            'status' => 'pending',
+        ]);
+
+        Livewire::actingAs($admin)
+            ->test(\App\Livewire\Dashboard\PendingQrLinks::class)
+            ->set('resolveStudentIds.' . $resolveLink->id, $student->id)
+            ->set('resolveNotes.' . $resolveLink->id, 'Manual resolution')
+            ->call('resolveLink', $resolveLink->id)
+            ->assertSee('Pending QR link resolved successfully.')
+            ->assertDispatched('pending-qr-link-resolved')
+            ->set('flagNotes.' . $flagLink->id, 'Not a student')
+            ->call('flagLink', $flagLink->id)
+            ->assertSee('Pending QR link flagged.')
+            ->assertDispatched('pending-qr-link-flagged');
+
+        $this->assertSame('resolved', $resolveLink->fresh()->status);
+        $this->assertSame($student->id, $resolveLink->fresh()->resolved_student_id);
+        $this->assertSame('flagged', $flagLink->fresh()->status);
     }
 
     // ─── Tenant Scope Tests ────────────────────────────────

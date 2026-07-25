@@ -13,6 +13,8 @@ use App\Models\University;
 use App\Models\User;
 use App\Models\RawScan;
 use App\Services\AdminAssignmentService;
+use App\Support\EventEvaluationForm;
+use App\Support\EvaluationQuestions;
 use Carbon\Carbon;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
@@ -523,6 +525,26 @@ class DemoDataSeeder extends Seeder
                     'evaluation_open' => true,
                 ]
             );
+            $completedEvent->loadMissing('evaluationFormVersion');
+            $completedForm = $completedEvent->evaluationFormVersion
+                ?: EventEvaluationForm::createForEvent(
+                    $completedEvent,
+                    null,
+                    [
+                        ...EvaluationQuestions::defaultSchema(),
+                        [
+                            'id' => 'program_flow',
+                            'label' => 'Program flow',
+                            'description' => 'Was the program sequence organized and easy to follow?',
+                        ],
+                        [
+                            'id' => 'time_management',
+                            'label' => 'Time management',
+                            'description' => 'Did the activity follow the expected schedule?',
+                        ],
+                    ],
+                    'Evaluation - ' . $completedEvent->title
+                );
 
             $eventDay = EventDay::firstOrCreate(
                 ['event_id' => $completedEvent->id, 'day_number' => 1],
@@ -600,6 +622,7 @@ class DemoDataSeeder extends Seeder
                 Evaluation::firstOrCreate(
                     ['event_id' => $completedEvent->id, 'student_id' => $student->id],
                     [
+                        'evaluation_form_version_id' => $completedForm->id,
                         'section_scores' => [
                             'attainment_of_objectives' => $faker->numberBetween(3, 5),
                             'speaker_mastery' => $faker->numberBetween(3, 5),
@@ -614,6 +637,10 @@ class DemoDataSeeder extends Seeder
                     ]
                 );
             }
+
+            Evaluation::where('event_id', $completedEvent->id)
+                ->whereNull('evaluation_form_version_id')
+                ->update(['evaluation_form_version_id' => $completedForm->id]);
 
             // --- B. Upcoming/Approved Event ---
             $approvedEvent = Event::firstOrCreate(
@@ -640,6 +667,15 @@ class DemoDataSeeder extends Seeder
                     'evaluation_open' => false,
                 ]
             );
+            $approvedEvent->loadMissing('evaluationFormVersion');
+            if (!$approvedEvent->evaluationFormVersion) {
+                EventEvaluationForm::createForEvent(
+                    $approvedEvent,
+                    null,
+                    EvaluationQuestions::defaultSchema(),
+                    'Evaluation - ' . $approvedEvent->title
+                );
+            }
 
             EventDay::firstOrCreate(
                 ['event_id' => $approvedEvent->id, 'day_number' => 1],

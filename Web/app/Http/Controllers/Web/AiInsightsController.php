@@ -69,9 +69,7 @@ class AiInsightsController extends Controller
         }
 
         $pendingComments = Evaluation::where('event_id', $event->id)
-            ->where('sentiment', 'unprocessed')
-            ->whereNotNull('open_comment')
-            ->whereRaw("trim(coalesce(open_comment, '')) <> ''")
+            ->pendingSentimentComments()
             ->count();
 
         if ($pendingComments === 0) {
@@ -88,9 +86,7 @@ class AiInsightsController extends Controller
         $eventsQuery = Event::with(['organization', 'eventDays'])
             ->withCount([
                 'evaluations as unprocessed_comment_count' => function ($query): void {
-                    $query->where('sentiment', 'unprocessed')
-                        ->whereNotNull('open_comment')
-                        ->whereRaw("trim(coalesce(open_comment, '')) <> ''");
+                    $query->pendingSentimentComments();
                 },
                 'evaluations as positive_comment_count' => fn ($query) => $query->where('sentiment', 'positive'),
                 'evaluations as neutral_comment_count' => fn ($query) => $query->where('sentiment', 'neutral'),

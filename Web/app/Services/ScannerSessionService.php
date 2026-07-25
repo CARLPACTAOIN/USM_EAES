@@ -227,16 +227,26 @@ class ScannerSessionService
         return ['allowed' => true, 'session' => $session, 'scope' => $scope];
     }
 
-    public function validateScanTimestamp(Event $event, Carbon $scannedAt): ?array
+    public function validateScanTimestamp(Event $event, Carbon $scannedAt, ?string $scanType = null): ?array
     {
-        [$scanStart, $scanEnd] = $this->lifecycle->scanWindow($event);
+        [$scanStart, $scanEnd] = $scanType
+            ? $this->lifecycle->scanWindowForType($event, $scanType)
+            : $this->lifecycle->scanWindow($event);
 
         if ($scanStart && $scannedAt->lt($scanStart)) {
-            return $this->deny(422, 'Event has not started yet. Scanning is not available.', 'event_not_started');
+            return match ($scanType) {
+                'time_in' => $this->deny(422, 'Time-in is not available before the early check-in window.', 'time_in_window_not_open'),
+                'time_out' => $this->deny(422, 'Time-out is not available before the event starts.', 'time_out_window_not_open'),
+                default => $this->deny(422, 'Event has not started yet. Scanning is not available.', 'event_not_started'),
+            };
         }
 
         if ($scanEnd && $scannedAt->gt($scanEnd)) {
-            return $this->deny(422, 'Event has ended. New scans are disabled, but pending valid scans can still be synced.', 'event_ended');
+            return match ($scanType) {
+                'time_in' => $this->deny(422, 'Time-in is closed for this event.', 'time_in_window_closed'),
+                'time_out' => $this->deny(422, 'Time-out checkout window has closed, but pending valid scans can still be synced.', 'time_out_window_closed'),
+                default => $this->deny(422, 'Event has ended. New scans are disabled, but pending valid scans can still be synced.', 'event_ended'),
+            };
         }
 
         return null;
@@ -252,6 +262,7 @@ class ScannerSessionService
     public function scannerState(Event $event, ScannerSession $session): array
     {
         [$scanStart, $scanEnd] = $this->lifecycle->scanWindow($event);
+        $scanWindows = $this->lifecycle->scanWindows($event);
         $scope = $this->scopeForSession($session, $event);
 
         return [
@@ -264,6 +275,10 @@ class ScannerSessionService
             'expires_at' => $session->expires_at,
             'scan_window_start' => $scanStart?->toIso8601String(),
             'scan_window_end' => $scanEnd?->toIso8601String(),
+            'time_in_window_start' => $scanWindows['time_in'][0]?->toIso8601String(),
+            'time_in_window_end' => $scanWindows['time_in'][1]?->toIso8601String(),
+            'time_out_window_start' => $scanWindows['time_out'][0]?->toIso8601String(),
+            'time_out_window_end' => $scanWindows['time_out'][1]?->toIso8601String(),
             'sync_grace_ends_at' => $this->lifecycle->syncGraceEndsAt($event)?->toIso8601String(),
         ];
     }

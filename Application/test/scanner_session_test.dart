@@ -39,6 +39,10 @@ void main() {
         ],
         scanWindowStart: DateTime.utc(2026, 7, 10, 8),
         scanWindowEnd: DateTime.utc(2026, 7, 10, 12),
+        timeInWindowStart: DateTime.utc(2026, 7, 10, 7),
+        timeInWindowEnd: DateTime.utc(2026, 7, 10, 12),
+        timeOutWindowStart: DateTime.utc(2026, 7, 10, 8),
+        timeOutWindowEnd: DateTime.utc(2026, 7, 10, 13),
         syncGraceEndsAt: DateTime.utc(2026, 7, 13, 12),
         savedAt: savedAt,
       );
@@ -51,6 +55,8 @@ void main() {
       expect(restored.eventDays.single.timeRangeLabel, '8:00 AM - 12:00 PM');
       expect(restored.session.eventDays.single.dateLabel, 'Jul 10, 2026');
       expect(restored.scanWindowEnd, DateTime.utc(2026, 7, 10, 12));
+      expect(restored.timeInWindowStart, DateTime.utc(2026, 7, 10, 7));
+      expect(restored.timeOutWindowEnd, DateTime.utc(2026, 7, 10, 13));
       expect(restored.savedAt, savedAt);
     });
 

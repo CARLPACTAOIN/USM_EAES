@@ -33,6 +33,7 @@ Route::middleware(['auth'])->group(function () {
         Route::get('/', [PortalController::class, 'index'])->name('portal');
         Route::get('/profile', [PortalController::class, 'profile'])->name('portal.profile');
         Route::post('/profile', [PortalController::class, 'updateProfile'])->name('portal.profile.update');
+        Route::get('/evaluations', [PortalController::class, 'evaluations'])->name('portal.evaluations');
         Route::get('/evaluations/{event}', [PortalController::class, 'evaluation'])->name('portal.evaluation');
         Route::post('/evaluations', [PortalController::class, 'submitEvaluation'])->name('portal.evaluation.submit');
     });
@@ -60,8 +61,10 @@ Route::middleware(['auth'])->group(function () {
             Route::post('/events/{event}/reject', [DashboardController::class, 'rejectEvent'])->name('dashboard.events.reject');
             Route::post('/events/{event}/link', [DashboardController::class, 'linkEvent'])->name('dashboard.events.link');
             Route::post('/events/{event}/hardcopy', [DashboardController::class, 'markHardcopy'])->name('dashboard.events.hardcopy');
+            Route::post('/events/{event}/attendance-policy', [DashboardController::class, 'updateEventAttendancePolicy'])->name('dashboard.events.attendance-policy');
             Route::post('/events/{event}/participant-scopes', [DashboardController::class, 'storeParticipantScope'])->name('dashboard.events.participant-scopes.store');
             Route::post('/events/{event}/participant-scopes/{participationScope}/submit', [DashboardController::class, 'submitParticipantScope'])->name('dashboard.events.participant-scopes.submit');
+            Route::post('/events/{event}/participant-scopes/{participationScope}/attendance-policy', [DashboardController::class, 'updateParticipantScopeAttendancePolicy'])->name('dashboard.events.participant-scopes.attendance-policy');
             Route::post('/events/{event}/participant-scopes/{participationScope}/review', [DashboardController::class, 'reviewParticipantScope'])->name('dashboard.events.participant-scopes.review');
             Route::post('/events/{event}/participant-scopes/{participationScope}/approve', [DashboardController::class, 'approveParticipantScope'])->name('dashboard.events.participant-scopes.approve');
             Route::post('/events/{event}/participant-scopes/{participationScope}/reject', [DashboardController::class, 'rejectParticipantScope'])->name('dashboard.events.participant-scopes.reject');

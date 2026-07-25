@@ -26,16 +26,19 @@ class AnalyticsOverviewController extends Controller
      */
     public function index(Request $request)
     {
-        $user = $request->user();
+        return view('dashboard.analytics.index', $this->dataFor($request->user(), $request->query()));
+    }
 
+    public function dataFor(User $user, array $filters = []): array
+    {
         // 1. Resolve Filters and Scopes (RBAC)
-        $selectedCollegeId = $request->input('college_id');
-        $selectedOrgId = $request->input('organization_id');
-        $selectedProgramId = $request->input('program_id');
-        $selectedYearLevel = $request->input('year_level');
-        $selectedSchoolYear = $request->input('school_year');
-        $selectedSemester = $request->input('semester');
-        $selectedEventType = $request->input('event_type');
+        $selectedCollegeId = $filters['college_id'] ?? null;
+        $selectedOrgId = $filters['organization_id'] ?? null;
+        $selectedProgramId = $filters['program_id'] ?? null;
+        $selectedYearLevel = $filters['year_level'] ?? null;
+        $selectedSchoolYear = $filters['school_year'] ?? null;
+        $selectedSemester = $filters['semester'] ?? null;
+        $selectedEventType = $filters['event_type'] ?? null;
         $scope = $this->adminScopes->forUser($user);
 
         if (!$scope) {
@@ -194,7 +197,7 @@ class AnalyticsOverviewController extends Controller
 
         $yearLevelOptions = YearLevels::options();
 
-        return view('dashboard.analytics.index', compact(
+        return compact(
             'organizations',
             'orgMetrics',
             'summary',
@@ -217,7 +220,7 @@ class AnalyticsOverviewController extends Controller
             'selectedEventType',
             'yearLevelOptions',
             'scope'
-        ));
+        );
     }
 
     /**

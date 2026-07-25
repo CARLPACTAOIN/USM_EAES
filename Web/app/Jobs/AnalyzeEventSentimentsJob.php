@@ -43,9 +43,7 @@ class AnalyzeEventSentimentsJob implements ShouldQueue
 
         // Fetch all unprocessed comments for this event
         $evaluations = Evaluation::where('event_id', $eventId)
-            ->where('sentiment', 'unprocessed')
-            ->whereNotNull('open_comment')
-            ->whereRaw("trim(coalesce(open_comment, '')) <> ''")
+            ->pendingSentimentComments()
             ->get();
 
         if ($evaluations->isEmpty()) {

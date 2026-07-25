@@ -23,6 +23,7 @@ class EventExportData
         $event->load([
             'organization.college',
             'parentEvent.organization',
+            'evaluationFormVersion',
             'participationScopes.organization',
             'participationScopes.college',
             'eventDays' => fn ($query) => $query->orderBy('day_number'),
@@ -35,12 +36,12 @@ class EventExportData
         ]);
 
         $generatedAt = now()->timezone(config('app.timezone'));
-        $questions = EvaluationQuestions::all();
+        $questions = EventEvaluationForm::questionMapForEvent($event);
         $evaluationsByStudent = $event->evaluations->keyBy('student_id');
         $attendanceByStudent = $event->attendanceRecords->groupBy('student_id');
 
         $summaryRows = self::summaryRows($event, $generatedBy, $generatedAt);
-        $attendanceRows = self::attendanceRows($event->attendanceRecords, $evaluationsByStudent);
+        $attendanceRows = self::attendanceRows($event, $event->attendanceRecords, $evaluationsByStudent);
         $evaluationRows = self::evaluationRows($event->evaluations, $attendanceByStudent, $questions);
 
         return [
@@ -99,6 +100,7 @@ class EventExportData
             ['Hardcopy submitted', self::yesNo($event->hardcopy_submitted) . ($event->hardcopy_submitted_at ? ' at ' . self::formatDateTime($event->hardcopy_submitted_at) : '')],
             ['Organization head signed', self::yesNo($event->head_organization_signed)],
             ['Adviser signed', self::yesNo($event->adviser_signed)],
+            ['Late cutoff policy', $event->event_late_cutoff_min !== null ? $event->event_late_cutoff_min . ' minute(s) after start' : 'Participant scope fallback'],
             ['Participant scopes', (string) $event->participationScopes->count()],
             ['Approved runtime scopes', (string) $event->participationScopes->filter(fn ($scope) => $scope->status === 'active' && (!$scope->ppa_required || $scope->ppa_status === 'approved'))->count()],
             ['Attendance records', (string) $event->attendanceRecords->count()],
@@ -114,7 +116,7 @@ class EventExportData
      * @param Collection<string, Evaluation> $evaluationsByStudent
      * @return list<list<string>>
      */
-    private static function attendanceRows(Collection $records, Collection $evaluationsByStudent): array
+    private static function attendanceRows(Event $event, Collection $records, Collection $evaluationsByStudent): array
     {
         $rows = [[
             'Day',
@@ -126,8 +128,8 @@ class EventExportData
             'Organization',
             'Time in',
             'Time out',
-            'Society status',
-            'General status',
+            'Attendance status',
+            'Late cutoff (min)',
             'Left early',
             'Attendance valid',
             'Evaluation submitted',
@@ -141,7 +143,7 @@ class EventExportData
                 $record->eventDay?->day_number ?? 999,
                 Str::lower($record->student?->name ?? '')
             ))
-            ->each(function (AttendanceRecord $record) use (&$rows, $evaluationsByStudent): void {
+            ->each(function (AttendanceRecord $record) use (&$rows, $evaluationsByStudent, $event): void {
                 $student = $record->student;
 
                 $rows[] = [
@@ -155,7 +157,7 @@ class EventExportData
                     self::formatDateTime($record->time_in),
                     self::formatDateTime($record->time_out),
                     self::label($record->society_status),
-                    self::label($record->competition_status),
+                    (string) $event->lateCutoffMinutesFor($record->participationScope),
                     self::yesNo($record->left_early),
                     self::yesNo($record->valid),
                     self::yesNo($student && $evaluationsByStudent->has($student->id)),

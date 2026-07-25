@@ -5,19 +5,24 @@ description: UI/UX design intelligence for Codex using the bundled UI UX Pro Max
 
 # UI/UX Pro Max
 
-Use this skill as the Codex adapter for the upstream UI UX Pro Max bundle. Keep the upstream bundle as the data source, then synthesize its recommendations with the current product, codebase, and user constraints.
+Use this file as a legacy compatibility wrapper for the upstream UI UX Pro Max bundle. The primary Codex design skill suite lives under `.codex/skills/`; start UI/UX work with `.codex/skills/ui-ux-pro-max/SKILL.md`, then use the related specialized Codex skills as needed.
 
 ## Local Layout
 
-- Codex entrypoint: `.agents/skills/ui-ux-pro-max/SKILL.md`
+- Primary Codex skill suite: `.codex/skills/`
+- UI/UX routing entrypoint: `.codex/skills/ui-ux-pro-max/SKILL.md`
+- Related Codex design skills: `.codex/skills/ui-styling/`, `.codex/skills/design/`, `.codex/skills/design-system/`, `.codex/skills/brand/`, `.codex/skills/slides/`, `.codex/skills/banner-design/`
+- Legacy wrapper: `.agents/skills/ui-ux-pro-max/SKILL.md`
 - Upstream bundle: `.agents/skills/ui-ux-pro-max-skill/`
-- Preferred search script: `.agents/skills/ui-ux-pro-max/scripts/search.py`
+- Preferred search script: `.codex/skills/ui-ux-pro-max/scripts/search.py`
+- Codex data copy: `.codex/skills/ui-ux-pro-max/data/`
+- Codex references: `.codex/skills/ui-ux-pro-max/references/`
 - Direct fallback script: `.agents/skills/ui-ux-pro-max-skill/src/ui-ux-pro-max/scripts/search.py`
-- Data source: `.agents/skills/ui-ux-pro-max-skill/src/ui-ux-pro-max/data/`
+- Upstream data source: `.agents/skills/ui-ux-pro-max-skill/src/ui-ux-pro-max/data/`
 
-Use the preferred path first. If the `scripts` or `data` junction is missing or broken, use the direct fallback path and repair the junctions when the task is about skill maintenance.
+Use the preferred path first. If the local `scripts`, `data`, or `references` copies are missing or stale, use the upstream fallback path and refresh the copied directories when the task is about skill maintenance.
 
-When changing UI UX Pro Max data or scripts, edit the upstream source under `.agents/skills/ui-ux-pro-max-skill/src/ui-ux-pro-max/`. Keep the Codex wrapper small; do not paste the full README or CSV contents into `SKILL.md`.
+When changing UI UX Pro Max data or scripts, edit the upstream source under `.agents/skills/ui-ux-pro-max-skill/src/ui-ux-pro-max/`, then copy the affected `data`, `scripts`, or `references` directory back into `.codex/skills/ui-ux-pro-max/`. Keep Codex skill files small; do not paste the full README or CSV contents into `SKILL.md`.
 
 ## Workflow
 
@@ -35,23 +40,23 @@ Run commands from the repo root.
 Generate a full design-system recommendation for a new or broad UI direction:
 
 ```powershell
-python .agents/skills/ui-ux-pro-max/scripts/search.py "education event attendance admin dashboard dense operational" --design-system -p "USM EAES" -f markdown
+python .codex/skills/ui-ux-pro-max/scripts/search.py "education event attendance admin dashboard dense operational" --design-system -p "USM EAES" -f markdown
 ```
 
 Search a specific design domain:
 
 ```powershell
-python .agents/skills/ui-ux-pro-max/scripts/search.py "modal form accessibility validation" --domain ux -f markdown
-python .agents/skills/ui-ux-pro-max/scripts/search.py "analytics dashboard comparison trend" --domain chart -f markdown
-python .agents/skills/ui-ux-pro-max/scripts/search.py "education government dashboard" --domain color -f markdown
+python .codex/skills/ui-ux-pro-max/scripts/search.py "modal form accessibility validation" --domain ux -f markdown
+python .codex/skills/ui-ux-pro-max/scripts/search.py "analytics dashboard comparison trend" --domain chart -f markdown
+python .codex/skills/ui-ux-pro-max/scripts/search.py "education government dashboard" --domain color -f markdown
 ```
 
 Search stack-specific implementation guidance:
 
 ```powershell
-python .agents/skills/ui-ux-pro-max/scripts/search.py "responsive dashboard tables forms" --stack laravel -f markdown
-python .agents/skills/ui-ux-pro-max/scripts/search.py "offline scanner event list cards" --stack flutter -f markdown
-python .agents/skills/ui-ux-pro-max/scripts/search.py "accessible data table filters" --stack html-tailwind -f markdown
+python .codex/skills/ui-ux-pro-max/scripts/search.py "responsive dashboard tables forms" --stack laravel -f markdown
+python .codex/skills/ui-ux-pro-max/scripts/search.py "offline scanner event list cards" --stack flutter -f markdown
+python .codex/skills/ui-ux-pro-max/scripts/search.py "accessible data table filters" --stack html-tailwind -f markdown
 ```
 
 If the preferred path fails, use:
@@ -76,11 +81,13 @@ Use domains for design content:
 - `icons`: icon usage guidance
 - `google-fonts`: individual font lookup
 - `react` and `web`: framework/web app guidance from the data bundle
+- `gsap`: motion presets and animation implementation guidance
 
 Use stacks for implementation details:
 
 - Web: `html-tailwind`, `laravel`, `react`, `nextjs`, `vue`, `svelte`, `astro`, `angular`, `shadcn`, `threejs`
 - Mobile/native: `flutter`, `react-native`, `swiftui`, `jetpack-compose`
+- Desktop: `javafx`, `wpf`, `winui`, `avalonia`, `uno`, `uwp`
 - Nuxt: `nuxtjs`, `nuxt-ui`
 
 For this EAES repo, default to `laravel` and `html-tailwind` for `Web/` portal work, and `flutter` for `Application/` scanner work.
@@ -98,7 +105,7 @@ For this EAES repo, default to `laravel` and `html-tailwind` for `Web/` portal w
 
 ## Fallbacks
 
-If Python is unavailable or the helper script fails, inspect the CSV files directly with `rg` or `Get-Content` under `.agents/skills/ui-ux-pro-max-skill/src/ui-ux-pro-max/data/`. Continue with repo patterns and state that the helper could not run if that affects confidence.
+If Python is unavailable or the helper script fails, inspect the CSV files directly with `rg` or `Get-Content` under `.codex/skills/ui-ux-pro-max/data/` or `.agents/skills/ui-ux-pro-max-skill/src/ui-ux-pro-max/data/`. Continue with repo patterns and state that the helper could not run if that affects confidence.
 
 If search results conflict with the existing product requirements or user instructions, follow the product/user constraint and mention the tradeoff briefly.
 

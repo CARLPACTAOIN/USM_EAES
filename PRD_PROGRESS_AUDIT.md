@@ -44,7 +44,7 @@
 | PPA digitization | Done | Web dashboard and APIs capture proposal metadata, official PPA softcopy upload, hardcopy/signature status, submit/review/approve/reject, participant-scope PPAs, and account-based scoped scanner assignments |
 | QR attendance + evaluation gate | Done | Sync controllers, EILO background job, pending QR dashboard, and student evaluation gate verified |
 | Offline scanner + sync | Done | Flutter scanner has Google mobile login, assigned-event listing/activation/resume, platform-backed device identity, participation-scope display, mode switching, SQLite repository, camera/manual capture UI, scope-stamped offline scans, API sync client, restart-safe scanner-session snapshots, offline restore after app close, controller tests, scanner-session phase indicators, and assignment-activation token coverage |
-| Event lifecycle + scanner sessions | Done | `events.lifecycle_phase`, `events.event_domain`, `event_participation_scopes`, `event_scanner_assignments`, `scanner_sessions`, assignment/scope-aware hydrate/sync guards, revocation, device binding, idempotent same-device activation resume, cross-device transfer blocking, scan-window validation, and scheduled lifecycle updates implemented |
+| Event lifecycle + scanner sessions | Done | `events.lifecycle_phase`, `events.event_domain`, `event_participation_scopes`, `event_scanner_assignments`, `scanner_sessions`, assignment/scope-aware hydrate/sync guards, revocation, device binding, idempotent same-device activation resume, cross-device transfer blocking, scan-window validation, scheduled lifecycle updates, and Event Proposals lazy lifecycle refresh implemented |
 | Swappable Gemini/Ollama NLP Assistant | Done | Container-bound AiServiceInterface supporting Gemini API and OpenAI-compatible Ollama Cloud (with connect & request timeouts, robust error logging, and dynamic UI branding) |
 
 ---
@@ -66,7 +66,7 @@
 |------|--------|------------------|
 | Roster hydration API (§3.1) | Done | Hydrate route `/events/{id}/hydrate` returns compressed roster scoped to the activated `event_participation_scope_id`, including student, multi-membership, non-academic, and HR roster paths |
 | Unresolved scan + server resolution (§3.2) | Done | `raw_scans` supports nullable `student_id`; pending QR links table and resolve/flag views with audit logging implemented |
-| Bulk sync + idempotency keys (§3.3) | Done | `/attendance/sync` API ingests logs, checks `dedup_key` duplicates, saves accepted in-window scans, rejects out-of-scope participants, and returns per-scan rejections for timestamps outside the event scan window |
+| Bulk sync + idempotency keys (§3.3) | Done | `/attendance/sync` API ingests logs, checks `dedup_key` duplicates, saves accepted in-window scans, accepts configured early Time-In and post-event Time-Out windows, rejects out-of-scope participants, and returns per-scan rejections for timestamps outside the scan-type window |
 | `ResolveAttendanceJob` + queue throttling | Done | Queueable job executes lockForUpdate transaction EILO mappings scoped by `event_participation_scope_id` |
 | Flutter offline SQLite scanner | Done | `sqflite`, `mobile_scanner`, `connectivity_plus`, and API client dependencies configured; local DB/sync classes, persisted scanner-session snapshots for offline app restart, global session feedback, duplicate-scan cooldown, student-ID manual entry, scope-stamped SQLite v3 offline scans, sync status panel with failed/retry states, auto-wipe after completed events, friendly error mapping, and expanded controller/widget tests verified |
 
@@ -90,14 +90,14 @@
 | 2.2 OSA review pipeline | Done | OSA review, approval, rejection status routes completed; OSA lists now exclude organizer-private drafts and expose proposal detail metadata for review |
 | 2.3 Participant PPAs and distributed attendance ownership | Done | `event_participation_scopes` model/migration, organizer attendance scopes, Organized/Participating Events dashboard tabs, in-app invitation notifications/acknowledgements/reminders, participant PPA submit/review/approve/reject routes, scope-aware scanner assignment/revocation, runtime hydrate/sync gating, and roll-up analytics implemented |
 | 2.4 HR event domain | Done | `events.event_domain`, HR Admin role/permissions, employee roster models, non-student Google onboarding separation, HR no-PPA event creation, and HR roster hydration path implemented; HR Admin provisioning is not handled through OSA Admin Access |
-| 4.2 Dual-threshold statuses | Done | Computes society status and general competition status against thresholds |
+| 4.2 Organizer-owned late cutoff | Done | Revised from OSA-owned dual thresholds to one official late-cutoff policy: organizer event cutoff is managed from separate Attendance Rules UI, applies first, locks after event start, and falls back to participant scope cutoffs only when unset; legacy status columns are preserved as compatibility mirrors |
 | 4.3 Multi-day session management | Done | EILO groups scans by day and maps to specific `event_day_id` records |
 
 ### Epic 5: Evaluation Portal & Gate
 
 | Feature | Status | Evidence / Notes |
 |---------|--------|------------------|
-| 5.1 Digital evaluation form | Done | Student portal view with centralized v1 categories (objective attainment, speaker mastery, venue comfort), Likert radios, comments, window status indicator, and confirmation modals |
+| 5.1 Digital evaluation form | Done | Event proposals now store locked event-level evaluation form snapshots with organizer-drafted dynamic 1-5 Likert questions plus one open comment; OSA proposal review shows the form before approval; student validation, analytics, and exports resolve question labels from the event snapshot with legacy default fallback |
 | 5.2 Evaluation gate (`valid` flag, 24h window) | Done | Toggles record validity on evaluation store; validates 24h time-limit |
 
 ### Epic 6: Analytics & Export
@@ -144,11 +144,11 @@
 | `admin_assignments` | Done | Source-of-truth admin authority and tenant scope table with active primary admin uniqueness by role/scope/academic year; user profile organization/college/program fields remain student membership |
 | `events` | Done | Custom PPA columns (location, budget, target), lifecycle phase, and event domain migrated with UUID |
 | `event_days` | Done | UUID schema defined and migrated |
-| `event_participation_scopes` | Done | UUID organizer/participant scope table added with PPA status, capture mode, delegated owner, and analytics roll-up fields |
+| `event_participation_scopes` | Done | UUID organizer/participant scope table added with PPA status, capture mode, delegated owner, analytics roll-up fields, and participant late-cutoff fallback |
 | `event_scanner_assignments` | Done | UUID scanner assignment table separates admin intent from runtime sessions, with event/scope/user/assigned-by, audience type, status, revocation, expiry, max devices, notes, and last activation fields |
 | `scanner_sessions` | Done | UUID scanner-session table added with event/scope/user/token, assignment link, label, device binding, status, expiry, revocation, and last-seen fields |
 | `raw_scans` | Done | Nullable student, QR, dedup_key, scanner-session/user audit, participation scope, captured-by organization/admin scope, server received, and processed markers migrated with UUID |
-| `attendance_records` | Done | EILO statuses, participation scope, validity, and override columns migrated with UUID |
+| `attendance_records` | Done | EILO official attendance status, compatibility status mirror, participation scope, validity, and override columns migrated with UUID |
 | `evaluations` | Done | Score JSONB, comment, sentiment metrics migrated with UUID |
 | `audit_logs` (NFR) | Done | Action, UUID targets, change details, admin-assignment lifecycle records, organization-management records, and OSA Admin Access history visibility implemented with UUID |
 | `pending_student_links` (§3.2) | Done | UUID table added for unresolved QR review, resolution, and flagging |
@@ -175,6 +175,10 @@
 
 ## Sprint Notes
 
+- **2026-07-21 (event-specific evaluation forms):**
+  - Added locked `evaluation_form_versions` snapshots linked to events and evaluation submissions, with backfill/fallback support for existing events.
+  - Extended proposal creation and API event creation to require 1-10 organizer-drafted Likert questions, and blocked OSA approval when a locked event form is missing.
+  - Updated student evaluation validation, per-event analytics, and evaluation exports to use event-specific question IDs and labels while preserving the evaluation gate.
 - **2026-07-15 (Admin Access audit history):**
   - Added an OSA-only Audit History tab to Admin Access for governance audit rows covering admin assignment lifecycle, organization management, and legacy admin-application review actions.
   - Added action, actor/search, and date filters while rendering only safe allowlisted details from `audit_logs.details`.
@@ -216,7 +220,7 @@
   - Implemented Google Socialite web routes/redirection and Sanctum scanner API token validation controllers.
   - Built PPA proposal submission, OSA review, and multi-organization event linking APIs.
   - Implemented hydration endpoint (`/hydrate`) and batch synchronization endpoint (`/sync`) chunking with client-side idempotency checks.
-  - Implemented background `ResolveAttendanceJob` resolving raw scans via EILO algorithms and checking dual thresholds.
+  - Implemented background `ResolveAttendanceJob` resolving raw scans via EILO algorithms and checking the organizer-owned late cutoff, with participant-scope fallback when the event cutoff is unset and Attendance Rules locked after event start.
   - Created `EvaluationController` supporting Likert scale questionnaire submissions and locking attendance validity.
   - Integrated `GeminiService` client wrappers for batch comment sentiment analysis and NLP query parsing.
   - Built `AnalyticsController` for stats reports and Gawad Parangal organizational membership active ratios.
@@ -347,6 +351,62 @@
   - Surfaced event-day start/end times in the non-OSA-visible dashboard event list and Flutter scanner assignment/session views using existing scoped event-day payloads, without changing scanner authorization, hydration, or sync contracts.
 - **2026-07-11 (scanner schedule timezone):**
   - Corrected scanner scan-window construction to treat stored event-day dates/times as USM local schedule time, made `APP_TIMEZONE` effective, and updated Flutter scheduled-event messaging to show date + time for future dates while keeping time-only copy for same-day events.
+- **2026-07-17 (Livewire scanner access UX):**
+  - Added `livewire/livewire` and converted the dashboard scanner-access modal into a Livewire component for no-reload scanner assignment, assignment revoke, and session revoke interactions with in-place loading feedback.
+  - Preserved participation-scope authorization and scanner/session service boundaries while adding Livewire feature coverage for assignment and session revocation paths.
+- **2026-07-17 (Livewire Events filter navigation):**
+  - Replaced the Events workspace/status filters, search, rows-per-page control, event table, row-scoped modals, and pagination with a single Livewire workspace component for in-place list updates while preserving URL state.
+  - Extracted the Events dashboard query/annotation logic into `DashboardEventWorkspaceService`, preserving tenant-scoped organized/participating boundaries, organizer-scope backfill, row actions, modals, and existing script initialization guards; added Livewire coverage for search, status filtering, and pagination.
+- **2026-07-17 (Livewire notification inbox):**
+  - Converted the dashboard notification bell into a Livewire component with in-place mark-read and mark-all-read actions, polling refresh, loading feedback, and `wire:navigate` action links while preserving the existing workflow inbox styling.
+  - Added Livewire sidebar notification badges so unread and needs-action indicators refresh after no-reload notification actions; kept the full notification center POST routes available as fallback.
+- **2026-07-17 (Livewire notification center page):**
+  - Converted `/dashboard/notifications` into a Livewire notification center for in-place mark-read, mark-all-read, polling refresh, and Livewire pagination while preserving needs-action strips and notification routing.
+  - Kept existing POST notification routes available as fallback and added Livewire coverage for center-page read actions and pagination.
+- **2026-07-17 (Livewire Admin Access workspace):**
+  - Converted the Admin Access organizations, admin assignments, and audit history workspace into a Livewire component with in-place filters, Livewire pagination, and no-reload assignment revoke/expire actions.
+  - Preserved OSA-only access, OSA assignable-role limits, existing organization create/edit POST fallbacks, audit history filtering, and student profile membership separation; added Livewire coverage for organization filtering and assignment revocation.
+- **2026-07-17 (Livewire Pending QR Links):**
+  - Converted `/dashboard/pending-student-links` into a Livewire workflow with in-place QR/event/organization search, source filtering, pagination, and no-reload resolve/flag actions.
+  - Preserved pending-link tenant scope, participant-scope student resolution checks, raw-scan student backfill, audit logging, attendance reprocessing dispatch, and existing POST routes as fallbacks; added Livewire coverage for filtering, resolve, and flag actions.
+- **2026-07-17 (Livewire Events proposal workflow):**
+  - Converted the Events table PPA packet indicators, proposal status chip, and primary submit/review/approve/reject/acknowledge CTAs into row-level Livewire components so common PPA workflow actions update in place without reloading the page.
+  - Preserved organizer/OSA authorization, locked evaluation-form approval gating, participant invitation acknowledgement rules, overflow action dropdowns, and existing POST routes as fallbacks; added Livewire coverage for hardcopy recording, organizer submission, OSA review/approval, and missing-form approval blocking.
+- **2026-07-17 (Livewire Attendance Rules):**
+  - Converted the Events Attendance Rules modal body into a Livewire component for no-reload event late-cutoff saves, participant fallback cutoff saves, preset selection, inline validation, and in-modal feedback.
+  - Preserved organizer-owned event cutoff precedence, participant-scope fallback gating, OSA read-only behavior, after-start locking, raw-scan reprocessing dispatch on scope cutoff changes, and existing POST routes as fallbacks; added Livewire coverage for event cutoff save/clear, scope fallback save, and locked-event blocking.
+- **2026-07-22 (Livewire Participant Scopes modal):**
+  - Converted the Events Participant Scopes modal into a Livewire component for no-reload invitation acknowledgement, participant PPA upload submission, OSA review/approve/reject decisions, and Add Participant Scope audience creation with inline loading, validation, search, and review-note feedback.
+  - Preserved `ParticipationScopeService` ownership checks, OSA-only review authority, event-bound scope guards, duplicate/organizer audience skipping, notification dispatch, and existing POST routes as fallbacks; added Livewire coverage for acknowledgement, upload submission, OSA review decisions, organization audience creation, and College/all audience creation.
+- **2026-07-22 (Livewire Create Event modal):**
+  - Converted the Events New Event Proposal modal into a Livewire component for no-reload proposal drafting with official PPA softcopy upload, schedule-adjacent generated daily attendance windows, same-time day syncing, compact event-specific evaluation questions, inline validation, and Livewire Navigate redirect after creation.
+  - Preserved recognized-organizer checks, HR event softcopy exemption, parent-permit restrictions, event-day date-range validation, locked evaluation-form creation, organizer scope creation, storage cleanup on failure, and the existing POST route as a multipart/named-field fallback from the modal with old-input restoration; added Livewire coverage for successful draft creation, generated day rows, fallback field preservation, softcopy/question/date validation, and fallback form contract.
+- **2026-07-22 (Livewire Events sentiment action):**
+  - Converted the Events table AI sentiment queue action into a Livewire button with in-place queued/open-window feedback while preserving the manual POST route as fallback.
+  - Preserved event tenant authorization, evaluation-window closure gating, pending-comment counting, and `AnalyzeEventSentimentsJob` dispatch; added Livewire coverage for closed-event dispatch and open-event rejection.
+- **2026-07-22 (Livewire AI Insights query):**
+  - Converted the AI Insights NLP query assistant into a Livewire component with no-reload query execution, one-click suggestions, inline validation, loading feedback, query errors, and scoped result tables.
+  - Preserved the whitelisted `NlpQueryExecutor`, AI provider binding, admin-only access, existing POST query route as fallback, and tenant-scoped result filtering; reused the Livewire sentiment action in the AI queue and added Livewire query coverage.
+- **2026-07-22 (Livewire Organization Analytics filters):**
+  - Converted the Organization Performance Analytics overview into a single Livewire-owned workspace so Apply/Clear update the filters, KPI cards, leaderboards, and organization/program results in place without a full-page GET reload.
+  - Preserved the existing `AnalyticsOverviewController` metric pipeline, admin assignment scope locks, shareable filtered analytics URLs, cascading college/organization/program options, mobile collapse behavior, active filter chips, loading feedback, and an explicit GET form fallback with named filter fields; added Livewire coverage for scoped filter application.
+- **2026-07-22 (Livewire Event Analytics participant drilldown):**
+  - Converted the per-event Participant Drilldown filter bar, row count, results table, and paginator into a Livewire component with in-place Apply/Clear, active filter chips, accessible labels, rows-per-page control, and loading feedback.
+  - Preserved `EventAnalyticsService::participantRows`, event tenant authorization, shareable filtered event analytics URLs, and the standard GET route as fallback with named filter fields and Attendance-tab preservation for query-string reloads; added Livewire coverage for participant filter application, plain GET filtering, and pagination.
+- **2026-07-22 (Analytics and Event Proposal filter UX):**
+  - Refined per-event Attendance participant filters with visible labels, grouped controls, active count placement, and compact responsive search/rows controls while preserving Livewire Apply/Clear and named GET fallback fields.
+  - Kept Event Proposal workspace/status controls as separate tab rows and reduced the list utility to a small debounced search field with Organization Profiles-style Alpine row filtering for immediate mobile typing feedback, plus Livewire-backed server search and plain GET fallback; removed the visible rows control and polished proposal modal focus/row states without changing PPA validation or approval flow.
+- **2026-07-22 (Livewire frontend bootstrap repair):**
+  - Replaced the separate Alpine startup with Livewire 4's Vite ESM bootstrap and `@livewireScriptConfig`, eliminating the duplicate Alpine runtime that left `wire:click` and `wire:submit` controls inert across Event Proposals, Attendance Rules, analytics filters, notifications, Admin Access, Pending QR Links, and AI Insights.
+  - Added a bootstrap regression test and verified Event Proposal feedback, Hardcopy request dispatch, Attendance Rules presets, Create Event row actions, cross-page analytics filters, focused Livewire feature tests, and the production Vite build.
+- **2026-07-23 (instant Event Proposal modal controls):**
+  - Moved Create Event date-range/day-row editing and Attendance Rules preset selection to immediate Alpine state with deferred Livewire entanglement, removing per-click server round trips while preserving the existing Livewire validation and save flows for PRD Epic 2 and Epic 4.
+  - Made cutoff highlighting reflect the actual selected value instead of permanently recommending 15 minutes, and made successful Event Proposal and Attendance Rules row feedback dismiss after four seconds. Added a frontend interaction contract test; verified all 184 tests/1,187 assertions, the production Vite build, and browser timings of 48 ms for Add Day and 58 ms for Delete Day with zero Livewire update requests.
+- **2026-07-22 (Event lifecycle lazy refresh):**
+  - Added an Event Proposals workspace safety refresh that recalculates accessible approved/completed event lifecycle phases once on page open before counts and rows render, so stale `evaluation_open` records advance toward processing/completed even if the scheduler was not running locally.
+- **2026-07-22 (scanner scan-type windows):**
+  - Split scanner capture validation into scan-type windows: configured early Time-In before scheduled start and configured post-event Time-Out checkout after scheduled end, while keeping Time-In closed after event end and Time-Out closed after checkout grace.
+  - Exposed mode-specific scanner-session window metadata to Flutter, preserved legacy `scan_window_start/end` fields, and updated offline capture tests for early check-in and post-event checkout.
 - **2026-06-30 (assignment-only scanner workflow):**
   - Removed the user-facing dashboard scanner-link generation route/action, deep-link flash card, Generate Link/Regenerate/Add Device controls, and mobile manual scanner-link entry flow.
   - Made assignment activation (`POST /api/v1/scanner/assignments/{assignment}/activate`) the only supported scanner session creation path; `scanner_sessions` remain as the internal runtime/device/audit layer for hydrate and sync.

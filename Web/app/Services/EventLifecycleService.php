@@ -117,11 +117,36 @@ class EventLifecycleService
 
     public function scanWindow(Event $event): array
     {
-        [$firstStart, $finalEnd] = $this->eventBounds($event);
+        $windows = $this->scanWindows($event);
 
         return [
-            $firstStart?->copy()->subMinutes((int) config('services.eaes.scan_early_checkin_buffer_min', 0)),
-            $finalEnd?->copy()->addMinutes((int) config('services.eaes.checkout_grace_period_min', 0)),
+            $windows['time_in'][0],
+            $windows['time_out'][1],
+        ];
+    }
+
+    public function scanWindowForType(Event $event, string $scanType): array
+    {
+        $windows = $this->scanWindows($event);
+
+        return $windows[$scanType] ?? $this->scanWindow($event);
+    }
+
+    public function scanWindows(Event $event): array
+    {
+        [$firstStart, $finalEnd] = $this->eventBounds($event);
+        $earlyCheckinMinutes = (int) config('services.eaes.scan_early_checkin_buffer_min', 60);
+        $checkoutGraceMinutes = (int) config('services.eaes.checkout_grace_period_min', 60);
+
+        return [
+            'time_in' => [
+                $firstStart?->copy()->subMinutes($earlyCheckinMinutes),
+                $finalEnd?->copy(),
+            ],
+            'time_out' => [
+                $firstStart?->copy(),
+                $finalEnd?->copy()->addMinutes($checkoutGraceMinutes),
+            ],
         ];
     }
 
@@ -148,9 +173,7 @@ class EventLifecycleService
             ->exists();
 
         $unprocessedSentiments = $event->evaluations()
-            ->where('sentiment', 'unprocessed')
-            ->whereNotNull('open_comment')
-            ->whereRaw("trim(coalesce(open_comment, '')) <> ''")
+            ->pendingSentimentComments()
             ->exists();
 
         $activeSessions = $event->scannerSessions()

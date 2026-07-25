@@ -68,6 +68,10 @@ class ScannerController extends ChangeNotifier {
   List<EventScheduleDay> eventDays = const [];
   DateTime? scanWindowStart;
   DateTime? scanWindowEnd;
+  DateTime? timeInWindowStart;
+  DateTime? timeInWindowEnd;
+  DateTime? timeOutWindowStart;
+  DateTime? timeOutWindowEnd;
   DateTime? syncGraceEndsAt;
   String? statusMessage;
   String? errorMessage;
@@ -89,8 +93,7 @@ class ScannerController extends ChangeNotifier {
 
   bool get hasSession => session != null;
 
-  bool get canCaptureScans =>
-      hasSession && eventLifecyclePhase == 'active' && _isInsideScanWindow();
+  bool get canCaptureScans => hasSession && _canCaptureForCurrentPhase();
 
   bool get lastSessionActivationFailureIsRecoverable =>
       lastSessionActivationErrorCategory == ScannerErrorCategory.networkError ||
@@ -185,6 +188,10 @@ class ScannerController extends ChangeNotifier {
       eventDays: eventDays,
       scanWindowStart: scanWindowStart,
       scanWindowEnd: scanWindowEnd,
+      timeInWindowStart: timeInWindowStart,
+      timeInWindowEnd: timeInWindowEnd,
+      timeOutWindowStart: timeOutWindowStart,
+      timeOutWindowEnd: timeOutWindowEnd,
       syncGraceEndsAt: syncGraceEndsAt,
       savedAt: _nowFactory().toUtc(),
     );
@@ -202,6 +209,11 @@ class ScannerController extends ChangeNotifier {
         snapshot.session.participationScopeName;
     scanWindowStart = snapshot.scanWindowStart;
     scanWindowEnd = snapshot.scanWindowEnd;
+    timeInWindowStart = snapshot.timeInWindowStart ?? snapshot.scanWindowStart;
+    timeInWindowEnd = snapshot.timeInWindowEnd ?? snapshot.scanWindowEnd;
+    timeOutWindowStart =
+        snapshot.timeOutWindowStart ?? snapshot.scanWindowStart;
+    timeOutWindowEnd = snapshot.timeOutWindowEnd ?? snapshot.scanWindowEnd;
     syncGraceEndsAt = snapshot.syncGraceEndsAt;
     lastSessionActivationErrorCategory = null;
     errorMessage = null;
@@ -254,8 +266,7 @@ class ScannerController extends ChangeNotifier {
       eventDays = session?.eventDays.isNotEmpty == true
           ? session!.eventDays
           : nextSession.eventDays;
-      scanWindowStart = _parseDateTime(scannerSession?['scan_window_start']);
-      scanWindowEnd = _parseDateTime(scannerSession?['scan_window_end']);
+      _applyScanWindows(scannerSession);
       syncGraceEndsAt = _parseDateTime(scannerSession?['sync_grace_ends_at']);
       await _refreshCounts(nextSession.eventId);
       statusMessage = _sessionReadyMessage();
@@ -275,6 +286,10 @@ class ScannerController extends ChangeNotifier {
       eventDays = const [];
       scanWindowStart = null;
       scanWindowEnd = null;
+      timeInWindowStart = null;
+      timeInWindowEnd = null;
+      timeOutWindowStart = null;
+      timeOutWindowEnd = null;
       syncGraceEndsAt = null;
       final mapped = _setError(error, sessionActivation: true);
       lastSessionActivationErrorCategory = mapped.category;
@@ -657,8 +672,7 @@ class ScannerController extends ChangeNotifier {
       if (updatedEventDays.isNotEmpty) {
         eventDays = updatedEventDays;
       }
-      scanWindowStart = _parseDateTime(scannerSession?['scan_window_start']);
-      scanWindowEnd = _parseDateTime(scannerSession?['scan_window_end']);
+      _applyScanWindows(scannerSession);
       syncGraceEndsAt = _parseDateTime(scannerSession?['sync_grace_ends_at']);
 
       if (status != 'completed' && eventLifecyclePhase != 'completed') {
@@ -706,6 +720,10 @@ class ScannerController extends ChangeNotifier {
       eventDays = const [];
       scanWindowStart = null;
       scanWindowEnd = null;
+      timeInWindowStart = null;
+      timeInWindowEnd = null;
+      timeOutWindowStart = null;
+      timeOutWindowEnd = null;
       syncGraceEndsAt = null;
       globalFeedback = const GlobalFeedback(
         kind: FeedbackKind.success,
@@ -738,10 +756,33 @@ class ScannerController extends ChangeNotifier {
     return DateTime.tryParse(value.toString());
   }
 
-  bool _isInsideScanWindow() {
+  void _applyScanWindows(Map<String, dynamic>? scannerSession) {
+    scanWindowStart = _parseDateTime(scannerSession?['scan_window_start']);
+    scanWindowEnd = _parseDateTime(scannerSession?['scan_window_end']);
+    timeInWindowStart =
+        _parseDateTime(scannerSession?['time_in_window_start']) ??
+        scanWindowStart;
+    timeInWindowEnd =
+        _parseDateTime(scannerSession?['time_in_window_end']) ?? scanWindowEnd;
+    timeOutWindowStart =
+        _parseDateTime(scannerSession?['time_out_window_start']) ??
+        scanWindowStart;
+    timeOutWindowEnd =
+        _parseDateTime(scannerSession?['time_out_window_end']) ?? scanWindowEnd;
+  }
+
+  DateTime? _windowStartFor(ScanType type) {
+    return type == ScanType.timeIn ? timeInWindowStart : timeOutWindowStart;
+  }
+
+  DateTime? _windowEndFor(ScanType type) {
+    return type == ScanType.timeIn ? timeInWindowEnd : timeOutWindowEnd;
+  }
+
+  bool _isInsideScanWindow(ScanType type) {
     final now = _nowFactory().toUtc();
-    final start = scanWindowStart?.toUtc();
-    final end = scanWindowEnd?.toUtc();
+    final start = _windowStartFor(type)?.toUtc();
+    final end = _windowEndFor(type)?.toUtc();
     if (start != null && now.isBefore(start)) {
       return false;
     }
@@ -751,23 +792,151 @@ class ScannerController extends ChangeNotifier {
     return true;
   }
 
+  bool _canCaptureForCurrentPhase() {
+    return switch (eventLifecyclePhase) {
+      'scheduled' =>
+        !_missingScheduledWindowMetadata() && _isInsideCurrentModeEventWindow(),
+      'active' => _isInsideCurrentModeEventWindow(),
+      'ended' || 'evaluation_open' || 'evaluation_closed' || 'processing' =>
+        scanType == ScanType.timeOut &&
+            !_missingScheduledWindowMetadata() &&
+            _isInsideCurrentModeEventWindow(),
+      _ => false,
+    };
+  }
+
+  bool _missingScheduledWindowMetadata() {
+    return eventDays.isEmpty &&
+        _windowStartFor(scanType) == null &&
+        _windowEndFor(scanType) == null;
+  }
+
+  bool _isInsideCurrentModeEventWindow() {
+    if (eventDays.isEmpty) {
+      return _isInsideScanWindow(scanType);
+    }
+
+    final now = _nowFactory().toLocal();
+    final earlyCheckinBuffer = _earlyCheckinBuffer();
+    final checkoutBuffer = _checkoutBuffer();
+
+    for (final day in eventDays) {
+      final date = day.date;
+      final start = _eventDayDateTime(date, day.startTime);
+      final end = _eventDayDateTime(date, day.endTime);
+      if (start == null || end == null) {
+        continue;
+      }
+
+      final windowStart = scanType == ScanType.timeIn
+          ? start.subtract(earlyCheckinBuffer)
+          : start;
+      final windowEnd = scanType == ScanType.timeIn
+          ? end
+          : end.add(checkoutBuffer);
+
+      if (!now.isBefore(windowStart) && !now.isAfter(windowEnd)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  Duration _earlyCheckinBuffer() {
+    final firstStart = _eventDayBounds().$1;
+    final firstWindowStart = timeInWindowStart?.toLocal();
+    if (firstStart == null || firstWindowStart == null) {
+      return Duration.zero;
+    }
+
+    final buffer = firstStart.difference(firstWindowStart);
+    return buffer.isNegative ? Duration.zero : buffer;
+  }
+
+  Duration _checkoutBuffer() {
+    final finalEnd = _eventDayBounds().$2;
+    final finalWindowEnd = timeOutWindowEnd?.toLocal();
+    if (finalEnd == null || finalWindowEnd == null) {
+      return Duration.zero;
+    }
+
+    final buffer = finalWindowEnd.difference(finalEnd);
+    return buffer.isNegative ? Duration.zero : buffer;
+  }
+
+  (DateTime?, DateTime?) _eventDayBounds() {
+    final starts = <DateTime>[];
+    final ends = <DateTime>[];
+
+    for (final day in eventDays) {
+      final date = day.date;
+      final start = _eventDayDateTime(date, day.startTime);
+      final end = _eventDayDateTime(date, day.endTime);
+      if (start != null) starts.add(start);
+      if (end != null) ends.add(end);
+    }
+
+    starts.sort();
+    ends.sort();
+
+    return (
+      starts.isEmpty ? null : starts.first,
+      ends.isEmpty ? null : ends.last,
+    );
+  }
+
+  DateTime? _eventDayDateTime(DateTime? date, String? time) {
+    if (date == null || time == null || time.trim().isEmpty) {
+      return null;
+    }
+
+    final parts = time.split(':');
+    if (parts.length < 2) {
+      return null;
+    }
+
+    final hour = int.tryParse(parts[0]);
+    final minute = int.tryParse(parts[1]);
+    if (hour == null || minute == null) {
+      return null;
+    }
+
+    final localDate = date.toLocal();
+    return DateTime(
+      localDate.year,
+      localDate.month,
+      localDate.day,
+      hour,
+      minute,
+    );
+  }
+
   String _sessionReadyMessage() {
     switch (eventLifecyclePhase) {
       case 'scheduled':
-        final start = scanWindowStart;
+        if (_canCaptureForCurrentPhase()) {
+          return '${scanType.label} scanning enabled.';
+        }
+        final start = _windowStartFor(scanType);
         return start == null
             ? 'Event has not started yet.'
-            : 'Event has not started yet. Scanning will be available at ${_formatAvailabilityDateTime(start)}.';
+            : '${scanType.label} will be available at ${_formatAvailabilityDateTime(start)}.';
       case 'active':
-        if (!_isInsideScanWindow()) {
+        if (!_isInsideCurrentModeEventWindow()) {
           return _scanWindowBlockedMessage();
         }
-        return 'Event active. Scanning enabled.';
+        return '${scanType.label} scanning enabled.';
       case 'ended':
       case 'evaluation_open':
       case 'evaluation_closed':
       case 'processing':
-        return 'Event has ended. New scans are disabled. Please sync all pending scans.';
+        if (_canCaptureForCurrentPhase()) {
+          return 'Time-Out scanning enabled for post-event checkout.';
+        }
+        return scanType == ScanType.timeOut
+            ? _scanWindowBlockedMessage()
+            : 'Event has ended. Time-In is closed. Switch to Time-Out for checkout if needed.';
       case 'completed':
         return 'Event completed. Local data will be removed after scans are synced.';
       default:
@@ -778,17 +947,22 @@ class ScannerController extends ChangeNotifier {
   String _scanBlockedMessage() {
     switch (eventLifecyclePhase) {
       case 'scheduled':
-        final start = scanWindowStart;
+        if (_canCaptureForCurrentPhase()) {
+          return '${scanType.label} scanning enabled.';
+        }
+        final start = _windowStartFor(scanType);
         return start == null
             ? 'Event has not started yet.'
-            : 'Event has not started yet. Scanning will be available at ${_formatAvailabilityDateTime(start)}.';
+            : '${scanType.label} will be available at ${_formatAvailabilityDateTime(start)}.';
       case 'active':
         return _scanWindowBlockedMessage();
       case 'ended':
       case 'evaluation_open':
       case 'evaluation_closed':
       case 'processing':
-        return 'Event has ended. New scans are disabled. Please sync all pending scans.';
+        return scanType == ScanType.timeOut
+            ? _scanWindowBlockedMessage()
+            : 'Event has ended. Time-In is closed. Switch to Time-Out for checkout if needed.';
       case 'completed':
         return 'Event completed. New scanner activity is closed.';
       default:
@@ -798,13 +972,17 @@ class ScannerController extends ChangeNotifier {
 
   String _scanWindowBlockedMessage() {
     final now = _nowFactory().toUtc();
-    final start = scanWindowStart;
+    final start = _windowStartFor(scanType);
     if (start != null && now.isBefore(start.toUtc())) {
-      return 'Event has not started yet. Scanning will be available at ${_formatAvailabilityDateTime(start)}.';
+      return scanType == ScanType.timeOut
+          ? 'Time-Out will be available when the event starts.'
+          : 'Time-In will be available at ${_formatAvailabilityDateTime(start)}.';
     }
-    final end = scanWindowEnd;
+    final end = _windowEndFor(scanType);
     if (end != null && now.isAfter(end.toUtc())) {
-      return 'Event scan window has ended. Please sync all pending scans.';
+      return scanType == ScanType.timeOut
+          ? 'Time-Out checkout window has ended. Please sync all pending scans.'
+          : 'Time-In is closed for this event.';
     }
     return 'Scanning is not available for this event phase.';
   }

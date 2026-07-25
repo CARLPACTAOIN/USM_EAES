@@ -5,12 +5,12 @@
             <p class="text-sm text-(--color-text-secondary) mt-1">EAES administration overview</p>
         </div>
         <div class="dashboard-header-actions shrink-0">
-            <x-notification-bell :summary="$notificationSummary" :items="$notificationDropdownItems" variant="dashboard" />
+            @livewire('dashboard.notification-bell', ['variant' => 'dashboard'], key('dashboard-notification-bell'))
         </div>
     </div>
 
     {{-- KPI Stats --}}
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-8">
         <div class="stat-card stat-card--accent">
             <div class="flex items-center justify-between mb-2">
                 <div class="w-10 h-10 rounded-lg flex items-center justify-center" style="background-color: var(--color-accent-subtle);">
@@ -82,8 +82,8 @@
             <div class="card-header">
                 <h2 class="font-semibold text-(--color-text-primary)">Quick Actions</h2>
             </div>
-            <div class="card-body space-y-2">
-                <a href="{{ route('dashboard.events') }}" class="flex items-center gap-3 p-3 rounded-lg hover:bg-(--color-surface-raised) transition-colors cursor-pointer">
+            <div class="card-body space-y-2 dashboard-quick-actions">
+                <a href="{{ route('dashboard.events') }}" class="dashboard-quick-action flex items-center gap-3 p-3 rounded-lg hover:bg-(--color-surface-raised) transition-colors cursor-pointer">
                     <div class="w-9 h-9 rounded-lg flex items-center justify-center shrink-0" style="background-color: var(--color-accent-subtle);">
                         <svg class="w-4.5 h-4.5" style="color: var(--color-accent);" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 4v16m8-8H4"/></svg>
                     </div>
@@ -92,7 +92,7 @@
                         <p class="text-xs text-(--color-text-tertiary)">Submit a new PPA</p>
                     </div>
                 </a>
-                <a href="{{ route('dashboard.pending-links') }}" class="flex items-center gap-3 p-3 rounded-lg hover:bg-(--color-surface-raised) transition-colors cursor-pointer">
+                <a href="{{ route('dashboard.pending-links') }}" class="dashboard-quick-action flex items-center gap-3 p-3 rounded-lg hover:bg-(--color-surface-raised) transition-colors cursor-pointer">
                     <div class="w-9 h-9 rounded-lg flex items-center justify-center shrink-0" style="background-color: var(--color-warning-light);">
                         <svg class="w-4.5 h-4.5" style="color: var(--color-warning);" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101"/></svg>
                     </div>
@@ -101,7 +101,7 @@
                         <p class="text-xs text-(--color-text-tertiary)">Map unknown scans to students</p>
                     </div>
                 </a>
-                <a href="{{ route('dashboard.ai') }}" class="flex items-center gap-3 p-3 rounded-lg hover:bg-(--color-surface-raised) transition-colors cursor-pointer">
+                <a href="{{ route('dashboard.ai') }}" class="dashboard-quick-action flex items-center gap-3 p-3 rounded-lg hover:bg-(--color-surface-raised) transition-colors cursor-pointer">
                     <div class="w-9 h-9 rounded-lg flex items-center justify-center shrink-0" style="background-color: var(--color-info-light);">
                         <svg class="w-4.5 h-4.5" style="color: var(--color-info);" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.75 3.75L8.25 7.5 4.5 9l3.75 1.5 1.5 3.75 1.5-3.75L15 9l-3.75-1.5-1.5-3.75zM17.25 12l-.9 2.25L14.1 15l2.25.75.9 2.25.9-2.25L20.4 15l-2.25-.75-.9-2.25z"/></svg>
                     </div>
@@ -110,7 +110,7 @@
                         <p class="text-xs text-(--color-text-tertiary)">Review sentiment and scoped queries</p>
                     </div>
                 </a>
-                <a href="{{ route('dashboard.analytics') }}" class="flex items-center gap-3 p-3 rounded-lg hover:bg-(--color-surface-raised) transition-colors cursor-pointer">
+                <a href="{{ route('dashboard.analytics') }}" class="dashboard-quick-action flex items-center gap-3 p-3 rounded-lg hover:bg-(--color-surface-raised) transition-colors cursor-pointer">
                     <div class="w-9 h-9 rounded-lg flex items-center justify-center shrink-0" style="background: linear-gradient(135deg, rgba(139,92,246,0.15), rgba(99,102,241,0.15));">
                         <svg class="w-4.5 h-4.5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
                     </div>
@@ -120,7 +120,7 @@
                     </div>
                 </a>
                 @if(auth()->user()?->hasRole('Super Admin (OSA)'))
-                <a href="{{ route('dashboard.admin-users') }}" class="flex items-center gap-3 p-3 rounded-lg hover:bg-(--color-surface-raised) transition-colors cursor-pointer">
+                <a href="{{ route('dashboard.admin-users') }}" class="dashboard-quick-action flex items-center gap-3 p-3 rounded-lg hover:bg-(--color-surface-raised) transition-colors cursor-pointer">
                     <div class="w-9 h-9 rounded-lg flex items-center justify-center shrink-0" style="background-color: var(--color-info-light);">
                         <svg class="w-4.5 h-4.5" style="color: var(--color-info);" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"/></svg>
                     </div>
@@ -141,9 +141,9 @@
             </div>
             <div class="card-body p-0">
                 @forelse($recentEvents as $event)
-                <div class="flex items-center gap-4 px-6 py-4 border-b border-(--color-border) last:border-b-0">
+                <div class="dashboard-recent-event flex items-center gap-4 px-6 py-4 border-b border-(--color-border) last:border-b-0">
                     <div class="flex-1 min-w-0">
-                        <p class="font-medium text-(--color-text-primary) truncate">{{ $event->title }}</p>
+                        <p class="font-medium text-(--color-text-primary) line-clamp-2">{{ $event->title }}</p>
                         <p class="text-xs text-(--color-text-tertiary)">
                             {{ $event->organization?->acronym ?? 'N/A' }} &middot;
                             {{ $event->start_date?->format('M d, Y') }}

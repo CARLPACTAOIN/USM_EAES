@@ -19,18 +19,10 @@ class EventAnalyticsController extends Controller
         EventTenantScope::authorize($event, $request->user());
 
         $analytics = $this->analytics->summary($event);
-        $participantRows = $this->analytics
-            ->participantRows(
-                $event,
-                $request->only(['scope_id', 'day_id', 'status', 'validation', 'year_level', 'q']),
-                (int) $request->integer('per_page', 25)
-            )
-            ->appends($request->query());
 
         return view('dashboard.analytics.event', [
             'event' => $event,
             'analytics' => $analytics,
-            'participantRows' => $participantRows,
             'filters' => [
                 'scope_id' => $request->query('scope_id'),
                 'day_id' => $request->query('day_id'),

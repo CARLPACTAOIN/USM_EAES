@@ -1,5 +1,5 @@
 ---
-description: UI/UX work must consult the ui-ux-pro-max local skill before design decisions
+description: UI/UX work must consult the Codex design skill suite before design decisions
 globs: Web/resources/**/*,Mobile/**/*
 alwaysApply: false
 ---
@@ -9,7 +9,8 @@ alwaysApply: false
 For layout, visual design, components, interaction patterns, or UX review in matched files:
 
 1. Read `AGENTS.md` (UI/UX section).
-2. Consult `.agents/skills/ui-ux-pro-max-skill/README.md` or `Web/.agents/skills/ui-ux-pro-max-skill/README.md` (authoritative).
-3. Full bundle: `.agents/skills/ui-ux-pro-max-skill/` or `Web/.agents/skills/ui-ux-pro-max-skill/` — scripts at `src/ui-ux-pro-max/scripts/search.py`.
+2. Consult `.codex/skills/ui-ux-pro-max/SKILL.md` first as the UI/UX routing entrypoint.
+3. Use the relevant specialized skill under `.codex/skills/` when needed: `ui-styling`, `design`, `design-system`, `brand`, `slides`, or `banner-design`.
+4. Search scripts live at `.codex/skills/ui-ux-pro-max/scripts/search.py`; upstream source data remains under `.agents/skills/ui-ux-pro-max-skill/`.
 
 The skill supports design quality only; it does not override `PRD_V1.md` or expand scope beyond the audit.

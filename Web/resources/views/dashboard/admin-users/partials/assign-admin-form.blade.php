@@ -45,8 +45,7 @@
         })">
     <form method="POST"
           action="{{ route('dashboard.admin-users.create') }}"
-          class="proposal-modal-form"
-          onclick="event.stopPropagation()">
+          class="proposal-modal-form">
         @csrf
 
         <div class="proposal-modal-header">

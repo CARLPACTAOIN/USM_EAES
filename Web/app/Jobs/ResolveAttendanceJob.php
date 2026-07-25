@@ -52,11 +52,12 @@ class ResolveAttendanceJob implements ShouldQueue
         $eventParticipationScopeId = $this->eventParticipationScopeId;
 
         // Fetch event parameters
-        $event = Event::with('eventDays')->findOrFail($eventId);
+        $event = Event::with(['eventDays', 'participationScopes'])->findOrFail($eventId);
         $eventDays = $event->eventDays;
+        $participationScopes = $event->participationScopes->keyBy('id');
 
         // Perform pessimistic lock on attendance records inside transaction
-        DB::transaction(function () use ($eventId, $studentIds, $event, $eventDays, $eventParticipationScopeId) {
+        DB::transaction(function () use ($eventId, $studentIds, $event, $eventDays, $eventParticipationScopeId, $participationScopes) {
             
             // Acquire locks on affected rows to avoid write collisions
             $existingRecords = AttendanceRecord::where('event_id', $eventId)
@@ -130,9 +131,10 @@ class ResolveAttendanceJob implements ShouldQueue
                         $existingGroup = $existingRecords->get($recordKey);
                         $existingRecord = $existingGroup ? $existingGroup->first() : null;
 
-                        // 1. Calculate Punctuality Statuses
-                        $societyStatus = 'absent';
-                        $competitionStatus = 'absent';
+                        // 1. Calculate official punctuality status from organizer policy, or scope fallback.
+                        $attendanceStatus = 'absent';
+                        $scope = $scopeId ? $participationScopes->get($scopeId) : null;
+                        $lateCutoffMinutes = $event->lateCutoffMinutesFor($scope);
 
                         if ($timeIn) {
                             // Compare time portion
@@ -140,22 +142,12 @@ class ResolveAttendanceJob implements ShouldQueue
                             $dayStartTime = Carbon::createFromTimeString($day->start_time);
                             $diffInMinutes = $dayStartTime->diffInMinutes($scanTime, false); // Negative if early
 
-                            // Society status calculations
                             if ($diffInMinutes <= 0) {
-                                $societyStatus = 'present_on_time';
-                            } elseif ($diffInMinutes <= $event->society_late_threshold_min) {
-                                $societyStatus = 'late';
+                                $attendanceStatus = 'present_on_time';
+                            } elseif ($diffInMinutes <= $lateCutoffMinutes) {
+                                $attendanceStatus = 'late';
                             } else {
-                                $societyStatus = 'late_cutoff';
-                            }
-
-                            // Competition status calculations
-                            if ($diffInMinutes <= 0) {
-                                $competitionStatus = 'present_on_time';
-                            } elseif ($diffInMinutes <= $event->general_competition_threshold_min) {
-                                $competitionStatus = 'late';
-                            } else {
-                                $competitionStatus = 'late_cutoff';
+                                $attendanceStatus = 'late_cutoff';
                             }
                         }
 
@@ -183,8 +175,8 @@ class ResolveAttendanceJob implements ShouldQueue
                             [
                                 'time_in' => $timeIn,
                                 'time_out' => $timeOut,
-                                'society_status' => $societyStatus,
-                                'competition_status' => $competitionStatus,
+                                'society_status' => $attendanceStatus,
+                                'competition_status' => $attendanceStatus,
                                 'left_early' => $leftEarly,
                                 'valid' => $existingRecord ? $existingRecord->valid : false, // Preserve evaluation gate validation state
                                 'force_validated' => $existingRecord ? $existingRecord->force_validated : false,

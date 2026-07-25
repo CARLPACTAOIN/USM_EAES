@@ -71,12 +71,12 @@ Using Spatie's conventions, roles are seeded with the following permissions:
 | Role Name (spatie\_roles) | Scoped Access boundaries | Core Spatie Permissions Assigned |
 | :---- | :---- | :---- |
 | **Super Admin (OSA)** | Universal (across all colleges and societies) | manage-organizations, approve-proposals, view-all-analytics, force-validate-any, manage-global-settings |
-| **USG Admin** | University-wide events only | create-proposals, assign-scanners-own, view-own-analytics |
-| **LSG Admin** | Constituent societies inside their College boundary | create-proposals, assign-scanners-own, view-college-analytics, view-constituent-data |
-| **Society Admin** | Strictly restricted to their own Society or recognized non-academic organization | create-proposals, assign-scanners-own, set-late-threshold, view-own-analytics, force-validate-own |
-| **Academic Unit Admin** | Academic unit/college unit event organizer scope | create-proposals, invite-participant-scopes, assign-scanners-own, view-college-analytics, view-constituent-data, force-validate-own |
-| **Office Event Admin** | Administrative office event organizer scope | create-proposals, invite-participant-scopes, assign-scanners-own, view-own-analytics, force-validate-own |
-| **HR Admin** | HR-domain faculty/staff attendance scope | create-hr-events, manage-faculty-roster, assign-hr-scanners, view-hr-analytics, export-hr-attendance |
+| **USG Admin** | University-wide events only | create-proposals, assign-scanners-own, set-attendance-policy, view-own-analytics |
+| **LSG Admin** | Constituent societies inside their College boundary | create-proposals, assign-scanners-own, set-attendance-policy, view-college-analytics, view-constituent-data |
+| **Society Admin** | Strictly restricted to their own Society or recognized non-academic organization | create-proposals, assign-scanners-own, set-attendance-policy, view-own-analytics, force-validate-own |
+| **Academic Unit Admin** | Academic unit/college unit event organizer scope | create-proposals, invite-participant-scopes, assign-scanners-own, set-attendance-policy, view-college-analytics, view-constituent-data, force-validate-own |
+| **Office Event Admin** | Administrative office event organizer scope | create-proposals, invite-participant-scopes, assign-scanners-own, set-attendance-policy, view-own-analytics, force-validate-own |
+| **HR Admin** | HR-domain faculty/staff attendance scope | create-hr-events, set-attendance-policy, manage-faculty-roster, assign-hr-scanners, view-hr-analytics, export-hr-attendance |
 | **Scanner** | Temporarily locked to a single assigned event session | scan-qr-codes, manual-entry-id |
 | **Faculty** | Own personal profiles | view-own-history, submit-evaluations |
 | **Student** | Own personal profile and personal logs | register-profile, view-own-history, submit-evaluations |
@@ -188,12 +188,12 @@ DB::transaction(function () use ($eventId, $studentIds) {
 ### **Epic 4: Attendance Processing Engine**
 
 * **Feature 4.1 \- Earliest-In / Latest-Out Resolution:** Merges multi-device raw logs down to a single canonical record containing the minimum entry timestamp and maximum exit timestamp per student.  
-* **Feature 4.2 \- Dual-Threshold Calculations:** Independently evaluates the **Society Threshold** (configurable per event) and the **General Competition Threshold** (set globally by OSA) to assign correct statuses.  
+* **Feature 4.2 \- Organizer-Owned Late Cutoff:** The event organizer may set an optional event-level **Late cutoff** in minutes after the scheduled start time from a separate Attendance Rules control. OSA does not review or approve this attendance policy value. When the organizer leaves the event cutoff unset, each approved participating organization may set a `late_cutoff_min` fallback for its own `event_participation_scope`; otherwise the organizer's event cutoff applies to all scopes. Attendance rules are editable only before the event starts. Attendance reports and analytics use one official attendance status based on this event-first, scope-fallback policy.
 * **Feature 4.3 \- Multi-Day Session Management:** Dynamically tracks attendance on a daily basis for multi-day events, generating daily canonical entries while presenting an integrated summary.
 
 ### **Epic 5: Student Evaluation Portal & Gate Enforcement**
 
-* **Feature 5.1 \- Digital Activity Evaluation Form:** Houses the official USM-OSA digital evaluation format containing Likert scale categories and open comment text fields.  
+* **Feature 5.1 \- Event-Specific Digital Activity Evaluation Forms:** Each event proposal carries its own organizer-drafted evaluation form using dynamic 1-5 Likert questions plus one open comment field. OSA reviews the exact form with the PPA metadata, and approval requires a locked event-level evaluation form snapshot that all attendees answer for that approved event.
 * **Feature 5.2 \- Evaluation Gate Mechanism:** Keeps a student's AttendanceRecord.valid status set to false until they submit their evaluation form. The submission window closes exactly 24 hours after the event (or final day) concludes.
 * **Feature 5.3 \- Event Lifecycle Automation:** Proposal approval remains separate from event runtime state. Approved events use `events.lifecycle_phase` with `scheduled`, `active`, `ended`, `evaluation_open`, `evaluation_closed`, `processing`, and `completed` phases computed from `event_days`, the 24-hour evaluation window, unresolved scans/pending links, sentiment processing, and scanner-session closure.
 
@@ -405,8 +405,9 @@ JSON Response Schema:
 * event\_domain (Enum/String: student\_affairs, hr, academic\_records, academic\_unit)  
 * start\_date (Date)  
 * end\_date (Date)  
-* society\_late\_threshold\_min (Integer, Default 15\)  
-* general\_competition\_threshold\_min (Integer, Default 30\)  
+* society\_late\_threshold\_min (Integer, Default 15, legacy fallback)
+* general\_competition\_threshold\_min (Integer, Default 30, legacy compatibility)
+* event\_late\_cutoff\_min (Integer, Nullable, organizer-owned event policy)
 * left\_early\_buffer\_min (Integer, Default 15\)  
 * evaluation\_open (Boolean, Default false)
 
@@ -430,6 +431,7 @@ JSON Response Schema:
 * organization\_id / college\_id / program\_id (UUID, Nullable)  
 * participant\_name\_snapshot  
 * ppa\_required, ppa\_status, ppa\_softcopy\_path, hardcopy\_submitted, org\_head\_signed, adviser\_signed  
+* late\_cutoff\_min (Integer, Nullable; participant-scope fallback only when the parent event cutoff is unset)
 * submitted\_by, submitted\_at, reviewed\_by, reviewed\_at, review\_remarks, approved\_at  
 * capture\_mode (self\_scanning, parent\_scanning, delegated\_scanning, central\_gate)  
 * delegated\_to\_organization\_id (UUID, Nullable)  
@@ -497,8 +499,8 @@ JSON Response Schema:
 * student\_id (UUID, Foreign Key)  
 * time\_in (DateTime TZ, Nullable)  
 * time\_out (DateTime TZ, Nullable)  
-* society\_status (Enum: "present\_on\_time", "late", "late\_cutoff", "absent")  
-* competition\_status (Enum: "present\_on\_time", "late", "late\_cutoff", "absent")  
+* society\_status (Enum: "present\_on\_time", "late", "late\_cutoff", "absent"; official event/scope cutoff status)
+* competition\_status (Enum: "present\_on\_time", "late", "late\_cutoff", "absent"; compatibility mirror of official status)
 * left\_early (Boolean, Default false)  
 * valid (Boolean, Default false) \-\> *Toggled to true via the Evaluation Gate*  
 * force\_validated (Boolean, Default false)  

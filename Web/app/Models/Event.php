@@ -33,8 +33,10 @@ class Event extends Model
         'adviser_signed',
         'society_late_threshold_min',
         'general_competition_threshold_min',
+        'event_late_cutoff_min',
         'left_early_buffer_min',
         'evaluation_open',
+        'evaluation_form_version_id',
     ];
 
     protected $casts = [
@@ -47,6 +49,10 @@ class Event extends Model
         'head_organization_signed' => 'boolean',
         'adviser_signed' => 'boolean',
         'evaluation_open' => 'boolean',
+        'event_late_cutoff_min' => 'integer',
+        'society_late_threshold_min' => 'integer',
+        'general_competition_threshold_min' => 'integer',
+        'left_early_buffer_min' => 'integer',
     ];
 
     public function organization()
@@ -89,6 +95,19 @@ class Event extends Model
         return $this->hasMany(EventParticipationScope::class);
     }
 
+    public function lateCutoffMinutesFor(?EventParticipationScope $scope = null): int
+    {
+        if ($this->event_late_cutoff_min !== null) {
+            return (int) $this->event_late_cutoff_min;
+        }
+
+        if ($scope?->late_cutoff_min !== null) {
+            return (int) $scope->late_cutoff_min;
+        }
+
+        return (int) ($this->society_late_threshold_min ?? 15);
+    }
+
     public function organizerParticipationScope()
     {
         return $this->hasOne(EventParticipationScope::class)
@@ -103,5 +122,15 @@ class Event extends Model
     public function evaluations()
     {
         return $this->hasMany(Evaluation::class);
+    }
+
+    public function evaluationFormVersion()
+    {
+        return $this->belongsTo(EvaluationFormVersion::class, 'evaluation_form_version_id');
+    }
+
+    public function evaluationFormVersions()
+    {
+        return $this->hasMany(EvaluationFormVersion::class);
     }
 }

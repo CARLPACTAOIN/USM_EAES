@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Event;
 use App\Models\Evaluation;
 use App\Models\AttendanceRecord;
+use App\Support\EventEvaluationForm;
 use App\Support\EvaluationWindow;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
@@ -37,7 +38,34 @@ class EvaluationController extends Controller
         }
 
         $eventId = $request->input('event_id');
-        $event = Event::findOrFail($eventId);
+        $event = Event::with('evaluationFormVersion')->findOrFail($eventId);
+        $questionMap = EventEvaluationForm::questionMapForEvent($event);
+        $scoreRules = [];
+
+        foreach ($questionMap as $key => $question) {
+            $scoreRules["section_scores.{$key}"] = [
+                $question['required'] ? 'required' : 'nullable',
+                'integer',
+                'min:' . $question['scale_min'],
+                'max:' . $question['scale_max'],
+            ];
+        }
+
+        $scoreValidator = Validator::make($request->all(), $scoreRules);
+        $scoreValidator->after(function ($validator) use ($request, $questionMap): void {
+            foreach (array_keys((array) $request->input('section_scores', [])) as $key) {
+                if (!array_key_exists($key, $questionMap)) {
+                    $validator->errors()->add("section_scores.{$key}", 'This evaluation question does not belong to this event.');
+                }
+            }
+        });
+
+        if ($scoreValidator->fails()) {
+            return response()->json([
+                'success' => false,
+                'errors' => $scoreValidator->errors()
+            ], 422);
+        }
 
         // 1. Check if the evaluation window has closed (24 hours after final event day concludes)
         $event->load('eventDays');
@@ -73,7 +101,8 @@ class EvaluationController extends Controller
         $evaluation = Evaluation::create([
             'event_id' => $eventId,
             'student_id' => $user->id,
-            'section_scores' => $request->input('section_scores'),
+            'evaluation_form_version_id' => $event->evaluation_form_version_id,
+            'section_scores' => collect($request->input('section_scores'))->only(array_keys($questionMap))->all(),
             'open_comment' => $request->input('open_comment'),
             'sentiment' => 'unprocessed',
             'submitted_at' => Carbon::now(),

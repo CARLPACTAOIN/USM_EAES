@@ -292,6 +292,19 @@
         background: linear-gradient(180deg, #ffffff 0%, #fbfdfb 100%);
     }
 
+    .analytics-card-header--filters {
+        align-items: flex-start;
+        flex-wrap: wrap;
+    }
+
+    .analytics-card-heading-stack {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 0.625rem 0.75rem;
+        min-width: 0;
+    }
+
     .analytics-card-title {
         margin: 0;
         color: #102018;
@@ -464,12 +477,115 @@
     .analytics-filter-grid {
         display: grid;
         grid-template-columns: repeat(1, minmax(0, 1fr));
+        gap: 0.875rem;
+    }
+
+    .analytics-filter-titlebar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
         gap: 0.75rem;
+    }
+
+    .analytics-filter-title {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        color: #526258;
+        font-size: 0.72rem;
+        font-weight: 800;
+        line-height: 1.2;
+        text-transform: uppercase;
+        letter-spacing: 0;
+    }
+
+    .analytics-filter-toolbar {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        min-width: 0;
+    }
+
+    .analytics-filter-field {
+        display: grid;
+        gap: 0.35rem;
+        min-width: 0;
+    }
+
+    .analytics-filter-label {
+        color: #526258;
+        font-size: 0.7rem;
+        font-weight: 800;
+        line-height: 1.2;
+        text-transform: uppercase;
+        letter-spacing: 0;
+    }
+
+    .analytics-filter-control {
+        display: block;
+        width: 100%;
+        min-height: 2.65rem;
+        padding: 0.5rem 0.75rem;
+        border: 1px solid #d7e2db;
+        border-radius: 8px;
+        color: #102018;
+        background-color: #ffffff;
+        font-size: 0.84rem;
+    }
+
+    select.analytics-filter-control {
+        padding-right: 2.5rem;
+    }
+
+    .analytics-filter-control:focus {
+        border-color: #0e5d36;
+        box-shadow: 0 0 0 3px rgba(14, 93, 54, 0.14);
+        outline: none;
+    }
+
+    .analytics-filter-control--rows {
+        min-width: 7.25rem;
+        min-height: 2.35rem;
+        font-size: 0.8rem;
+    }
+
+    .analytics-filter-search {
+        position: relative;
+    }
+
+    .analytics-filter-search-icon {
+        position: absolute;
+        top: 50%;
+        left: 0.85rem;
+        width: 1rem;
+        height: 1rem;
+        color: #6f8076;
+        transform: translateY(-50%);
+        pointer-events: none;
+    }
+
+    .analytics-filter-search-input {
+        padding-left: 2.4rem;
     }
 
     @media (min-width: 768px) {
         .analytics-filter-grid {
-            grid-template-columns: 1.4fr repeat(4, minmax(0, 1fr));
+            grid-template-columns: minmax(16rem, 1.5fr) repeat(2, minmax(10rem, 1fr));
+            align-items: end;
+        }
+
+        .analytics-filter-field--search {
+            grid-column: span 2;
+        }
+    }
+
+    @media (min-width: 1180px) {
+        .analytics-filter-grid {
+            grid-template-columns: minmax(18rem, 1.55fr) repeat(5, minmax(8.75rem, 1fr));
+        }
+
+        .analytics-filter-field--search {
+            grid-column: auto;
         }
     }
 
@@ -853,7 +969,7 @@
                             ['label' => 'Proposal / PPA State', 'value' => $label($eventData['status']).' / '.($eventData['proposal_state']['hardcopy_submitted'] ? 'Hardcopy submitted' : 'Hardcopy pending'), 'accent' => '#d97706'],
                             ['label' => 'Schedule', 'value' => $eventData['start_date'].' to '.$eventData['end_date'], 'accent' => '#2563eb'],
                             ['label' => 'Venue', 'value' => $eventData['location_details'] ?: $label($eventData['location_type']), 'accent' => '#4f46e5'],
-                            ['label' => 'Expected Audience Source', 'value' => $eventData['audience']['source_label'].' ('.$attendance['expected_audience'].' denominator)', 'accent' => '#0f766e'],
+                            ['label' => 'Who was expected', 'value' => $eventData['audience']['source_label'].' ('.$attendance['expected_audience'].' people)', 'accent' => '#0f766e'],
                         ] as $item)
                             <div class="analytics-context-row">
                                 <span class="analytics-context-icon" style="--accent: {{ $item['accent'] }};" aria-hidden="true">
@@ -931,7 +1047,7 @@
             <div class="analytics-card-header">
                 <div>
                     <h2 class="analytics-card-title">Daily Attendance Trend</h2>
-                    <p class="analytics-card-kicker">{{ $attendance['attended'] }} / {{ $attendance['expected_audience'] }} expected audience</p>
+                    <p class="analytics-card-kicker">{{ $attendance['attended'] }} of {{ $attendance['expected_audience'] }} expected</p>
                 </div>
             </div>
             <div class="analytics-card-body">
@@ -942,7 +1058,7 @@
         <div class="analytics-card">
             <div class="analytics-card-header">
                 <h2 class="analytics-card-title">Daily EILO Attendance</h2>
-                <span class="analytics-card-kicker">{{ $attendance['attended'] }} / {{ $attendance['expected_audience'] }} expected audience</span>
+                <span class="analytics-card-kicker">{{ $attendance['attended'] }} of {{ $attendance['expected_audience'] }} expected</span>
             </div>
             <div class="analytics-table-wrap">
                 <table class="analytics-table">
@@ -993,99 +1109,19 @@
             </div>
         </div>
 
-        <div class="analytics-card">
-            <div class="analytics-card-header">
-                <div>
-                    <h2 class="analytics-card-title">Participant Drilldown</h2>
-                    <p class="analytics-card-kicker">{{ $participantRows->total() }} row(s)</p>
-                </div>
-            </div>
-            <div class="analytics-card-body border-b border-(--color-border)">
-                <form method="GET" action="{{ route('dashboard.events.analytics', $event) }}" class="space-y-3">
-                    <input type="hidden" name="tab" value="attendance">
-                    <div class="analytics-filter-grid">
-                        <input type="search" name="q" value="{{ $filters['q'] }}" placeholder="Search name, ID, email" class="form-input">
-                        <select name="scope_id" class="form-select">
-                            <option value="">All scopes</option>
-                            @foreach($scopeRollups as $scope)
-                                <option value="{{ $scope['id'] }}" @selected($filters['scope_id'] === $scope['id'])>{{ $scope['name'] }}</option>
-                            @endforeach
-                        </select>
-                        <select name="day_id" class="form-select">
-                            <option value="">All days</option>
-                            @foreach($dailyAttendance as $day)
-                                <option value="{{ $day['id'] }}" @selected($filters['day_id'] === $day['id'])>{{ $day['label'] }} - {{ $day['date'] }}</option>
-                            @endforeach
-                        </select>
-                        <select name="status" class="form-select">
-                            @foreach(['all' => 'All statuses', 'attended' => 'Attended', 'present_on_time' => 'On time', 'late' => 'Late', 'late_cutoff' => 'Late cutoff', 'left_early' => 'Left early', 'absent' => 'Absent'] as $value => $text)
-                                <option value="{{ $value }}" @selected($filters['status'] === $value)>{{ $text }}</option>
-                            @endforeach
-                        </select>
-                        <select name="validation" class="form-select">
-                            @foreach(['all' => 'All validation', 'valid' => 'Valid', 'invalid' => 'Invalid or pending', 'evaluated' => 'Evaluated', 'not_evaluated' => 'Missing evaluation'] as $value => $text)
-                                <option value="{{ $value }}" @selected($filters['validation'] === $value)>{{ $text }}</option>
-                            @endforeach
-                        </select>
-                        <select name="year_level" class="form-select">
-                            <option value="">All year levels</option>
-                            @foreach(\App\Support\YearLevels::options() as $value => $text)
-                                <option value="{{ $value }}" @selected($filters['year_level'] === $value)>{{ $text }}</option>
-                            @endforeach
-                        </select>
-                    </div>
-                    <div class="flex flex-wrap gap-2">
-                        <button type="submit" class="btn btn-sm">Apply Filters</button>
-                        <a href="{{ route('dashboard.events.analytics', ['event' => $event, 'tab' => 'attendance']) }}" class="btn btn-sm btn-secondary">Reset</a>
-                    </div>
-                </form>
-            </div>
-            <div class="analytics-table-wrap">
-                <table class="analytics-table">
-                    <thead>
-                        <tr>
-                            <th>Student</th>
-                            <th>Scope</th>
-                            <th>Status</th>
-                            <th>Validation</th>
-                            <th>Evaluation</th>
-                            <th class="text-right">Time In / Out</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @forelse($participantRows as $row)
-                            @php
-                                $status = $row['day_status']['status'] ?? $row['status'];
-                            @endphp
-                            <tr>
-                                <td>
-                                    <p class="font-semibold text-(--color-text-primary)">{{ $row['name'] }}</p>
-                                    <p class="text-xs text-(--color-text-tertiary)">{{ $row['student_id_number'] ?: $row['email'] }} - {{ $row['program_code'] ?: 'N/A' }} - {{ $row['year_level_label'] }}</p>
-                                    @unless($row['expected'])
-                                        <span class="mt-1 analytics-chip analytics-tone-warn"><span class="analytics-chip-dot"></span>Outside expected denominator</span>
-                                    @endunless
-                                </td>
-                                <td class="text-xs text-(--color-text-secondary)">{{ $row['scope_names']->isNotEmpty() ? $row['scope_names']->join(', ') : 'No scope' }}</td>
-                                <td><span class="analytics-chip {{ $toneClass($status) }}"><span class="analytics-chip-dot"></span>{{ $label($status) }}</span></td>
-                                <td>
-                                    <span class="analytics-chip {{ $row['valid'] ? 'analytics-tone-good' : 'analytics-tone-warn' }}"><span class="analytics-chip-dot"></span>{{ $row['valid'] ? 'Valid' : 'Invalid or pending' }}</span>
-                                    @if($row['force_validated'])
-                                        <span class="block mt-1 text-[11px] text-(--color-text-tertiary)">Force validated</span>
-                                    @endif
-                                </td>
-                                <td><span class="analytics-chip {{ $row['evaluation_submitted'] ? 'analytics-tone-good' : 'analytics-tone-neutral' }}"><span class="analytics-chip-dot"></span>{{ $row['evaluation_submitted'] ? 'Submitted' : 'Missing' }}</span></td>
-                                <td class="text-right text-xs font-data text-(--color-text-secondary)">{{ $row['time_in'] ?: 'None' }} / {{ $row['time_out'] ?: 'None' }}</td>
-                            </tr>
-                        @empty
-                            <tr><td colspan="6" class="analytics-empty">No participants match the filters.</td></tr>
-                        @endforelse
-                    </tbody>
-                </table>
-            </div>
-            @if($participantRows->hasPages())
-                <div class="p-4 border-t border-(--color-border)">{{ $participantRows->links() }}</div>
-            @endif
-        </div>
+        @livewire('dashboard.event-analytics-participant-filters', [
+            'eventId' => $event->id,
+            'filters' => $filters,
+            'scopeOptions' => $scopeRollups->map(fn ($scope) => [
+                'id' => (string) $scope['id'],
+                'name' => (string) $scope['name'],
+            ])->values()->all(),
+            'dayOptions' => $dailyAttendance->map(fn ($day) => [
+                'id' => (string) $day['id'],
+                'label' => (string) $day['label'],
+                'date' => (string) $day['date'],
+            ])->values()->all(),
+        ], key('event-analytics-participant-filters-'.$event->id))
     </section>
 
     <section x-show="activeTab === 'evaluations'" x-cloak class="space-y-5">
@@ -1308,7 +1344,7 @@
         <div class="analytics-card-body">
             <div class="analytics-export-grid">
                 @foreach([
-                    ['title' => 'Attendance PDF', 'type' => 'PDF', 'accent' => '#dc2626', 'url' => route('dashboard.events.exports.attendance.pdf', $event), 'copy' => 'Validated attendance summary with denominator context.'],
+                    ['title' => 'Attendance PDF', 'type' => 'PDF', 'accent' => '#dc2626', 'url' => route('dashboard.events.exports.attendance.pdf', $event), 'copy' => 'Validated attendance summary, including who was expected to attend.'],
                     ['title' => 'Attendance XLSX', 'type' => 'XLSX', 'accent' => '#0e5d36', 'url' => route('dashboard.events.exports.attendance.excel', $event), 'copy' => 'Spreadsheet attendance records and EILO timestamps.'],
                     ['title' => 'Evaluations PDF', 'type' => 'PDF', 'accent' => '#d97706', 'url' => route('dashboard.events.exports.evaluations.pdf', $event), 'copy' => 'Evaluation response summary and submitted feedback evidence.'],
                     ['title' => 'Evaluations XLSX', 'type' => 'XLSX', 'accent' => '#2563eb', 'url' => route('dashboard.events.exports.evaluations.excel', $event), 'copy' => 'Raw evaluation scores, comments, and sentiment fields.'],

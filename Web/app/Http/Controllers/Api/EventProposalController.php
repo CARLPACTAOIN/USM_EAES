@@ -9,6 +9,7 @@ use App\Models\EventParticipationScope;
 use App\Models\Organization;
 use App\Services\AdminScopeService;
 use App\Services\ParticipationScopeService;
+use App\Support\EventEvaluationForm;
 use App\Support\EventTenantScope;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
@@ -88,12 +89,17 @@ class EventProposalController extends Controller
             'location_details' => 'nullable|string',
             'target_demographics' => 'nullable|array',
             'budget_allocations' => 'nullable|array',
+            'event_late_cutoff_min' => 'nullable|integer|min:0|max:240',
             'event_days' => 'required|array|min:1',
             'event_days.*.day_number' => 'required|integer|min:1',
             'event_days.*.date' => 'required|date',
             'event_days.*.start_time' => 'required|date_format:H:i',
             'event_days.*.end_time' => 'required|date_format:H:i|after:event_days.*.start_time',
             'parent_event_id' => 'nullable|uuid|exists:events,id',
+            'evaluation_questions' => 'required|array|min:1|max:10',
+            'evaluation_questions.*.id' => 'nullable|string|max:80',
+            'evaluation_questions.*.label' => 'required|string|max:180',
+            'evaluation_questions.*.description' => 'nullable|string|max:500',
         ]);
 
         if ($validator->fails()) {
@@ -140,6 +146,9 @@ class EventProposalController extends Controller
                 'location_details' => $request->location_details,
                 'target_demographics' => $request->target_demographics,
                 'budget_allocations' => $request->budget_allocations,
+                'event_late_cutoff_min' => $request->filled('event_late_cutoff_min')
+                    ? (int) $request->input('event_late_cutoff_min')
+                    : null,
             ]);
 
             // Create Event Days
@@ -153,6 +162,13 @@ class EventProposalController extends Controller
                 ]);
             }
 
+            EventEvaluationForm::createForEvent(
+                $event,
+                $user,
+                $request->input('evaluation_questions', []),
+                'Evaluation - ' . $event->title
+            );
+
             $this->participationScopes->ensureOrganizerScope($event->fresh(['organization']));
 
             DB::commit();
@@ -162,7 +178,7 @@ class EventProposalController extends Controller
                 'message' => $isHrEvent
                     ? 'HR attendance event created and approved for scanner access.'
                     : 'Event PPA proposal created as draft.',
-                'event' => $event->load('eventDays')
+                'event' => $event->load('eventDays', 'evaluationFormVersion')
             ], 201);
         } catch (\Exception $e) {
             DB::rollBack();
@@ -248,6 +264,13 @@ class EventProposalController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Proposals must be submitted or under review to be approved.'
+            ], 422);
+        }
+
+        if (!EventEvaluationForm::hasLockedForm($event)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'A locked evaluation form with at least one question is required before approval.'
             ], 422);
         }
 
@@ -363,6 +386,7 @@ class EventProposalController extends Controller
                 'hardcopy_submitted' => (bool) $linkedEvent->hardcopy_submitted,
                 'org_head_signed' => (bool) $linkedEvent->head_organization_signed,
                 'adviser_signed' => (bool) $linkedEvent->adviser_signed,
+                'late_cutoff_min' => $linkedEvent->event_late_cutoff_min,
                 'approved_at' => in_array($linkedEvent->status, ['approved', 'completed'], true) ? now() : null,
                 'capture_mode' => 'self_scanning',
                 'analytics_rollup_enabled' => true,

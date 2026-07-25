@@ -50,6 +50,10 @@ class ScannerSessionSnapshot {
     this.eventDays = const [],
     this.scanWindowStart,
     this.scanWindowEnd,
+    this.timeInWindowStart,
+    this.timeInWindowEnd,
+    this.timeOutWindowStart,
+    this.timeOutWindowEnd,
     this.syncGraceEndsAt,
     required this.savedAt,
   });
@@ -66,6 +70,10 @@ class ScannerSessionSnapshot {
   final List<EventScheduleDay> eventDays;
   final DateTime? scanWindowStart;
   final DateTime? scanWindowEnd;
+  final DateTime? timeInWindowStart;
+  final DateTime? timeInWindowEnd;
+  final DateTime? timeOutWindowStart;
+  final DateTime? timeOutWindowEnd;
   final DateTime? syncGraceEndsAt;
   final DateTime savedAt;
 
@@ -91,6 +99,10 @@ class ScannerSessionSnapshot {
       eventDays: eventScheduleDaysFromJson(json['event_days']),
       scanWindowStart: _dateTimeOrNull(json['scan_window_start']),
       scanWindowEnd: _dateTimeOrNull(json['scan_window_end']),
+      timeInWindowStart: _dateTimeOrNull(json['time_in_window_start']),
+      timeInWindowEnd: _dateTimeOrNull(json['time_in_window_end']),
+      timeOutWindowStart: _dateTimeOrNull(json['time_out_window_start']),
+      timeOutWindowEnd: _dateTimeOrNull(json['time_out_window_end']),
       syncGraceEndsAt: _dateTimeOrNull(json['sync_grace_ends_at']),
       savedAt: _dateTimeOrNull(json['saved_at']) ?? DateTime.now().toUtc(),
     );
@@ -121,6 +133,10 @@ class ScannerSessionSnapshot {
       'event_days': eventDays.map((day) => day.toJson()).toList(),
       'scan_window_start': scanWindowStart?.toUtc().toIso8601String(),
       'scan_window_end': scanWindowEnd?.toUtc().toIso8601String(),
+      'time_in_window_start': timeInWindowStart?.toUtc().toIso8601String(),
+      'time_in_window_end': timeInWindowEnd?.toUtc().toIso8601String(),
+      'time_out_window_start': timeOutWindowStart?.toUtc().toIso8601String(),
+      'time_out_window_end': timeOutWindowEnd?.toUtc().toIso8601String(),
       'sync_grace_ends_at': syncGraceEndsAt?.toUtc().toIso8601String(),
       'saved_at': savedAt.toUtc().toIso8601String(),
     };

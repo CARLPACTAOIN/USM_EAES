@@ -9,7 +9,7 @@ Follow `AGENTS.md` for all work (mirrored at repo root and `Web/AGENTS.md`).
 
 ## Required references
 
-1. **`AGENTS.md`** / **`Web/AGENTS.md`** — workflow, conflict handling, audit rules, UI skill paths, technical defaults (keep mirrors identical).
+1. **`AGENTS.md`** / **`Web/AGENTS.md`** — workflow, conflict handling, audit rules, Codex skill-suite paths under `.codex/skills/`, technical defaults (keep mirrors identical).
 2. **`PRD_V1.md`** / **`Web/PRD_V1.md`** — authoritative scope and requirements when it conflicts with existing code.
 3. **`PRD_PROGRESS_AUDIT.md`** / **`Web/PRD_PROGRESS_AUDIT.md`** — implementation status; update when progress materially changes.
 

@@ -15,6 +15,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
+use Livewire\Livewire;
 use Tests\TestCase;
 
 class AdminOnboardingTest extends TestCase
@@ -377,6 +378,69 @@ class AdminOnboardingTest extends TestCase
         $this->assertStringContainsString('Office Event Admin', $assignmentModal);
         $this->assertStringNotContainsString('Super Admin (OSA)', $assignmentModal);
         $this->assertStringNotContainsString('HR Admin', $assignmentModal);
+    }
+
+    public function test_livewire_admin_access_workspace_filters_organizations_without_page_redirect(): void
+    {
+        [$college] = $this->createCollegeAndProgram();
+        Organization::create(['college_id' => $college->id, 'name' => 'PSITS', 'acronym' => 'PSITS', 'type' => 'society', 'status' => 'active']);
+        Organization::create(['college_id' => null, 'name' => 'University Student Government', 'acronym' => 'USG', 'type' => 'usg', 'status' => 'active']);
+
+        Livewire::actingAs($this->createOsa())
+            ->test(\App\Livewire\Dashboard\AdminAccessWorkspace::class, [
+                'initialTab' => 'organizations',
+                'collegePrograms' => [],
+            ])
+            ->assertSee('PSITS')
+            ->assertSee('University Student Government')
+            ->set('orgType', 'usg')
+            ->assertSee('University Student Government')
+            ->assertDontSee('PSITS');
+    }
+
+    public function test_livewire_admin_access_workspace_revokes_assignment_without_page_redirect(): void
+    {
+        [$college] = $this->createCollegeAndProgram();
+        $organization = Organization::create([
+            'college_id' => $college->id,
+            'name' => 'PSITS',
+            'acronym' => 'PSITS',
+            'type' => 'society',
+            'status' => 'active',
+        ]);
+        $student = $this->createStudent('livewire.admin@usm.edu.ph');
+        $osa = $this->createOsa();
+
+        $assignment = app(AdminAssignmentService::class)->createAssignment(
+            user: $student,
+            roleName: 'Society Admin',
+            organization: $organization,
+            college: $college,
+            academicYear: '2026-2027',
+            termStart: '2026-07-01',
+            termEnd: '2027-06-30',
+            positionTitle: 'President',
+            approvedBy: $osa,
+            isPrimaryAdmin: true
+        );
+
+        Livewire::actingAs($osa)
+            ->test(\App\Livewire\Dashboard\AdminAccessWorkspace::class, [
+                'initialTab' => 'assignments',
+                'collegePrograms' => [],
+            ])
+            ->assertSee('livewire.admin@usm.edu.ph')
+            ->set('revokeReasons.' . $assignment->id, 'Rotation ended.')
+            ->call('revokeAssignment', $assignment->id)
+            ->assertSee('Admin assignment revoked.')
+            ->assertDispatched('close-admin-revoke-modal');
+
+        $this->assertSame(AdminAssignment::STATUS_REVOKED, $assignment->fresh()->status);
+        $this->assertDatabaseHas('audit_logs', [
+            'target_id' => $assignment->id,
+            'admin_id' => $osa->id,
+            'action' => 'revoke-admin-assignment',
+        ]);
     }
 
     public function test_admin_assignment_lifecycle_writes_governance_audit_logs(): void
