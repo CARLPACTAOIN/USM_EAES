@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Livewire\Dashboard\AdminAccessWorkspace;
 use App\Models\AdminAssignment;
 use App\Models\AuditLog;
 use App\Models\College;
@@ -64,7 +65,7 @@ class AdminOnboardingTest extends TestCase
                 'program_ids' => [$program->id],
                 'status' => 'active',
             ])
-            ->assertRedirect(route('dashboard.admin-users') . '?tab=organizations')
+            ->assertRedirect(route('dashboard.admin-users').'?tab=organizations')
             ->assertSessionHasNoErrors();
 
         $organization = Organization::where('acronym', 'PSITS')->firstOrFail();
@@ -116,7 +117,7 @@ class AdminOnboardingTest extends TestCase
                 'term_end' => '2027-06-30',
                 'position_title' => 'President',
             ])
-            ->assertRedirect(route('dashboard.admin-users') . '?tab=assignments')
+            ->assertRedirect(route('dashboard.admin-users').'?tab=assignments')
             ->assertSessionHasNoErrors();
 
         $student->refresh();
@@ -130,6 +131,70 @@ class AdminOnboardingTest extends TestCase
             'role_name' => 'Society Admin',
             'organization_id' => $adminOrganization->id,
             'status' => AdminAssignment::STATUS_ACTIVE,
+        ]);
+    }
+
+    public function test_osa_can_assign_admin_from_typed_person_search_email(): void
+    {
+        [$college] = $this->createCollegeAndProgram();
+        $organization = Organization::create([
+            'college_id' => $college->id,
+            'name' => 'Typed Search Society',
+            'acronym' => 'TSS',
+            'type' => 'society',
+            'status' => 'active',
+        ]);
+
+        $this->actingAs($this->createOsa())
+            ->post(route('dashboard.admin-users.create'), [
+                'person_query' => 'typed.search@usm.edu.ph',
+                'role' => 'Society Admin',
+                'organization_id' => $organization->id,
+                'college_id' => $college->id,
+                'academic_year' => '2026-2027',
+            ])
+            ->assertRedirect(route('dashboard.admin-users').'?tab=assignments')
+            ->assertSessionHasNoErrors();
+
+        $user = User::where('email', 'typed.search@usm.edu.ph')->firstOrFail();
+
+        $this->assertTrue($user->hasRole('Society Admin'));
+        $this->assertDatabaseHas('admin_assignments', [
+            'user_id' => $user->id,
+            'role_name' => 'Society Admin',
+            'organization_id' => $organization->id,
+            'college_id' => $college->id,
+            'status' => AdminAssignment::STATUS_ACTIVE,
+        ]);
+    }
+
+    public function test_assign_admin_returns_modal_error_for_unknown_typed_student_id(): void
+    {
+        [$college] = $this->createCollegeAndProgram();
+        $organization = Organization::create([
+            'college_id' => $college->id,
+            'name' => 'Unknown Student Society',
+            'acronym' => 'USS',
+            'type' => 'society',
+            'status' => 'active',
+        ]);
+
+        $this->actingAs($this->createOsa())
+            ->from(route('dashboard.admin-users'))
+            ->post(route('dashboard.admin-users.create'), [
+                'person_query' => '2026-4040',
+                'role' => 'Society Admin',
+                'organization_id' => $organization->id,
+                'college_id' => $college->id,
+                'academic_year' => '2026-2027',
+            ])
+            ->assertRedirect(route('dashboard.admin-users'))
+            ->assertSessionHasErrors('person_query');
+
+        $this->assertDatabaseMissing('admin_assignments', [
+            'role_name' => 'Society Admin',
+            'organization_id' => $organization->id,
+            'academic_year' => '2026-2027',
         ]);
     }
 
@@ -387,7 +452,7 @@ class AdminOnboardingTest extends TestCase
         Organization::create(['college_id' => null, 'name' => 'University Student Government', 'acronym' => 'USG', 'type' => 'usg', 'status' => 'active']);
 
         Livewire::actingAs($this->createOsa())
-            ->test(\App\Livewire\Dashboard\AdminAccessWorkspace::class, [
+            ->test(AdminAccessWorkspace::class, [
                 'initialTab' => 'organizations',
                 'collegePrograms' => [],
             ])
@@ -425,12 +490,12 @@ class AdminOnboardingTest extends TestCase
         );
 
         Livewire::actingAs($osa)
-            ->test(\App\Livewire\Dashboard\AdminAccessWorkspace::class, [
+            ->test(AdminAccessWorkspace::class, [
                 'initialTab' => 'assignments',
                 'collegePrograms' => [],
             ])
             ->assertSee('livewire.admin@usm.edu.ph')
-            ->set('revokeReasons.' . $assignment->id, 'Rotation ended.')
+            ->set('revokeReasons.'.$assignment->id, 'Rotation ended.')
             ->call('revokeAssignment', $assignment->id)
             ->assertSee('Admin assignment revoked.')
             ->assertDispatched('close-admin-revoke-modal');
@@ -543,7 +608,7 @@ class AdminOnboardingTest extends TestCase
                 'program_ids' => [$program->id],
                 'status' => 'inactive',
             ])
-            ->assertRedirect(route('dashboard.admin-users') . '?tab=organizations')
+            ->assertRedirect(route('dashboard.admin-users').'?tab=organizations')
             ->assertSessionHasNoErrors();
 
         $updateLog = AuditLog::where('action', 'update-organization')
@@ -581,7 +646,7 @@ class AdminOnboardingTest extends TestCase
                 'status' => 'active',
             ]);
             $organization->programs()->attach($program->id);
-            $admin = $this->createStudent(strtolower($acronym) . '.admin@usm.edu.ph');
+            $admin = $this->createStudent(strtolower($acronym).'.admin@usm.edu.ph');
 
             $service->createAssignment(
                 user: $admin,
@@ -722,7 +787,7 @@ class AdminOnboardingTest extends TestCase
         $this->actingAs($osa)
             ->get(route('dashboard.admin-users'))
             ->assertOk()
-            ->assertSee('/storage/' . $logoPath, false)
+            ->assertSee('/storage/'.$logoPath, false)
             ->assertSee('PSITS organization logo');
 
         $scopedAdmin = $this->createStudent('psits.analytics.admin@usm.edu.ph');
@@ -742,7 +807,7 @@ class AdminOnboardingTest extends TestCase
         $this->actingAs($scopedAdmin)
             ->get(route('dashboard.analytics'))
             ->assertOk()
-            ->assertSee('/storage/' . $logoPath, false)
+            ->assertSee('/storage/'.$logoPath, false)
             ->assertSee('PSITS organization logo');
     }
 
@@ -1033,7 +1098,7 @@ class AdminOnboardingTest extends TestCase
 
     private function createScopedAdmin(string $role, Organization $organization, ?College $college = null): User
     {
-        $admin = $this->createStudent(strtolower(str_replace([' ', '(', ')'], '.', $role)) . '@usm.edu.ph');
+        $admin = $this->createStudent(strtolower(str_replace([' ', '(', ')'], '.', $role)).'@usm.edu.ph');
 
         app(AdminAssignmentService::class)->createAssignment(
             user: $admin,

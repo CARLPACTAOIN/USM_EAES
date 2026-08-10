@@ -13,7 +13,7 @@
         <span class="event-workflow-feedback event-workflow-feedback--error">{{ $errorNotice }}</span>
     @endif
 
-    @if(!$isParticipatingWorkspace && $user?->can('create-proposals') && $event->status === 'draft')
+    @if(!$isParticipatingWorkspace && $user?->can('create-proposals') && in_array($event->status, ['draft', 'revision_requested'], true))
         @if(!$event->hardcopy_submitted)
             <button type="button"
                     class="btn btn-sm btn-secondary"
@@ -44,7 +44,7 @@
                     title="Start Review"
                     wire:click="startReview"
                     wire:loading.attr="disabled"
-                    wire:target="startReview,approveProposal,rejectProposal">
+                    wire:target="startReview,approveProposal,requestRevision,rejectProposal">
                 <span wire:loading.remove wire:target="startReview">Review</span>
                 <span wire:loading wire:target="startReview">Reviewing...</span>
             </button>
@@ -57,23 +57,43 @@
                     title="Approve"
                     wire:click="approveProposal"
                     wire:loading.attr="disabled"
-                    wire:target="startReview,approveProposal,rejectProposal">
+                    wire:target="startReview,approveProposal,requestRevision,rejectProposal">
                 <span wire:loading.remove wire:target="approveProposal">Approve</span>
                 <span wire:loading wire:target="approveProposal">Approving...</span>
             </button>
+            <form wire:submit="requestRevision" class="event-revision-inline">
+                <label for="event-revision-note-{{ $event->id }}" class="sr-only">Revision note</label>
+                <input type="text"
+                       id="event-revision-note-{{ $event->id }}"
+                       class="form-input text-xs @error('reviewRemarks') form-input-error @enderror"
+                       placeholder="Revision note"
+                       maxlength="1000"
+                       wire:model="reviewRemarks">
+                @error('reviewRemarks')
+                    <span class="form-error" role="alert">{{ $message }}</span>
+                @enderror
+                <button type="submit"
+                        class="btn btn-sm btn-secondary"
+                        title="Request Revision"
+                        wire:loading.attr="disabled"
+                        wire:target="requestRevision">
+                    <span wire:loading.remove wire:target="requestRevision">Request Revision</span>
+                    <span wire:loading wire:target="requestRevision">Returning...</span>
+                </button>
+            </form>
             <button type="button"
                     class="btn btn-sm btn-destructive"
                     title="Reject"
                     wire:click="rejectProposal"
                     wire:loading.attr="disabled"
-                    wire:target="startReview,approveProposal,rejectProposal">
+                    wire:target="startReview,approveProposal,requestRevision,rejectProposal">
                 <span wire:loading.remove wire:target="rejectProposal">Reject</span>
                 <span wire:loading wire:target="rejectProposal">Rejecting...</span>
             </button>
         @endif
     @endif
 
-    @if($isParticipatingWorkspace && $primaryParticipantScope && !$primaryParticipantScope->invitation_acknowledged_at)
+    @if(!$user?->hasRole('Super Admin (OSA)') && $isParticipatingWorkspace && $primaryParticipantScope && !$primaryParticipantScope->invitation_acknowledged_at)
         <button type="button"
                 class="btn btn-sm btn-primary"
                 title="Acknowledge participant invitation"

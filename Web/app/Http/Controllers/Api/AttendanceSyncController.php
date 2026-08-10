@@ -7,36 +7,36 @@ use App\Models\AuditLog;
 use App\Models\EmployeeRosterEntry;
 use App\Models\Event;
 use App\Models\EventParticipationScope;
-use App\Models\User;
 use App\Models\RawScan;
-use App\Models\PendingStudentLink;
-use App\Jobs\ResolveAttendanceJob;
+use App\Models\User;
+use App\Services\AttendanceSyncPersistenceService;
 use App\Services\ParticipationScopeService;
+use App\Services\QueueOutboxService;
 use App\Services\ScannerSessionService;
 use Carbon\Carbon;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Validator;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
 class AttendanceSyncController extends Controller
 {
     public function __construct(
         private readonly ScannerSessionService $scannerSessions,
-        private readonly ParticipationScopeService $participationScopes
-    ) {
-    }
+        private readonly ParticipationScopeService $participationScopes,
+        private readonly AttendanceSyncPersistenceService $syncPersistence,
+        private readonly QueueOutboxService $queueOutbox,
+    ) {}
 
     /**
      * Expose compressed student roster hydration payload for mobile clients.
-     *
-     * @param  string  $eventId
-     * @return \Illuminate\Http\JsonResponse
      */
-    public function hydrate($eventId)
+    public function hydrate(string $eventId): JsonResponse
     {
         $event = Event::findOrFail($eventId);
         $access = $this->scannerSessions->validateRequest(request(), $event);
-        if (!$access['allowed']) {
+        if (! $access['allowed']) {
             return $this->scannerDeniedResponse($access, $event);
         }
 
@@ -51,21 +51,18 @@ class AttendanceSyncController extends Controller
             'event_participation_scope_id' => $scope->id,
             'participation_scope' => $this->participationScopes->scopePayload($scope),
             'scanner_session' => $this->scannerSessions->scannerState($event, $access['session']),
-            'roster' => $students
+            'roster' => $students,
         ]);
     }
 
     /**
      * Synchronize a batch of raw scans from the mobile device.
-     *
-     * @param  \Illuminate\Http\Request  $request
-     * @return \Illuminate\Http\JsonResponse
      */
-    public function sync(Request $request)
+    public function sync(Request $request): JsonResponse
     {
         $validator = Validator::make($request->all(), [
             'event_id' => 'required|uuid|exists:events,id',
-            'scans' => 'required|array|max:' . config('services.eaes.sync_batch_size', 200),
+            'scans' => 'required|array|max:'.config('services.eaes.sync_batch_size', 200),
             'scans.*.dedup_key' => 'required|string',
             'scans.*.scan_type' => 'required|in:time_in,time_out',
             'scans.*.scanned_at' => 'required|date',
@@ -77,14 +74,14 @@ class AttendanceSyncController extends Controller
         if ($validator->fails()) {
             return response()->json([
                 'success' => false,
-                'errors' => $validator->errors()
+                'errors' => $validator->errors(),
             ], 422);
         }
 
         $eventId = $request->input('event_id');
         $event = Event::findOrFail($eventId);
         $access = $this->scannerSessions->validateRequest($request, $event, forSync: true);
-        if (!$access['allowed']) {
+        if (! $access['allowed']) {
             return $this->scannerDeniedResponse($access, $event);
         }
 
@@ -101,8 +98,6 @@ class AttendanceSyncController extends Controller
 
         $newScans = [];
         $rejectedScans = [];
-        $unresolvedQrs = [];
-        $studentIds = [];
 
         // Pre-fetch students by QR code to resolve student_id immediately on sync
         $qrValues = collect($scansData)
@@ -151,6 +146,7 @@ class AttendanceSyncController extends Controller
                     'reason' => $timestampGuard['reason'],
                     'message' => $timestampGuard['message'],
                 ];
+
                 continue;
             }
 
@@ -159,7 +155,7 @@ class AttendanceSyncController extends Controller
             $studentId = $student ? $student->id : null;
 
             if ($studentId) {
-                if (!$this->participationScopes->userBelongsToScope($student, $scope)) {
+                if (! $this->participationScopes->userBelongsToScope($student, $scope)) {
                     $rejectedScans[] = [
                         'dedup_key' => $scan['dedup_key'],
                         'reason' => 'out_of_scope',
@@ -179,17 +175,15 @@ class AttendanceSyncController extends Controller
                             'dedup_key' => $scan['dedup_key'],
                         ],
                     ]);
+
                     continue;
                 }
 
-                $studentIds[] = $studentId;
-            } else {
-                $unresolvedQrs[] = $scan['qr_code_value'];
             }
 
             // Map event day dynamic lookup later in background resolution if day_id is not passed
             $newScans[] = [
-                'id' => (string) \Illuminate\Support\Str::uuid(),
+                'id' => (string) Str::uuid(),
                 'event_id' => $eventId,
                 'event_participation_scope_id' => $scope->id,
                 'event_day_id' => $scan['event_day_id'] ?? null,
@@ -221,48 +215,39 @@ class AttendanceSyncController extends Controller
             ]);
         }
 
-        // Perform high-speed bulk insert and queue unresolved QR records for manual review.
-        DB::transaction(function () use ($newScans) {
-            RawScan::insert($newScans);
-        });
+        $persistenceResult = $this->syncPersistence->persistWithResolutionOutbox($event, $scope, $newScans);
+        $persistedScans = $persistenceResult['scans'];
 
-        foreach ($newScans as $scan) {
-            if ($scan['student_id']) {
-                continue;
-            }
-
-            PendingStudentLink::firstOrCreate(
-                [
-                    'event_id' => $eventId,
-                    'event_participation_scope_id' => $scope->id,
-                    'qr_code_value' => $scan['qr_code_value'],
-                    'status' => 'pending',
-                ],
-                [
-                    'organization_id' => $scope->organization_id ?: $event->organization_id,
-                    'raw_scan_id' => $scan['id'],
-                ]
-            );
+        if ($persistedScans->isEmpty()) {
+            return response()->json([
+                'success' => true,
+                'message' => $rejectedScans === []
+                    ? 'All scans in batch were duplicates, skipped.'
+                    : 'No scans were ingested because every new scan was outside the allowed event window.',
+                'rejected_count' => count($rejectedScans),
+                'rejected_scans' => $rejectedScans,
+            ]);
         }
 
-        // Dispatch background processing job
-        // Pass both resolved studentIds and unresolved Qrs so the worker knows who to process
-        if (!empty($studentIds)) {
-            ResolveAttendanceJob::dispatch($eventId, array_unique($studentIds), $scope->id);
+        if ($persistenceResult['outbox_entry_id']) {
+            $this->queueOutbox->dispatch($persistenceResult['outbox_entry_id']);
         }
 
         return response()->json([
             'success' => true,
             'message' => 'Scans ingested successfully. Processing started in background.',
-            'ingested_count' => count($newScans),
-            'duplicate_count' => count($scansData) - count($newScans) - count($rejectedScans),
+            'ingested_count' => $persistedScans->count(),
+            'duplicate_count' => count($scansData) - $persistedScans->count() - count($rejectedScans),
             'rejected_count' => count($rejectedScans),
             'rejected_scans' => $rejectedScans,
-            'unresolved_count' => count($unresolvedQrs),
+            'unresolved_count' => $persistedScans->whereNull('student_id')->count(),
         ]);
     }
 
-    private function scannerDeniedResponse(array $access, Event $event)
+    /**
+     * @param  array{message: string, event_phase?: string, reason: string, status: int}  $access
+     */
+    private function scannerDeniedResponse(array $access, Event $event): JsonResponse
     {
         return response()->json([
             'success' => false,
@@ -273,7 +258,10 @@ class AttendanceSyncController extends Controller
         ], $access['status']);
     }
 
-    private function hydrationRoster(EventParticipationScope $scope)
+    /**
+     * @return Collection<int, array<string, mixed>>
+     */
+    private function hydrationRoster(EventParticipationScope $scope): Collection
     {
         $scope->loadMissing('event');
 

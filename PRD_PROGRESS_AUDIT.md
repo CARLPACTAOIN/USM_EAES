@@ -2,7 +2,7 @@
 
 **Branch / snapshot:** `main` (local)  
 **PRD source:** `PRD_V1.md` (v2.0 content, filename `PRD_V1.md`)  
-**Last reviewed:** 2026-07-16
+**Last reviewed:** 2026-08-08
 **Backend path:** `Web/` (Laravel 12 backend with UUID schemas)
 
 > This file tracks implementation status only. It does not override `PRD_V1.md`.
@@ -26,12 +26,12 @@
 | Item | Status | Evidence / Notes |
 |------|--------|------------------|
 | Laravel 12 app in `Web/` | Done | Skeleton integrated with UUID migrations, configs, and route mappings |
-| Backend Composer dependencies (`vendor`) | Done | Spatie permission, Laravel Socialite, Sanctum, DomPDF, and Laravel Excel installed |
+| Backend Composer dependencies (`vendor`) | Done | Spatie permission, Laravel Socialite, Sanctum, DomPDF, and Laravel Excel installed; `composer audit` clean after 2026-08-08 security patch update |
 | Web Node dependencies (`node_modules`) | Done | Dependencies installed and locked (alpinejs, html5-qrcode), Tailwind v4 configured, Vite production assets built on 2026-06-26 using local Node 20.19.4 |
 | `APP_KEY` / env setup | Done | Key generated, environment configured in `Web/.env` |
 | PostgreSQL 16 (PRD §7) | Done | Laragon PHP 8.4.5 now runs with `pdo_pgsql`; `artisan migrate:fresh` and `artisan test` pass against local PostgreSQL 16 |
 | API layer + Sanctum (Epic 1) | Done | Sanctum API setup, token login, logout, session validate routes, and UUID-compatible token ownership created |
-| Redis queues (PRD §3.3) | Partial | `predis/predis` installed and Redis queue/cache templates use `REDIS_CLIENT=predis`; local runtime still uses database fallback until a Redis-compatible server is installed and `.env` is switched |
+| Redis queues (PRD §3.3) | Partial | Redis 7 local Compose service, production Redis queue/cache templates, priority Supervisor workers, queue health checks, and a durable scanner-resolution outbox are implemented; local runtime intentionally remains on the database fallback until Redis is started and `.env` is switched |
 | Project `AGENTS.md` + Cursor rules | Done | Root `AGENTS.md`, `.cursor/rules/` |
 
 ---
@@ -66,8 +66,8 @@
 |------|--------|------------------|
 | Roster hydration API (§3.1) | Done | Hydrate route `/events/{id}/hydrate` returns compressed roster scoped to the activated `event_participation_scope_id`, including student, multi-membership, non-academic, and HR roster paths |
 | Unresolved scan + server resolution (§3.2) | Done | `raw_scans` supports nullable `student_id`; pending QR links table and resolve/flag views with audit logging implemented |
-| Bulk sync + idempotency keys (§3.3) | Done | `/attendance/sync` API ingests logs, checks `dedup_key` duplicates, saves accepted in-window scans, accepts configured early Time-In and post-event Time-Out windows, rejects out-of-scope participants, and returns per-scan rejections for timestamps outside the scan-type window |
-| `ResolveAttendanceJob` + queue throttling | Done | Queueable job executes lockForUpdate transaction EILO mappings scoped by `event_participation_scope_id` |
+| Bulk sync + idempotency keys (§3.3) | Done | `/attendance/sync` preserves scan-window and scope guards while `AttendanceSyncPersistenceService` atomically inserts with `insertOrIgnore`, re-queries request UUID winners, creates unresolved pending links only for winners, and writes a durable resolution outbox record in the same transaction; PostgreSQL/SQLite partial indexes remain final duplicate authority |
+| `ResolveAttendanceJob` + queue throttling | Done | Queueable EILO job uses scoped `WithoutOverlapping`, bounded retries/backoff/timeout, participation-scope row locking (event-row fallback for legacy jobs), attendance identity indexes as final duplicate defense, PII-safe failure logging, and the dedicated `attendance` queue; the scheduled outbox dispatcher retries Redis handoff after recovery |
 | Flutter offline SQLite scanner | Done | `sqflite`, `mobile_scanner`, `connectivity_plus`, and API client dependencies configured; local DB/sync classes, persisted scanner-session snapshots for offline app restart, global session feedback, duplicate-scan cooldown, student-ID manual entry, scope-stamped SQLite v3 offline scans, sync status panel with failed/retry states, auto-wipe after completed events, friendly error mapping, and expanded controller/widget tests verified |
 
 ---
@@ -86,9 +86,9 @@
 
 | Feature | Status | Evidence / Notes |
 |---------|--------|------------------|
-| 2.1 Digital PPA submission | Done | Event proposal creation saves location details, budgets, days, official proposal softcopy, resolution number, and hardcopy/signature status before submission/approval |
-| 2.2 OSA review pipeline | Done | OSA review, approval, rejection status routes completed; OSA lists now exclude organizer-private drafts and expose proposal detail metadata for review |
-| 2.3 Participant PPAs and distributed attendance ownership | Done | `event_participation_scopes` model/migration, organizer attendance scopes, Organized/Participating Events dashboard tabs, in-app invitation notifications/acknowledgements/reminders, participant PPA submit/review/approve/reject routes, scope-aware scanner assignment/revocation, runtime hydrate/sync gating, and roll-up analytics implemented |
+| 2.1 Digital PPA submission | Done | Livewire, web fallback, and API proposal writes share `EventProposalDraftService` for location details, budgets, ordered event days, evaluation snapshots, official proposal softcopy, resolution number, hardcopy/signature status, and organizer-scope synchronization before submission/approval |
+| 2.2 OSA review pipeline | Done | OSA review, approval, request-revision, and rejection status routes completed; returned proposals carry OSA revision remarks, remain scanner-locked, and can be edited/resubmitted by the organizer |
+| 2.3 Participant PPAs and distributed attendance ownership | Done | `event_participation_scopes` model/migration, organizer attendance scopes, Organized/Participating Events dashboard tabs, in-app invitation notifications/acknowledgements/reminders, participant PPA submit/review/approve/request-revision/reject routes, scope-aware scanner assignment/revocation, runtime hydrate/sync gating, and roll-up analytics implemented |
 | 2.4 HR event domain | Done | `events.event_domain`, HR Admin role/permissions, employee roster models, non-student Google onboarding separation, HR no-PPA event creation, and HR roster hydration path implemented; HR Admin provisioning is not handled through OSA Admin Access |
 | 4.2 Organizer-owned late cutoff | Done | Revised from OSA-owned dual thresholds to one official late-cutoff policy: organizer event cutoff is managed from separate Attendance Rules UI, applies first, locks after event start, and falls back to participant scope cutoffs only when unset; legacy status columns are preserved as compatibility mirrors |
 | 4.3 Multi-day session management | Done | EILO groups scans by day and maps to specific `event_day_id` records |
@@ -159,7 +159,8 @@
 
 | Item | Status | Evidence / Notes |
 |------|--------|------------------|
-| Bulk sync concurrency / queue protection | Done | Pessimistic `lockForUpdate` prevents database write deadlocks |
+| Bulk sync concurrency / queue protection | Done | Fail-fast migration rejects pre-existing duplicate attendance or active pending-link identities before DDL; PostgreSQL/SQLite partial unique indexes enforce canonical attendance and one-active-pending-link identities, with lock coordination, a transactional scanner-resolution outbox, priority Redis queues, and an opt-in isolated PostgreSQL contention suite |
+| API abuse protection | Done | Named Laravel limiters protect public password/Google authentication, authenticated API traffic, scanner sync, writes, and NLP queries with configurable thresholds, user/token plus IP keys, cache-backed state, standard throttle headers, and stable JSON `429` responses |
 | PII / HTTPS expectations | Done | Deployment templates, security headers, HTTPS/session checks, dev-login gating, demo seeder, deployment check command, and PII hardening guide completed |
 | Immutable `audit_logs` for admin resolution and governance actions | Done | `audit_logs` schema migrated; pending QR resolve/flag actions, admin assignment create/revoke/expire actions, admin-application review actions, and organization create/update/logo actions are recorded; OSA can filter Admin Access governance audit history by action, actor/search text, and date range |
 
@@ -175,10 +176,17 @@
 
 ## Sprint Notes
 
+- **2026-07-29 (proposal revision workflow):**
+  - Added `revision_requested` as a first-class PPA review state for organizer proposals and participant PPAs, with OSA-required revision remarks and final rejection semantics.
+  - Added organizer full-proposal edit/resubmit support while draft or revision-requested, preserving scanner locks until approval and keeping organizer scope packet fields synchronized.
+  - Added dashboard/Livewire, web fallback, and API revision actions plus focused coverage for main proposal and participant PPA revision loops.
 - **2026-07-21 (event-specific evaluation forms):**
   - Added locked `evaluation_form_versions` snapshots linked to events and evaluation submissions, with backfill/fallback support for existing events.
   - Extended proposal creation and API event creation to require 1-10 organizer-drafted Likert questions, and blocked OSA approval when a locked event form is missing.
   - Updated student evaluation validation, per-event analytics, and evaluation exports to use event-specific question IDs and labels while preserving the evaluation gate.
+- **2026-08-08 (tiered API rate limiting):**
+  - Added configurable cache-backed Laravel limiters for public authentication, authenticated API reads, scanner sync, authenticated writes, and NLP queries.
+  - Applied user/token-plus-IP keys to protected routes and IP keys to public authentication, preserving scanner batch size and existing successful response contracts while returning stable JSON `429` responses with retry headers.
 - **2026-07-15 (Admin Access audit history):**
   - Added an OSA-only Audit History tab to Admin Access for governance audit rows covering admin assignment lifecycle, organization management, and legacy admin-application review actions.
   - Added action, actor/search, and date filters while rendering only safe allowlisted details from `audit_logs.details`.
@@ -402,6 +410,9 @@
 - **2026-07-23 (instant Event Proposal modal controls):**
   - Moved Create Event date-range/day-row editing and Attendance Rules preset selection to immediate Alpine state with deferred Livewire entanglement, removing per-click server round trips while preserving the existing Livewire validation and save flows for PRD Epic 2 and Epic 4.
   - Made cutoff highlighting reflect the actual selected value instead of permanently recommending 15 minutes, and made successful Event Proposal and Attendance Rules row feedback dismiss after four seconds. Added a frontend interaction contract test; verified all 184 tests/1,187 assertions, the production Vite build, and browser timings of 48 ms for Add Day and 58 ms for Delete Day with zero Livewire update requests.
+- **2026-07-30 (Admin Access and participant scope modal responsiveness):**
+  - Moved Admin Access assignment/organization Alpine helpers into the single Vite Livewire bootstrap, added typed email/student-ID fallback and modal-visible validation for Assign Admin, and kept `admin_assignments` creation under the existing OSA-scoped controller/service checks from PRD Feature 1.3.
+  - Changed Add Participant Scope audience tabs, local search, checkbox selection, capture mode, and option count to immediate Alpine state with deferred Livewire entanglement; final scope creation still runs through `EventParticipantScopes::addParticipantScopes` and `ParticipationScopeService` for PRD Feature 2.3 boundaries.
 - **2026-07-22 (Event lifecycle lazy refresh):**
   - Added an Event Proposals workspace safety refresh that recalculates accessible approved/completed event lifecycle phases once on page open before counts and rows render, so stale `evaluation_open` records advance toward processing/completed even if the scheduler was not running locally.
 - **2026-07-22 (scanner scan-type windows):**
@@ -445,3 +456,27 @@
   - Added `predis/predis` so Redis-backed queue/cache can run without the Windows PHP Redis extension.
   - Switched Redis env templates to `REDIS_CLIENT=predis` and documented the local Redis server/env switch needed before replacing the database queue fallback.
   - Hardened `eaes:deployment-check` to fail clearly when Redis is configured but the selected PHP Redis client is unavailable.
+- **2026-07-30 (Livewire Blaze removal):**
+  - Removed `livewire/blaze` after review because the app currently has a small anonymous Blade component surface and the main layout relies on a `View::composer`.
+  - Removed the `Blaze::optimize()` provider configuration and kept the standard Laravel view-composer path.
+- **2026-07-30 (Composer security patch update):**
+  - Updated vulnerable Composer transitive dependencies with dependency movement allowed: `dompdf/dompdf` 3.1.6, `guzzlehttp/guzzle` 7.15.2, and `phpoffice/phpspreadsheet` 1.30.6.
+  - Verified `composer audit` reports no advisories and the Laravel backend test suite passes with 189 tests / 1,246 assertions.
+- **2026-08-08 (CommonMark security patch update):**
+  - Updated the Laravel framework's transitive `league/commonmark` dependency from 2.8.2 to 2.9.0 to resolve six newly reported security advisories.
+  - Verified `composer validate` and `composer audit` pass, with the Laravel backend test suite passing 190 tests / 1,250 assertions.
+- **2026-08-08 (shared proposal persistence):**
+  - Routed Livewire, multipart web fallback, and API proposal create/update operations through `EventProposalDraftService`, centralizing transactions, proposal-document cleanup/replacement, ordered event days, evaluation snapshots, parent-permit rules, HR exemptions, and organizer-scope packet synchronization for PRD Feature 2.1 and Feature 2.4.
+  - Aligned student-affairs API proposal creation with the digital PPA contract by requiring a PPA category and official proposal document, retained HR exemptions, returned domain failures as `422` without exposing unexpected exceptions, and kept `event_late_cutoff_min` under the separate Attendance Rules workflow from PRD Feature 4.2.
+  - Added multipart API coverage for proposal metadata, missing documents, HR creation, parent and tenant boundaries, legacy document requirements, revision-requested updates, document replacement cleanup, ordered day numbering, evaluation snapshots, organizer-scope synchronization, and attendance-cutoff immutability; verified 192 Laravel tests / 1,280 assertions plus clean Composer validation and security audit.
+- **2026-08-08 (participant-scope concurrency protection):**
+  - Added fail-safe PostgreSQL/SQLite partial unique indexes for active organizer, organization participant, College participant, and linked-event participant identities; migrations now stop before DDL when duplicate active audiences require manual reconciliation.
+  - Made `ParticipationScopeService` use `firstOrCreate()` and `wasRecentlyCreated` for idempotent organizer/audience creation, first-writer configuration retention, and single invitation delivery; the Livewire flow and web fallback both use this shared path.
+  - Centralized linked-event scope synchronization, reusing unlinked manual invitations, preserving existing scope configuration, and returning web redirect/API `422` domain feedback with parent-link rollback for conflicting linked events. Added database, service, web, API, and migration-preflight coverage while keeping Epic 2 / Feature 2.3 `Done`.
+- **2026-08-08 (scanner sync concurrency hardening):**
+  - Added fail-fast PostgreSQL/SQLite partial unique indexes for all nullable canonical attendance identity variants and active unresolved QR links; existing duplicate data now stops migration before any DDL and requires manual reconciliation.
+  - Routed raw-scan winner detection and pending-link creation through `AttendanceSyncPersistenceService`, so replays and competing scanner uploads count only persisted winners and never dispatch duplicate attendance resolution work.
+  - Hardened `ResolveAttendanceJob` with scoped overlap coordination, database parent-row locks, retry/timeout policy, PII-safe failure logs, and queue visibility timeouts above job runtime. Added SQLite feature coverage plus an opt-in `phpunit.pgsql.xml` suite targeting only `eaes_concurrency_test` for real PostgreSQL contention.
+- **2026-08-08 (Redis queue resilience and load readiness):**
+  - Added a transactional `queue_outbox_entries` handoff for persisted scanner winners, immediate safe dispatch plus scheduled recovery dispatch, `attendance`/`default`/`ai` worker separation, bounded AI job retry/overlap policy, queue health checks, production Redis connectivity checks, and Supervisor worker definitions.
+  - Added a local Redis 7 Compose service and a guarded k6 scanner-sync harness for an isolated 20-scanner, 200-record batch workload. The Flutter scanner now honors `Retry-After` and retries transient rate-limit, Redis-coordination, and network sync failures while preserving local scans.

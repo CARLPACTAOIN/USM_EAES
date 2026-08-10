@@ -2,7 +2,10 @@
 
 namespace App\Livewire\Dashboard;
 
+use App\Models\User;
 use App\Services\DashboardEventWorkspaceService;
+use Livewire\Attributes\Locked;
+use Livewire\Attributes\On;
 use Livewire\Attributes\Url;
 use Livewire\Component;
 use Livewire\WithPagination;
@@ -22,6 +25,12 @@ class EventsWorkspace extends Component
 
     #[Url(as: 'per_page', except: 15)]
     public int $perPage = 15;
+
+    #[Locked]
+    public ?string $activeModal = null;
+
+    #[Locked]
+    public ?string $activeEventId = null;
 
     public function mount(?string $workspace = null, ?string $status = null, ?string $search = null, int $perPage = 15): void
     {
@@ -74,18 +83,42 @@ class EventsWorkspace extends Component
         $this->resetPage();
     }
 
-    public function searchTyped(?string $value = null): void
-    {
-        $this->search = trim((string) $value);
-        $this->resetPage();
-    }
-
     public function applyFilters(): void
     {
         $this->search = trim($this->search);
         $this->perPage = $this->normalizePerPage($this->perPage);
         $this->resetPage();
     }
+
+    public function openModal(string $modal, string $eventId): void
+    {
+        abort_unless(in_array($modal, [
+            'workflow',
+            'sentiment',
+            'proposal-edit',
+            'participant-scopes',
+            'attendance-rules',
+            'scanner-access',
+        ], true), 404);
+
+        $user = auth()->user();
+        abort_unless($user instanceof User, 403);
+
+        app(DashboardEventWorkspaceService::class)->eventForWorkspace($user, $this->workspace, $eventId);
+
+        $this->activeModal = $modal;
+        $this->activeEventId = $eventId;
+    }
+
+    public function closeModal(): void
+    {
+        $this->activeModal = null;
+        $this->activeEventId = null;
+    }
+
+    #[On('event-proposal-workflow-updated')]
+    #[On('participant-scopes-updated')]
+    public function refreshWorkspace(): void {}
 
     public function render(DashboardEventWorkspaceService $workspaceService)
     {
@@ -98,6 +131,9 @@ class EventsWorkspace extends Component
             search: $this->search,
             perPage: $this->perPage
         );
+        $activeEvent = $this->activeEventId
+            ? $workspaceService->eventForWorkspace($user, $this->workspace, $this->activeEventId)
+            : null;
 
         return view('livewire.dashboard.events-workspace', [
             'events' => $events,
@@ -109,6 +145,7 @@ class EventsWorkspace extends Component
             'participatingEventsCount' => $counts['participating'],
             'statusFilters' => $workspaceService->statusFiltersFor($user),
             'activeFilterCount' => collect([$this->status, $this->search])->filter(fn ($value) => filled($value))->count(),
+            'activeEvent' => $activeEvent,
         ]);
     }
 

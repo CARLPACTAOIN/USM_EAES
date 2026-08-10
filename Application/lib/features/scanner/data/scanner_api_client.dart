@@ -84,6 +84,7 @@ class ScannerApiClient implements ScannerRemoteApi {
       throw ScannerApiException(
         message ?? 'Request failed with HTTP ${response.statusCode}.',
         statusCode: response.statusCode,
+        retryAfter: _retryAfter(response),
       );
     }
 
@@ -93,13 +94,20 @@ class ScannerApiClient implements ScannerRemoteApi {
 
     return decoded;
   }
+
+  Duration? _retryAfter(http.Response response) {
+    final seconds = int.tryParse(response.headers['retry-after'] ?? '');
+
+    return seconds == null || seconds < 1 ? null : Duration(seconds: seconds);
+  }
 }
 
 class ScannerApiException implements Exception {
-  const ScannerApiException(this.message, {this.statusCode});
+  const ScannerApiException(this.message, {this.statusCode, this.retryAfter});
 
   final String message;
   final int? statusCode;
+  final Duration? retryAfter;
 
   @override
   String toString() => message;

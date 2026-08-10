@@ -11,18 +11,29 @@ class EventParticipationScope extends Model
     use HasFactory, HasUuids;
 
     public const ROLE_ORGANIZER = 'organizer';
+
     public const ROLE_PARTICIPANT = 'participant';
 
     public const STATUS_ACTIVE = 'active';
+
     public const STATUS_REVOKED = 'revoked';
+
     public const STATUS_INACTIVE = 'inactive';
 
     public const PPA_DRAFT = 'draft';
+
     public const PPA_SUBMITTED = 'submitted';
+
     public const PPA_UNDER_REVIEW = 'under_review';
+
+    public const PPA_REVISION_REQUESTED = 'revision_requested';
+
     public const PPA_APPROVED = 'approved';
+
     public const PPA_REJECTED = 'rejected';
+
     public const PPA_WITHDRAWN = 'withdrawn';
+
     public const PPA_NOT_REQUIRED = 'not_required';
 
     protected $fillable = [
@@ -167,7 +178,7 @@ class EventParticipationScope extends Model
             return false;
         }
 
-        return !$this->ppa_required || in_array($this->ppa_status, [self::PPA_APPROVED, self::PPA_NOT_REQUIRED], true);
+        return ! $this->ppa_required || in_array($this->ppa_status, [self::PPA_APPROVED, self::PPA_NOT_REQUIRED], true);
     }
 
     public function displayName(): string

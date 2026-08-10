@@ -1,6 +1,5 @@
 import './bootstrap';
 import { Livewire, Alpine } from '../../vendor/livewire/livewire/dist/livewire.esm';
-import { Html5Qrcode } from 'html5-qrcode';
 
 /* ─── Toast Notification System ──────────────────────────── */
 Alpine.data('toastManager', () => ({
@@ -276,6 +275,301 @@ Alpine.data('eventScheduleEditor', (initialDays, initialStartDate, initialEndDat
     }
 }));
 
+/* ─── Admin Access Assignment Form ───────────────────────── */
+Alpine.data('adminAssignmentForm', (config) => ({
+    searchUrl: config.searchUrl,
+    organizations: config.organizations || [],
+    colleges: config.colleges || [],
+    role: config.oldRole || '',
+    collegeId: config.oldCollegeId || '',
+    organizationId: config.oldOrganizationId || '',
+    email: config.oldEmail || '',
+    studentId: config.oldStudentId || '',
+    name: config.oldName || '',
+    searchQuery: config.oldPersonQuery || '',
+    results: [],
+    showResults: false,
+    userLocked: !!(config.oldEmail || config.oldStudentId),
+    accountMode: config.oldAccountMode || 'search',
+    roleTypes: {
+        'USG Admin': 'usg',
+        'LSG Admin': 'lsg',
+        'Society Admin': ['society', 'non_academic_org'],
+        'Academic Unit Admin': 'academic_unit',
+        'Office Event Admin': 'administrative_office',
+    },
+    async searchUsers() {
+        if (this.searchQuery.trim().length < 2) {
+            this.results = [];
+            this.showResults = false;
+            return;
+        }
+
+        try {
+            const response = await fetch(`${this.searchUrl}?q=${encodeURIComponent(this.searchQuery.trim())}`, {
+                headers: { 'Accept': 'application/json' },
+            });
+
+            this.results = response.ok ? await response.json() : [];
+            this.showResults = this.results.length > 0;
+        } catch (error) {
+            this.results = [];
+            this.showResults = false;
+        }
+    },
+    selectUser(user) {
+        this.email = user.email || '';
+        this.studentId = user.student_id_number || '';
+        this.name = user.name || '';
+        this.searchQuery = user.email || user.student_id_number || user.name || '';
+        this.userLocked = true;
+        this.accountMode = 'search';
+        this.showResults = false;
+    },
+    clearUser() {
+        this.email = '';
+        this.studentId = '';
+        this.name = '';
+        this.searchQuery = '';
+        this.userLocked = false;
+        this.results = [];
+        this.showResults = false;
+    },
+    setAccountMode(mode) {
+        this.accountMode = mode;
+        this.clearUser();
+    },
+    prepareSubmit() {
+        if (this.accountMode !== 'search' || this.userLocked) {
+            return;
+        }
+
+        const query = this.searchQuery.trim();
+
+        if (!query || this.email || this.studentId) {
+            return;
+        }
+
+        if (query.includes('@')) {
+            this.email = query;
+        } else {
+            this.studentId = query;
+        }
+    },
+    userInitial() {
+        const source = (this.name || this.email || '?').trim();
+        return source.charAt(0).toUpperCase();
+    },
+    scopeSummary() {
+        if (this.role === 'USG Admin') return 'USG organization scope';
+        if (this.role === 'LSG Admin') return 'College LSG scope';
+        if (this.role === 'Society Admin') return 'Society or non-academic organization scope';
+        if (this.role === 'Academic Unit Admin') return 'Academic unit organization scope';
+        if (this.role === 'Office Event Admin') return 'Administrative office event scope';
+
+        return 'Assignment scope';
+    },
+    roleUsesCollege() {
+        return ['LSG Admin', 'Academic Unit Admin'].includes(this.role);
+    },
+    roleUsesOrganization() {
+        return Object.keys(this.roleTypes).includes(this.role);
+    },
+    filteredOrganizations() {
+        if (!this.roleUsesOrganization()) return [];
+
+        const targetTypes = Array.isArray(this.roleTypes[this.role])
+            ? this.roleTypes[this.role]
+            : [this.roleTypes[this.role]];
+
+        return this.organizations.filter((org) => {
+            if (!targetTypes.includes(org.type)) return false;
+            if (this.roleUsesCollege() && this.collegeId) return org.college_id === this.collegeId;
+            if (this.roleUsesCollege() && !this.collegeId) return false;
+            return true;
+        });
+    },
+    organizationPlaceholder() {
+        if (!this.role) return 'Select role first';
+        if (!this.roleUsesOrganization()) return 'No organization scope';
+        if (this.roleUsesCollege() && !this.collegeId) return 'Select college first';
+        return 'Select organization';
+    },
+    syncRole() {
+        if (!this.roleUsesCollege()) this.collegeId = '';
+
+        if (!this.roleUsesOrganization()) {
+            this.organizationId = '';
+            return;
+        }
+
+        this.syncOrganization();
+    },
+    syncCollege() {
+        this.syncOrganization();
+    },
+    syncOrganization() {
+        if (!this.filteredOrganizations().some((org) => org.id === this.organizationId)) {
+            this.organizationId = '';
+        }
+    },
+    chooseOrganization() {
+        const org = this.organizations.find((item) => item.id === this.organizationId);
+
+        if (org?.college_id && this.roleUsesCollege()) {
+            this.collegeId = org.college_id;
+        }
+    },
+    init() {
+        this.syncRole();
+    },
+}));
+
+/* ─── Admin Access Organization Form ─────────────────────── */
+Alpine.data('organizationForm', (config) => ({
+    colleges: config.colleges || [],
+    type: config.type || 'society',
+    collegeId: config.collegeId || '',
+    programIds: (config.programIds || []).map((id) => String(id)),
+    programSearch: '',
+    programsForCollege() {
+        const college = this.colleges.find((item) => item.id === this.collegeId);
+        return college?.programs || [];
+    },
+    filteredProgramsForCollege() {
+        const term = this.programSearch.trim().toLowerCase();
+
+        if (!term) {
+            return this.programsForCollege();
+        }
+
+        return this.programsForCollege().filter((program) => {
+            return [program.code, program.name]
+                .some((value) => String(value || '').toLowerCase().includes(term));
+        });
+    },
+    selectedProgramCount() {
+        return this.programIds.length;
+    },
+    selectAllPrograms() {
+        this.programIds = this.programsForCollege().map((program) => String(program.id));
+    },
+    clearPrograms() {
+        this.programIds = [];
+    },
+    syncProgramSelection() {
+        if (!this.typeUsesPrograms()) {
+            this.programIds = [];
+            return;
+        }
+
+        const allowedProgramIds = new Set(this.programsForCollege().map((program) => String(program.id)));
+        this.programIds = this.programIds
+            .map((id) => String(id))
+            .filter((id) => allowedProgramIds.has(id));
+    },
+    typeShowsCollege() {
+        return ['society', 'non_academic_org', 'lsg', 'academic_unit'].includes(this.type);
+    },
+    typeRequiresCollege() {
+        return ['society', 'lsg', 'academic_unit'].includes(this.type);
+    },
+    typeUsesCollege() {
+        return this.typeShowsCollege();
+    },
+    typeUsesPrograms() {
+        return ['society', 'non_academic_org'].includes(this.type);
+    },
+    init() {
+        this.syncProgramSelection();
+
+        this.$watch('collegeId', () => {
+            this.programSearch = '';
+            this.syncProgramSelection();
+        });
+
+        this.$watch('type', () => {
+            if (!this.typeShowsCollege()) {
+                this.collegeId = '';
+            }
+
+            this.programSearch = '';
+            this.syncProgramSelection();
+        });
+    },
+}));
+
+/* ─── Participant Scope Audience Builder ─────────────────── */
+Alpine.data('participantAudienceBuilder', (config) => ({
+    audienceMode: config.audienceMode,
+    selectedCollegeIds: config.selectedCollegeIds,
+    selectedOrganizationIds: config.selectedOrganizationIds,
+    collegeQuery: config.collegeQuery,
+    organizationQuery: config.organizationQuery,
+    captureMode: config.captureMode,
+    ppaRequired: config.ppaRequired,
+    analyticsRollupEnabled: config.analyticsRollupEnabled,
+    colleges: config.colleges || [],
+    organizations: config.organizations || [],
+    setAudienceMode(mode) {
+        if (!['all', 'college', 'organization'].includes(mode)) {
+            return;
+        }
+
+        this.audienceMode = mode;
+
+        if (mode !== 'college') {
+            this.selectedCollegeIds = [];
+            this.collegeQuery = '';
+        }
+
+        if (mode !== 'organization') {
+            this.selectedOrganizationIds = [];
+            this.organizationQuery = '';
+        }
+    },
+    optionMatches(option, query, fields) {
+        const term = String(query || '').trim().toLowerCase();
+
+        if (!term) {
+            return true;
+        }
+
+        return fields.some((field) => String(option?.[field] || '').toLowerCase().includes(term));
+    },
+    filteredColleges() {
+        return this.colleges.filter((college) => this.optionMatches(college, this.collegeQuery, ['code', 'name']));
+    },
+    filteredOrganizations() {
+        return this.organizations.filter((organization) => this.optionMatches(organization, this.organizationQuery, ['acronym', 'name', 'college_code', 'college_name']));
+    },
+    selectionCount() {
+        if (this.audienceMode === 'all') {
+            return this.colleges.length;
+        }
+
+        if (this.audienceMode === 'college') {
+            return this.selectedCollegeIds.length;
+        }
+
+        return this.selectedOrganizationIds.length;
+    },
+    selectionLabel() {
+        const count = this.selectionCount();
+
+        if (this.audienceMode === 'all') {
+            return `${count} College ${count === 1 ? 'scope' : 'scopes'}`;
+        }
+
+        return count === 0 ? 'No audience selected' : `${count} selected`;
+    },
+    submitLabel() {
+        const count = this.selectionCount();
+
+        return count > 1 ? `Add ${count} scopes` : 'Add Scope';
+    },
+}));
+
 /* ─── Dependent Dropdowns (College → Organization) ───────── */
 Alpine.data('dependentSelect', (orgsJson = '{}', programsJson = '{}', initialCollege = '', initialProgram = '', initialOrg = '') => ({
     allOrgs: typeof orgsJson === 'string' ? JSON.parse(orgsJson) : orgsJson,
@@ -294,63 +588,6 @@ Alpine.data('dependentSelect', (orgsJson = '{}', programsJson = '{}', initialCol
             this.selectedProgram = '';
             this.selectedOrg = '';
         });
-    }
-}));
-
-/* ─── Student Profile QR Capture ─────────────────────────── */
-Alpine.data('profileQrScanner', (initialValue = '') => ({
-    mode: 'scanner',
-    scannedValue: initialValue || '',
-    scanning: false,
-    cameraError: '',
-    readerId: '',
-    scanner: null,
-    init() {
-        this.readerId = `qr-reader-${Math.random().toString(36).slice(2)}`;
-        this.$nextTick(() => {
-            if (this.$refs.reader) {
-                this.$refs.reader.id = this.readerId;
-            }
-        });
-    },
-    async startScanner() {
-        this.cameraError = '';
-        if (!this.readerId) return;
-
-        this.scanner = new Html5Qrcode(this.readerId);
-
-        try {
-            await this.scanner.start(
-                { facingMode: 'environment' },
-                { fps: 10, qrbox: { width: 250, height: 250 } },
-                async (decodedText) => {
-                    this.scannedValue = decodedText;
-                    await this.stopScanner();
-                },
-                () => {}
-            );
-            this.scanning = true;
-        } catch (error) {
-            this.cameraError = 'Camera access failed. Use manual entry instead.';
-            this.mode = 'manual';
-            this.scanning = false;
-        }
-    },
-    async stopScanner() {
-        if (!this.scanner) {
-            this.scanning = false;
-            return;
-        }
-
-        try {
-            await this.scanner.stop();
-            await this.scanner.clear();
-        } catch (error) {
-            // The library throws if stop is called before a camera stream starts.
-        }
-
-        this.scanner = null;
-        this.scanning = false;
     }
 }));
 

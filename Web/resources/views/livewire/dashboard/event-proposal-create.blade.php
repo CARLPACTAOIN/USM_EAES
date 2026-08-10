@@ -1,5 +1,7 @@
+@php($proposalModalId = $editing ? 'edit-event-modal-'.$eventId : 'create-event-modal')
+
 <form method="POST"
-      action="{{ route('dashboard.events.create') }}"
+      action="{{ $editing ? route('dashboard.events.update', $eventId) : route('dashboard.events.create') }}"
       enctype="multipart/form-data"
       wire:submit.prevent="createProposal"
       class="proposal-modal-form">
@@ -11,11 +13,15 @@
             </span>
             <div>
                 <p class="proposal-modal-kicker">PPA proposal packet</p>
-                <h2 id="create-event-modal-title" class="proposal-modal-title">New Event Proposal</h2>
-                <p id="create-event-modal-description" class="proposal-modal-subtitle">Submit the digital record with the official softcopy and OSA hardcopy status.</p>
+                <h2 id="{{ $editing ? 'edit-event-modal-title-'.$eventId : 'create-event-modal-title' }}" class="proposal-modal-title">
+                    {{ $editing ? 'Revise Event Proposal' : 'New Event Proposal' }}
+                </h2>
+                <p id="{{ $editing ? 'edit-event-modal-description-'.$eventId : 'create-event-modal-description' }}" class="proposal-modal-subtitle">
+                    {{ $editing ? 'Update the returned proposal before resubmitting to OSA.' : 'Submit the digital record with the official softcopy and OSA hardcopy status.' }}
+                </p>
             </div>
         </div>
-        <button type="button" onclick="document.getElementById('create-event-modal')?.close()" class="btn-icon btn-ghost" aria-label="Close proposal modal">
+        <button type="button" onclick="document.getElementById('{{ $proposalModalId }}')?.close()" class="btn-icon btn-ghost" aria-label="Close proposal modal">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
         </button>
     </div>
@@ -280,7 +286,12 @@
                                    class="form-input @error('proposalDocument') form-input-error @enderror"
                                    accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                                    wire:model="proposalDocument">
-                            <p class="form-helper">Accepted: PDF, DOC, DOCX up to 10 MB.</p>
+                            <p class="form-helper">
+                                Accepted: PDF, DOC, DOCX up to 10 MB.
+                                @if($editing && $currentProposalDocumentName)
+                                    Current file: {{ $currentProposalDocumentName }}.
+                                @endif
+                            </p>
                             <p wire:loading wire:target="proposalDocument" class="form-helper">Uploading softcopy...</p>
                             @error('proposalDocument') <p class="form-error" role="alert">{{ $message }}</p> @enderror
                         </div>
@@ -394,16 +405,16 @@
     </div>
 
     <div class="proposal-modal-footer">
-        <p class="proposal-required-note"><span class="text-(--color-destructive)">*</span> Required fields apply before saving the draft.</p>
+        <p class="proposal-required-note"><span class="text-(--color-destructive)">*</span> Required fields apply before {{ $editing ? 'saving revisions' : 'saving the draft' }}.</p>
         <div class="proposal-footer-actions">
-            <button type="button" onclick="document.getElementById('create-event-modal')?.close()" class="btn btn-secondary">Cancel</button>
+            <button type="button" onclick="document.getElementById('{{ $proposalModalId }}')?.close()" class="btn btn-secondary">Cancel</button>
             <button type="submit"
                     class="btn btn-primary"
                     wire:loading.attr="disabled"
                     wire:target="createProposal,proposalDocument">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M5 13l4 4L19 7"/></svg>
-                <span wire:loading.remove wire:target="createProposal,proposalDocument">Save Draft Proposal</span>
-                <span wire:loading wire:target="createProposal,proposalDocument">Saving draft...</span>
+                <span wire:loading.remove wire:target="createProposal,proposalDocument">{{ $editing ? 'Save Revisions' : 'Save Draft Proposal' }}</span>
+                <span wire:loading wire:target="createProposal,proposalDocument">{{ $editing ? 'Saving revisions...' : 'Saving draft...' }}</span>
             </button>
         </div>
     </div>

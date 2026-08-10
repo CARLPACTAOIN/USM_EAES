@@ -11,6 +11,7 @@ use App\Services\AdminScopeService;
 use App\Services\ParticipationScopeService;
 use App\Services\ScannerAssignmentService;
 use App\Services\ScannerSessionService;
+use Illuminate\Contracts\View\View;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Livewire\Attributes\Locked;
@@ -36,6 +37,7 @@ class EventScannerAccess extends Component
     public function mount(string $eventId): void
     {
         $this->eventId = $eventId;
+        $this->initializeDefaultScope();
     }
 
     public function setScope(?string $scopeId = null): void
@@ -50,8 +52,9 @@ class EventScannerAccess extends Component
     {
         $this->resetFeedback();
 
-        if (!$this->scopeId) {
+        if (! $this->scopeId) {
             $this->addError('scopeId', 'Choose an attendance scope before adding scanners.');
+
             return;
         }
 
@@ -61,12 +64,13 @@ class EventScannerAccess extends Component
         $scanner = User::findOrFail($scannerId);
         $assignments = app(ScannerAssignmentService::class);
 
-        if (!$assignments->canAssignScanner(auth()->user(), $scanner, $scope)) {
+        if (! $assignments->canAssignScanner(auth()->user(), $scanner, $scope)) {
             $this->addError('scannerQuery', 'Select scanners from the selected attendance scope.');
+
             return;
         }
 
-        if (!in_array($scannerId, $this->selectedScannerIds, true)) {
+        if (! in_array($scannerId, $this->selectedScannerIds, true)) {
             $this->selectedScannerIds[] = $scannerId;
         }
 
@@ -95,13 +99,15 @@ class EventScannerAccess extends Component
         $event = $this->event();
         if ($event->status !== 'approved') {
             $this->errorNotice = 'Scanner assignments can only be created for approved events.';
+
             return;
         }
 
         abort_unless(auth()->user()?->can('assign-scanners-own'), 403);
 
-        if (!$this->scopeId) {
+        if (! $this->scopeId) {
             $this->addError('scopeId', 'Choose an attendance scope.');
+
             return;
         }
 
@@ -112,6 +118,7 @@ class EventScannerAccess extends Component
 
         if ($scannerIds->isEmpty()) {
             $this->addError('selectedScannerIds', 'Choose at least one scanner from your authorized organization or college.');
+
             return;
         }
 
@@ -124,8 +131,9 @@ class EventScannerAccess extends Component
 
         foreach ($scannerIds as $scannerId) {
             $scanner = $scannerUsers->get($scannerId);
-            if (!$scanner || !$assignments->canAssignScanner(auth()->user(), $scanner, $scope)) {
+            if (! $scanner || ! $assignments->canAssignScanner(auth()->user(), $scanner, $scope)) {
                 $this->addError('selectedScannerIds', 'Select scanners from the selected attendance scope.');
+
                 return;
             }
         }
@@ -196,14 +204,10 @@ class EventScannerAccess extends Component
         $this->notice = 'Scanner session revoked.';
     }
 
-    public function render()
+    public function render(): View
     {
         $event = $this->eventForDisplay();
         $scannerScopes = $this->scannerScopes($event);
-
-        if (!$this->scopeId && $scannerScopes->isNotEmpty()) {
-            $this->scopeId = $scannerScopes->first()->id;
-        }
 
         return view('livewire.dashboard.event-scanner-access', [
             'event' => $event,
@@ -217,6 +221,17 @@ class EventScannerAccess extends Component
     private function event(): Event
     {
         return Event::findOrFail($this->eventId);
+    }
+
+    private function initializeDefaultScope(): void
+    {
+        $event = Event::with([
+            'participationScopes.organization',
+            'participationScopes.college',
+            'participationScopes.delegatedOrganization',
+        ])->findOrFail($this->eventId);
+
+        $this->scopeId = $this->scannerScopes($event)->first()?->id;
     }
 
     private function eventForDisplay(): Event
@@ -247,28 +262,30 @@ class EventScannerAccess extends Component
 
         return $event->participationScopes
             ->filter(fn (EventParticipationScope $scope) => $scope->status === EventParticipationScope::STATUS_ACTIVE
-                && !$participationScopes->runtimeGuard($scope)
+                && ! $participationScopes->runtimeGuard($scope)
                 && $participationScopes->canManageScope(auth()->user(), $scope))
             ->values();
     }
 
     private function eligibleScannerUsers(): Collection
     {
-        if (!auth()->user()?->can('assign-scanners-own') || !$this->scopeId) {
+        $search = trim($this->scannerQuery);
+
+        if (! auth()->user()?->can('assign-scanners-own') || ! $this->scopeId || $search === '') {
             return collect();
         }
 
         $scope = EventParticipationScope::find($this->scopeId);
-        if (!$scope || $scope->event_id !== $this->eventId) {
+        if (! $scope || $scope->event_id !== $this->eventId) {
             return collect();
         }
 
-        if (!app(ParticipationScopeService::class)->canManageScope(auth()->user(), $scope)) {
+        if (! app(ParticipationScopeService::class)->canManageScope(auth()->user(), $scope)) {
             return collect();
         }
 
         return app(ScannerAssignmentService::class)->eligibleUsers(
-            search: $this->scannerQuery !== '' ? $this->scannerQuery : null,
+            search: $search,
             limit: 8,
             admin: auth()->user(),
             participationScope: $scope
@@ -280,7 +297,7 @@ class EventScannerAccess extends Component
         abort_unless(auth()->user()?->can('assign-scanners-own'), 403);
 
         $scope = app(AdminScopeService::class)->forUser(auth()->user());
-        if (!$scope) {
+        if (! $scope) {
             abort(403, 'Access denied. No active admin assignment found.');
         }
 

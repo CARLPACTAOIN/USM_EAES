@@ -174,7 +174,7 @@ DB::transaction(function () use ($eventId, $studentIds) {
 ### **Epic 2: Event Proposal & Permit System (PPA)**
 
 * **Feature 2.1 \- Digital PPA Submission:** Society, USG, LSG, non-academic organization, academic unit, and administrative office admins construct digital proposals featuring all fields from the official paper forms, including budget allocations, location classifications (on-campus vs. off-campus), and target demographics.  
-* **Feature 2.2 \- OSA Proposal Review Pipeline:** A central dashboard allowing OSA Directors to approve or reject PPAs. The scanner interface for any event remains locked until the proposal status transitions to Approved.  
+* **Feature 2.2 \- OSA Proposal Review Pipeline:** A central dashboard allowing OSA Directors to approve, reject, or request revision on PPAs. Revision requests return the proposal to the organizer with OSA remarks for correction and resubmission, while rejection is treated as a final denial unless reopened through an approved administrative exception. The scanner interface for any event remains locked until the proposal status transitions to Approved.
 * **Feature 2.3 \- Multi-Organization Event Linking and Participant PPAs:** Allows USG/LSG/academic-unit/office organizers to list a parent event and invite sub-organizational PPAs as participant scopes under a master permit. Each `event_participation_scope` records organizer vs participant role, participant type, PPA status, capture mode, and roll-up analytics eligibility. The organizing organization is always represented by the organizer attendance scope and is automatically included in its own event audience; it must not submit a duplicate participant PPA for the same event. The Events dashboard separates **Organized Events** from **Participating Events** so invited organizations can find submitted parent events, submit or resubmit only their own participant PPA, and manage scanners only for their own approved scope. Organizer drafts remain private until the parent proposal is submitted. Participant scanners cannot be assigned, activated, hydrated, synced, or counted as official analytics participants until their participant PPA is approved or marked not required.
 * **Feature 2.4 \- Event Domains:** `events.event_domain` separates student-affairs, HR, academic-records, and academic-unit contexts. HR events use faculty/staff attendance rosters, do not require OSA PPA approval, and are managed by HR Admins through HR-domain permissions.
 * **Organizer Rule \- Recognition and Graduation:** Recognition and Graduation events are no longer modeled as a separate records-office admin role or organization. Until a dedicated staff-office module exists, OSA assigns these events to an active approved organizer through the normal proposal workflow, and university-wide audience calculations remain based on event audience rules rather than student membership in the organizer.
@@ -400,7 +400,7 @@ JSON Response Schema:
 * id (UUID, Primary Key)  
 * organization\_id (UUID, Foreign Key)  
 * title (String)  
-* status (Enum: "draft", "submitted", "under\_review", "approved", "rejected", "completed")  
+* status (Enum: "draft", "submitted", "under\_review", "revision\_requested", "approved", "rejected", "completed")
 * lifecycle\_phase (Enum: "scheduled", "active", "ended", "evaluation\_open", "evaluation\_closed", "processing", "completed")  
 * event\_domain (Enum/String: student\_affairs, hr, academic\_records, academic\_unit)  
 * start\_date (Date)  

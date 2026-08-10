@@ -2,53 +2,78 @@
 
 namespace App\Jobs;
 
-use App\Models\Event;
-use App\Models\EventDay;
-use App\Models\RawScan;
 use App\Models\AttendanceRecord;
+use App\Models\Event;
+use App\Models\EventParticipationScope;
+use App\Models\RawScan;
+use App\Services\EventAnalyticsCache;
+use Carbon\Carbon;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
+use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\DB;
-use Carbon\Carbon;
+use Illuminate\Support\Facades\Log;
+use Throwable;
 
 class ResolveAttendanceJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    protected $eventId;
-    protected $studentIds;
-    protected $eventParticipationScopeId;
+    public int $tries = 3;
+
+    public int $timeout = 120;
+
+    /** @var array<int, int> */
+    public array $backoff = [5, 30, 90];
+
+    protected string $eventId;
+
+    /** @var array<int, string> */
+    protected array $studentIds;
+
+    protected ?string $eventParticipationScopeId;
 
     /**
      * Create a new job instance.
      *
-     * @param  string  $eventId
-     * @param  array  $studentIds
-     * @return void
+     * @param  array<int, string>  $studentIds
      */
-    public function __construct($eventId, array $studentIds, ?string $eventParticipationScopeId = null)
+    public function __construct(string $eventId, array $studentIds, ?string $eventParticipationScopeId = null)
     {
+        $this->onQueue('attendance');
         $this->eventId = $eventId;
         $this->studentIds = $studentIds;
         $this->eventParticipationScopeId = $eventParticipationScopeId;
     }
 
     /**
-     * Execute the job.
-     *
-     * @return void
+     * @return array<int, WithoutOverlapping>
      */
-    public function handle()
+    public function middleware(): array
+    {
+        return [
+            (new WithoutOverlapping($this->overlapKey()))
+                ->releaseAfter(5)
+                ->expireAfter(180),
+        ];
+    }
+
+    public function handle(EventAnalyticsCache $analyticsCache): void
     {
         if (empty($this->studentIds)) {
             return;
         }
 
         $eventId = $this->eventId;
-        $studentIds = $this->studentIds;
+        $studentIds = collect($this->studentIds)
+            ->filter()
+            ->unique()
+            ->sort()
+            ->values()
+            ->all();
         $eventParticipationScopeId = $this->eventParticipationScopeId;
 
         // Fetch event parameters
@@ -56,9 +81,19 @@ class ResolveAttendanceJob implements ShouldQueue
         $eventDays = $event->eventDays;
         $participationScopes = $event->participationScopes->keyBy('id');
 
-        // Perform pessimistic lock on attendance records inside transaction
-        DB::transaction(function () use ($eventId, $studentIds, $event, $eventDays, $eventParticipationScopeId, $participationScopes) {
-            
+        DB::transaction(function () use ($eventId, $studentIds, $event, $eventDays, $eventParticipationScopeId, $participationScopes): void {
+            if ($eventParticipationScopeId) {
+                EventParticipationScope::query()
+                    ->whereKey($eventParticipationScopeId)
+                    ->lockForUpdate()
+                    ->firstOrFail();
+            } else {
+                Event::query()
+                    ->whereKey($eventId)
+                    ->lockForUpdate()
+                    ->firstOrFail();
+            }
+
             // Acquire locks on affected rows to avoid write collisions
             $existingRecords = AttendanceRecord::where('event_id', $eventId)
                 ->whereIn('student_id', $studentIds)
@@ -66,7 +101,7 @@ class ResolveAttendanceJob implements ShouldQueue
                 ->lockForUpdate()
                 ->get()
                 ->groupBy(function ($record) {
-                    return $record->student_id . '_' . $record->event_day_id . '_' . ($record->event_participation_scope_id ?? '');
+                    return $record->student_id.'_'.$record->event_day_id.'_'.($record->event_participation_scope_id ?? '');
                 });
 
             // Fetch all raw scans for these students on this event
@@ -76,14 +111,14 @@ class ResolveAttendanceJob implements ShouldQueue
                 ->orderBy('scanned_at', 'asc')
                 ->get()
                 ->groupBy(function (RawScan $scan) {
-                    return $scan->student_id . '_' . ($scan->event_participation_scope_id ?? '');
+                    return $scan->student_id.'_'.($scan->event_participation_scope_id ?? '');
                 });
 
             foreach ($studentIds as $studentId) {
                 $scopeKeys = $eventParticipationScopeId
-                    ? [$studentId . '_' . $eventParticipationScopeId]
+                    ? [$studentId.'_'.$eventParticipationScopeId]
                     : $rawScans->keys()
-                        ->filter(fn (string $key) => str_starts_with($key, $studentId . '_'))
+                        ->filter(fn (string $key) => str_starts_with($key, $studentId.'_'))
                         ->values()
                         ->all();
 
@@ -100,7 +135,7 @@ class ResolveAttendanceJob implements ShouldQueue
                     $scansByDay = [];
                     foreach ($studentScans as $scan) {
                         $scanDate = Carbon::parse($scan->scanned_at)->toDateString();
-                        
+
                         // Match to event day by date
                         $matchedDay = $eventDays->first(function ($day) use ($scanDate) {
                             return $day->date->toDateString() === $scanDate;
@@ -122,12 +157,12 @@ class ResolveAttendanceJob implements ShouldQueue
                         $timeOut = $timeOutScan ? Carbon::parse($timeOutScan->scanned_at) : null;
 
                         // If neither time_in nor time_out exists, skip creating/updating records for this day
-                        if (!$timeIn && !$timeOut) {
+                        if (! $timeIn && ! $timeOut) {
                             continue;
                         }
 
                         // Key to search existing record
-                        $recordKey = $studentId . '_' . $day->id . '_' . ($scopeId ?? '');
+                        $recordKey = $studentId.'_'.$day->id.'_'.($scopeId ?? '');
                         $existingGroup = $existingRecords->get($recordKey);
                         $existingRecord = $existingGroup ? $existingGroup->first() : null;
 
@@ -156,7 +191,7 @@ class ResolveAttendanceJob implements ShouldQueue
                         if ($timeOut) {
                             $scanTimeOut = Carbon::createFromTimeString($timeOut->format('H:i:s'));
                             $dayEndTime = Carbon::createFromTimeString($day->end_time);
-                            
+
                             // If they scan out earlier than end_time minus buffer threshold
                             $cutoffTime = $dayEndTime->copy()->subMinutes($event->left_early_buffer_min);
                             if ($scanTimeOut->lt($cutoffTime)) {
@@ -203,5 +238,21 @@ class ResolveAttendanceJob implements ShouldQueue
                     ->update(['processed_at' => now()]);
             }
         });
+
+        $analyticsCache->invalidateEvent($eventId);
+    }
+
+    public function failed(?Throwable $exception): void
+    {
+        Log::error('Attendance resolution job failed.', [
+            'event_id' => $this->eventId,
+            'event_participation_scope_id' => $this->eventParticipationScopeId,
+            'exception_class' => $exception ? $exception::class : null,
+        ]);
+    }
+
+    private function overlapKey(): string
+    {
+        return 'attendance-resolution:'.$this->eventId.':'.($this->eventParticipationScopeId ?? 'legacy');
     }
 }

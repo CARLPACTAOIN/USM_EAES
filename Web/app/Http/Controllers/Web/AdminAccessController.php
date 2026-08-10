@@ -14,6 +14,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 class AdminAccessController extends Controller
 {
@@ -61,7 +62,7 @@ class AdminAccessController extends Controller
         $auditTo = $request->input('audit_to');
 
         $activeTab = $request->input('tab');
-        if (!in_array($activeTab, ['organizations', 'assignments', 'audit'], true)) {
+        if (! in_array($activeTab, ['organizations', 'assignments', 'audit'], true)) {
             if ($request->has('orgs_page') || $request->has('org_search') || $request->has('org_type') || $request->has('org_status')) {
                 $activeTab = 'organizations';
             } elseif ($request->has('page') || $request->has('assign_search') || $request->has('assign_role') || $request->has('assign_status') || $request->has('assign_term')) {
@@ -87,22 +88,22 @@ class AdminAccessController extends Controller
                 $query->where('academic_year', '!=', $currentAy);
             })
             ->when($assignSearch !== '', function ($query) use ($assignSearch) {
-                $needle = '%' . mb_strtolower($assignSearch) . '%';
+                $needle = '%'.mb_strtolower($assignSearch).'%';
                 $query->where(function ($inner) use ($needle) {
                     $inner->whereHas('user', function ($uQuery) use ($needle) {
                         $uQuery->whereRaw('LOWER(name) LIKE ?', [$needle])
                             ->orWhereRaw('LOWER(email) LIKE ?', [$needle]);
                     })
-                    ->orWhereHas('organization', function ($oQuery) use ($needle) {
-                        $oQuery->whereRaw('LOWER(name) LIKE ?', [$needle])
-                            ->orWhereRaw('LOWER(acronym) LIKE ?', [$needle]);
-                    })
-                    ->orWhereHas('college', function ($cQuery) use ($needle) {
-                        $cQuery->whereRaw('LOWER(name) LIKE ?', [$needle])
-                            ->orWhereRaw('LOWER(code) LIKE ?', [$needle]);
-                    })
-                    ->orWhereRaw('LOWER(role_name) LIKE ?', [$needle])
-                    ->orWhereRaw('LOWER(position_title) LIKE ?', [$needle]);
+                        ->orWhereHas('organization', function ($oQuery) use ($needle) {
+                            $oQuery->whereRaw('LOWER(name) LIKE ?', [$needle])
+                                ->orWhereRaw('LOWER(acronym) LIKE ?', [$needle]);
+                        })
+                        ->orWhereHas('college', function ($cQuery) use ($needle) {
+                            $cQuery->whereRaw('LOWER(name) LIKE ?', [$needle])
+                                ->orWhereRaw('LOWER(code) LIKE ?', [$needle]);
+                        })
+                        ->orWhereRaw('LOWER(role_name) LIKE ?', [$needle])
+                        ->orWhereRaw('LOWER(position_title) LIKE ?', [$needle]);
                 });
             })
             ->latest()
@@ -118,7 +119,7 @@ class AdminAccessController extends Controller
                 $query->where('status', $orgStatus);
             })
             ->when($orgSearch !== '', function ($query) use ($orgSearch) {
-                $needle = '%' . mb_strtolower($orgSearch) . '%';
+                $needle = '%'.mb_strtolower($orgSearch).'%';
 
                 $query->where(function ($inner) use ($needle) {
                     $inner->whereRaw('LOWER(name) LIKE ?', [$needle])
@@ -147,7 +148,7 @@ class AdminAccessController extends Controller
                 $query->whereDate('created_at', '<=', $auditTo);
             })
             ->when($auditSearch !== '', function ($query) use ($auditSearch) {
-                $needle = '%' . mb_strtolower($auditSearch) . '%';
+                $needle = '%'.mb_strtolower($auditSearch).'%';
                 $query->where(function ($inner) use ($needle) {
                     $inner->whereRaw('LOWER(action) LIKE ?', [$needle])
                         ->orWhereRaw('LOWER(CAST(details AS TEXT)) LIKE ?', [$needle])
@@ -203,7 +204,7 @@ class AdminAccessController extends Controller
             return response()->json([]);
         }
 
-        $like = '%' . $query . '%';
+        $like = '%'.$query.'%';
 
         $users = User::query()
             ->where(function ($builder) use ($like) {
@@ -221,9 +222,11 @@ class AdminAccessController extends Controller
     public function store(Request $request, AdminAssignmentService $service)
     {
         $this->authorizeOsa($request);
+        $this->normalizeAssignmentPerson($request);
 
         $validator = Validator::make($request->all(), [
             'name' => ['nullable', 'string', 'max:255'],
+            'person_query' => ['nullable', 'string', 'max:255'],
             'email' => ['required_without:student_id_number', 'nullable', 'email', 'max:255'],
             'student_id_number' => ['nullable', 'string', 'max:20'],
             'password' => ['nullable', 'string', 'min:8'],
@@ -341,7 +344,7 @@ class AdminAccessController extends Controller
 
     private function authorizeOsa(Request $request): void
     {
-        if (!$request->user()?->hasRole('Super Admin (OSA)')) {
+        if (! $request->user()?->hasRole('Super Admin (OSA)')) {
             abort(403);
         }
     }
@@ -353,16 +356,16 @@ class AdminAccessController extends Controller
             ? Organization::find($request->input('organization_id'))
             : null;
 
-        if ($organization && !in_array($organization->type, OrganizationManagementService::ORGANIZATION_TYPES, true)) {
+        if ($organization && ! in_array($organization->type, OrganizationManagementService::ORGANIZATION_TYPES, true)) {
             $validator->errors()->add('organization_id', 'Select an active recognized organization.');
         }
 
-        if ($role === 'Society Admin' && (!$organization || !in_array($organization->type, ['society', 'non_academic_org'], true))) {
+        if ($role === 'Society Admin' && (! $organization || ! in_array($organization->type, ['society', 'non_academic_org'], true))) {
             $validator->errors()->add('organization_id', 'Select a society or recognized non-academic organization for Society Admin assignments.');
         }
 
         if ($role === 'LSG Admin') {
-            if (!$request->filled('college_id')) {
+            if (! $request->filled('college_id')) {
                 $validator->errors()->add('college_id', 'Select a College for LSG Admin assignments.');
             }
 
@@ -382,13 +385,13 @@ class AdminAccessController extends Controller
         }
 
         if ($role === 'Academic Unit Admin') {
-            if (!$organization || $organization->type !== 'academic_unit') {
+            if (! $organization || $organization->type !== 'academic_unit') {
                 $validator->errors()->add('organization_id', 'Select an academic unit organization for Academic Unit Admin assignments.');
             }
         }
 
         if ($role === 'Office Event Admin') {
-            if (!$organization || $organization->type !== 'administrative_office') {
+            if (! $organization || $organization->type !== 'administrative_office') {
                 $validator->errors()->add('organization_id', 'Select an administrative office for Office Event Admin assignments.');
             }
 
@@ -410,7 +413,7 @@ class AdminAccessController extends Controller
             $user = User::where('student_id_number', $request->input('student_id_number'))->first();
         }
 
-        if (!$user && $request->filled('email')) {
+        if (! $user && $request->filled('email')) {
             $user = User::where('email', $request->input('email'))->first();
         }
 
@@ -419,8 +422,10 @@ class AdminAccessController extends Controller
         }
 
         $email = $request->input('email');
-        if (!$email) {
-            abort(422, 'Email is required when creating a new account.');
+        if (! $email) {
+            throw ValidationException::withMessages([
+                'person_query' => 'Select an existing account result, or create a new staff account with a USM email address.',
+            ]);
         }
 
         $user = User::create([
@@ -430,11 +435,32 @@ class AdminAccessController extends Controller
             'user_type' => str_starts_with(strtolower($email), 's.') ? 'student' : 'faculty_or_staff_pending',
         ]);
 
-        if ($user->user_type === 'student' && !$user->hasRole('Student')) {
+        if ($user->user_type === 'student' && ! $user->hasRole('Student')) {
             $user->assignRole('Student');
         }
 
         return $user;
+    }
+
+    private function normalizeAssignmentPerson(Request $request): void
+    {
+        if ($request->filled('email') || $request->filled('student_id_number')) {
+            return;
+        }
+
+        $query = trim((string) $request->input('person_query', ''));
+
+        if ($query === '') {
+            return;
+        }
+
+        if (str_contains($query, '@')) {
+            $request->merge(['email' => $query]);
+
+            return;
+        }
+
+        $request->merge(['student_id_number' => $query]);
     }
 
     private function resolveAssignmentScope(Request $request): array
@@ -443,15 +469,15 @@ class AdminAccessController extends Controller
         $organization = $request->filled('organization_id') ? Organization::find($request->input('organization_id')) : null;
         $college = $request->filled('college_id') ? College::find($request->input('college_id')) : null;
 
-        if (!$organization && $role === 'USG Admin') {
+        if (! $organization && $role === 'USG Admin') {
             $organization = Organization::where('type', 'usg')->where('status', 'active')->first();
         }
 
-        if (!$organization && $role === 'LSG Admin' && $college) {
+        if (! $organization && $role === 'LSG Admin' && $college) {
             $organization = Organization::where('type', 'lsg')->where('college_id', $college->id)->first();
         }
 
-        if (!$college && $organization?->college_id) {
+        if (! $college && $organization?->college_id) {
             $college = $organization->college;
         }
 
@@ -462,7 +488,7 @@ class AdminAccessController extends Controller
     {
         $year = now()->year;
 
-        return $year . '-' . ($year + 1);
+        return $year.'-'.($year + 1);
     }
 
     private function isDateString(mixed $value): bool
@@ -480,19 +506,19 @@ class AdminAccessController extends Controller
             $details = $log->details ?? [];
 
             foreach (['user_id'] as $key) {
-                if (!empty($details[$key])) {
+                if (! empty($details[$key])) {
                     $userIds[] = $details[$key];
                 }
             }
 
             foreach (['organization_id'] as $key) {
-                if (!empty($details[$key])) {
+                if (! empty($details[$key])) {
                     $organizationIds[] = $details[$key];
                 }
             }
 
             foreach (['college_id'] as $key) {
-                if (!empty($details[$key])) {
+                if (! empty($details[$key])) {
                     $collegeIds[] = $details[$key];
                 }
             }

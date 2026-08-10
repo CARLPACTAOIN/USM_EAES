@@ -12,6 +12,7 @@ use App\Services\AdminScopeService;
 use App\Services\ParticipationScopeService;
 use App\Support\AdminScope;
 use Carbon\Carbon;
+use Illuminate\Contracts\View\View;
 use Illuminate\Support\Collection;
 use Livewire\Attributes\Locked;
 use Livewire\Component;
@@ -71,6 +72,7 @@ class EventAttendanceRules extends Component
 
         if ($this->attendancePolicyLocked($event)) {
             $this->errorNotice = 'Attendance rules are locked after the event starts.';
+
             return;
         }
 
@@ -97,11 +99,13 @@ class EventAttendanceRules extends Component
 
         if ($this->attendancePolicyLocked($event)) {
             $this->errorNotice = 'Attendance rules are locked after the event starts.';
+
             return;
         }
 
         if ($event->event_late_cutoff_min !== null) {
             $this->errorNotice = 'This event already has an organizer late cutoff. Participant scope cutoffs are available only when the organizer leaves the event cutoff unset.';
+
             return;
         }
 
@@ -127,16 +131,17 @@ class EventAttendanceRules extends Component
         $this->notice = 'Participant late cutoff updated.';
     }
 
-    public function render()
+    public function render(): View
     {
         $event = $this->eventForDisplay();
+        $participantScopes = $this->visibleParticipantScopes($event);
 
         return view('livewire.dashboard.event-attendance-rules', [
             'event' => $event,
-            'participantScopes' => $this->visibleParticipantScopes($event),
+            'participantScopes' => $participantScopes,
             'attendancePolicyLocked' => $this->attendancePolicyLocked($event),
             'canManageEventRules' => $this->canManageEventRules($event),
-            'canEditScopeCutoffs' => $this->editableScopeMap($event),
+            'canEditScopeCutoffs' => $this->editableScopeMap($event, $participantScopes),
             'user' => auth()->user(),
         ]);
     }
@@ -162,7 +167,7 @@ class EventAttendanceRules extends Component
             ->sortBy('participant_name_snapshot')
             ->values();
 
-        if (!$this->isParticipatingWorkspace) {
+        if (! $this->isParticipatingWorkspace) {
             return $scopes;
         }
 
@@ -182,6 +187,7 @@ class EventAttendanceRules extends Component
 
         if ($adminScope->isSuperAdmin()) {
             abort_if($event->status === 'draft', 403, 'Draft proposals are visible only to their organizers until submitted.');
+
             return;
         }
 
@@ -201,7 +207,7 @@ class EventAttendanceRules extends Component
     {
         $user = auth()->user();
 
-        abort_unless($user && !$user->hasRole('Super Admin (OSA)') && $user->can('create-proposals'), 403);
+        abort_unless($user && ! $user->hasRole('Super Admin (OSA)') && $user->can('create-proposals'), 403);
         abort_unless($this->canManageEventRules($event), 403, 'Only the event organizer can update attendance rules.');
     }
 
@@ -209,7 +215,7 @@ class EventAttendanceRules extends Component
     {
         $user = auth()->user();
 
-        abort_unless($user && !$user->hasRole('Super Admin (OSA)'), 403);
+        abort_unless($user && ! $user->hasRole('Super Admin (OSA)'), 403);
         abort_unless($scope->event_id === $event->id, 404);
         abort_unless(app(ParticipationScopeService::class)->canManageScope($user, $scope), 403, 'Access denied. Restricted to the participant scope owner.');
     }
@@ -221,22 +227,22 @@ class EventAttendanceRules extends Component
 
         return (bool) ($user
             && $user->can('create-proposals')
-            && !$user->hasRole('Super Admin (OSA)')
+            && ! $user->hasRole('Super Admin (OSA)')
             && $adminScope?->organizationId
             && $event->organization_id === $adminScope->organizationId);
     }
 
-    private function editableScopeMap(Event $event): array
+    private function editableScopeMap(Event $event, Collection $participantScopes): array
     {
         $user = auth()->user();
         $attendancePolicyLocked = $this->attendancePolicyLocked($event);
 
-        return $this->visibleParticipantScopes($event)
+        return $participantScopes
             ->mapWithKeys(fn (EventParticipationScope $scope) => [
                 $scope->id => (bool) ($user
-                    && !$user->hasRole('Super Admin (OSA)')
+                    && ! $user->hasRole('Super Admin (OSA)')
                     && $event->event_late_cutoff_min === null
-                    && !$attendancePolicyLocked
+                    && ! $attendancePolicyLocked
                     && app(ParticipationScopeService::class)->canManageScope($user, $scope)),
             ])
             ->all();
@@ -250,7 +256,7 @@ class EventAttendanceRules extends Component
         $eventEndDate = $event->end_date?->copy()->startOfDay() ?? $eventStartDate;
         $startsAt = $event->eventDays
             ->filter(function (EventDay $day) use ($eventStartDate, $eventEndDate): bool {
-                if (!$eventStartDate || !$eventEndDate || !$day->date) {
+                if (! $eventStartDate || ! $eventEndDate || ! $day->date) {
                     return true;
                 }
 
@@ -259,28 +265,28 @@ class EventAttendanceRules extends Component
                 return $dayDate->betweenIncluded($eventStartDate, $eventEndDate);
             })
             ->map(function (EventDay $day) use ($timezone): ?Carbon {
-                if (!$day->date || !$day->start_time) {
+                if (! $day->date || ! $day->start_time) {
                     return null;
                 }
 
-                return Carbon::parse($day->date->toDateString() . ' ' . $day->start_time, $timezone);
+                return Carbon::parse($day->date->toDateString().' '.$day->start_time, $timezone);
             })
             ->filter()
             ->sortBy(fn (Carbon $date) => $date->timestamp)
             ->first();
 
-        if (!$startsAt && $event->start_date) {
+        if (! $startsAt && $event->start_date) {
             $firstStartTime = $event->eventDays
                 ->sortBy('day_number')
                 ->first(fn (EventDay $day) => filled($day->start_time))
                 ?->start_time;
 
             if ($firstStartTime) {
-                $startsAt = Carbon::parse($event->start_date->toDateString() . ' ' . $firstStartTime, $timezone);
+                $startsAt = Carbon::parse($event->start_date->toDateString().' '.$firstStartTime, $timezone);
             }
         }
 
-        if (!$startsAt && $event->start_date) {
+        if (! $startsAt && $event->start_date) {
             $startsAt = Carbon::parse($event->start_date->toDateString(), $timezone)->startOfDay();
         }
 

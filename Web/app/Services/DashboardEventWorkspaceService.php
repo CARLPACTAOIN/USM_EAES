@@ -16,8 +16,7 @@ class DashboardEventWorkspaceService
         private readonly AdminScopeService $adminScopes,
         private readonly ParticipationScopeService $participationScopes,
         private readonly EventLifecycleService $lifecycles
-    ) {
-    }
+    ) {}
 
     public function eventsFor(User $user, string $workspace, ?string $status = null, ?string $search = null, int $perPage = 15)
     {
@@ -36,14 +35,16 @@ class DashboardEventWorkspaceService
 
         $search = trim((string) $search);
         if ($search !== '') {
-            $query->where(function ($searchQuery) use ($search): void {
+            $searchTerm = "%{$search}%";
+
+            $query->where(function ($searchQuery) use ($searchTerm): void {
                 $searchQuery
-                    ->where('title', 'like', "%{$search}%")
-                    ->orWhere('proposal_category', 'like', "%{$search}%")
-                    ->orWhereHas('organization', function ($organizationQuery) use ($search): void {
+                    ->whereLike('title', $searchTerm)
+                    ->orWhereLike('proposal_category', $searchTerm)
+                    ->orWhereHas('organization', function ($organizationQuery) use ($searchTerm): void {
                         $organizationQuery
-                            ->where('name', 'like', "%{$search}%")
-                            ->orWhere('acronym', 'like', "%{$search}%");
+                            ->whereLike('name', $searchTerm)
+                            ->orWhereLike('acronym', $searchTerm);
                     });
             });
         }
@@ -54,6 +55,30 @@ class DashboardEventWorkspaceService
         $this->annotateEventsForDashboard($events->getCollection(), $user, $workspace);
 
         return $events;
+    }
+
+    public function eventForWorkspace(User $user, string $workspace, string $eventId): Event
+    {
+        $workspace = $workspace === 'participating' ? 'participating' : 'organized';
+        $query = $this->baseEventQuery();
+
+        if ($workspace === 'participating') {
+            $this->applyParticipatingEventScope($query, $user);
+        } else {
+            $this->applyEventTenantScope($query, $user);
+        }
+
+        $event = $query->find($eventId);
+
+        if (! $event) {
+            abort(404);
+        }
+        $events = collect([$event]);
+
+        $this->ensureOrganizerScopesForDashboard($events);
+        $this->annotateEventsForDashboard($events, $user, $workspace);
+
+        return $event;
     }
 
     public function refreshLifecycleForDashboard(User $user): void
@@ -114,8 +139,8 @@ class DashboardEventWorkspaceService
     public function statusFiltersFor(User $user): array
     {
         return $user->hasRole('Super Admin (OSA)')
-            ? ['submitted', 'under_review', 'approved', 'rejected', 'completed']
-            : ['draft', 'submitted', 'under_review', 'approved', 'rejected', 'completed'];
+            ? [Event::STATUS_SUBMITTED, Event::STATUS_UNDER_REVIEW, Event::STATUS_REVISION_REQUESTED, Event::STATUS_APPROVED, Event::STATUS_REJECTED, Event::STATUS_COMPLETED]
+            : [Event::STATUS_DRAFT, Event::STATUS_SUBMITTED, Event::STATUS_UNDER_REVIEW, Event::STATUS_REVISION_REQUESTED, Event::STATUS_APPROVED, Event::STATUS_REJECTED, Event::STATUS_COMPLETED];
     }
 
     private function baseEventQuery()
@@ -164,8 +189,9 @@ class DashboardEventWorkspaceService
     {
         $scope = $this->adminScopes->forUser($user);
 
-        if (!$scope) {
+        if (! $scope) {
             $query->whereRaw('1 = 0');
+
             return;
         }
 
@@ -204,7 +230,7 @@ class DashboardEventWorkspaceService
                     ->orWhereHas('delegatedOrganization', fn ($organizationQuery) => $organizationQuery->where('college_id', $scope->collegeId));
             }
 
-            if (!$hasBoundary) {
+            if (! $hasBoundary) {
                 $boundaryQuery->whereRaw('1 = 0');
             }
         });
@@ -251,7 +277,7 @@ class DashboardEventWorkspaceService
         $eventEndDate = $event->end_date?->copy()->startOfDay() ?? $eventStartDate;
         $startsAt = $event->eventDays
             ->filter(function (EventDay $day) use ($eventStartDate, $eventEndDate): bool {
-                if (!$eventStartDate || !$eventEndDate || !$day->date) {
+                if (! $eventStartDate || ! $eventEndDate || ! $day->date) {
                     return true;
                 }
 
@@ -260,7 +286,7 @@ class DashboardEventWorkspaceService
                 return $dayDate->betweenIncluded($eventStartDate, $eventEndDate);
             })
             ->map(function (EventDay $day) use ($timezone): ?Carbon {
-                if (!$day->date || !$day->start_time) {
+                if (! $day->date || ! $day->start_time) {
                     return null;
                 }
 
@@ -270,7 +296,7 @@ class DashboardEventWorkspaceService
             ->sortBy(fn (Carbon $date) => $date->timestamp)
             ->first();
 
-        if (!$startsAt && $event->start_date) {
+        if (! $startsAt && $event->start_date) {
             $firstStartTime = $event->eventDays
                 ->sortBy('day_number')
                 ->first(fn (EventDay $day) => filled($day->start_time))
@@ -281,7 +307,7 @@ class DashboardEventWorkspaceService
             }
         }
 
-        if (!$startsAt && $event->start_date) {
+        if (! $startsAt && $event->start_date) {
             $startsAt = Carbon::parse($event->start_date->toDateString(), $timezone)->startOfDay();
         }
 
@@ -320,7 +346,7 @@ class DashboardEventWorkspaceService
 
     private function adminScopeMatchesParticipantScope(?AdminScope $adminScope, EventParticipationScope $scope): bool
     {
-        if (!$adminScope) {
+        if (! $adminScope) {
             return false;
         }
 

@@ -20,8 +20,7 @@ class ScannerAssignmentService
         private readonly ScannerSessionService $scannerSessions,
         private readonly AdminScopeService $adminScopes,
         private readonly ParticipationScopeService $participationScopes
-    ) {
-    }
+    ) {}
 
     public function assign(
         Event $event,
@@ -41,7 +40,7 @@ class ScannerAssignmentService
             ]);
         }
 
-        if (!$this->participationScopes->canManageScope($assignedBy, $participationScope)) {
+        if (! $this->participationScopes->canManageScope($assignedBy, $participationScope)) {
             throw ValidationException::withMessages([
                 'event_participation_scope_id' => 'You cannot assign scanners for this attendance scope.',
             ]);
@@ -54,7 +53,7 @@ class ScannerAssignmentService
         }
 
         $this->assertEligibleScanner($scannerUser, $participationScope);
-        if (!$this->participationScopes->userBelongsToScope($scannerUser, $participationScope)) {
+        if (! $this->participationScopes->userBelongsToScope($scannerUser, $participationScope)) {
             throw ValidationException::withMessages([
                 'scanner_user_id' => 'Select a scanner account inside the selected attendance scope.',
             ]);
@@ -146,8 +145,7 @@ class ScannerAssignmentService
         int $limit = 50,
         ?User $admin = null,
         ?EventParticipationScope $participationScope = null
-    ): Collection
-    {
+    ): Collection {
         return $this->eligibleUsersQuery($admin, $search, $participationScope)
             ->orderBy('name')
             ->limit($limit)
@@ -169,7 +167,7 @@ class ScannerAssignmentService
             'email' => $user->email,
             'studentId' => $identity,
             'organization' => $scopeLabel,
-            'label' => trim($user->name . ' · ' . $identity . ' · ' . $scopeLabel),
+            'label' => trim($user->name.' · '.$identity.' · '.$scopeLabel),
         ];
     }
 
@@ -182,24 +180,25 @@ class ScannerAssignmentService
             ->whereKey($scannerUser->id)
             ->exists();
 
-        if (!$eligible) {
+        if (! $eligible) {
             return false;
         }
 
-        return !$participationScope || $this->participationScopes->userBelongsToScope($scannerUser, $participationScope);
+        return ! $participationScope || $this->participationScopes->userBelongsToScope($scannerUser, $participationScope);
     }
 
     private function eligibleUsersQuery(
         ?User $admin = null,
         ?string $search = null,
         ?EventParticipationScope $participationScope = null
-    ): Builder
-    {
-        $domain = config('services.eaes.allowed_email_domain', 'usm.edu.ph');
+    ): Builder {
+        $domain = mb_strtolower((string) config('services.eaes.allowed_email_domain', 'usm.edu.ph'));
+        $normalizedSearch = trim((string) $search);
+        $searchNeedle = '%'.mb_strtolower($normalizedSearch).'%';
 
         return User::query()
             ->with(['organization', 'college', 'program', 'activeOrganizationMemberships.organization', 'employeeRosterEntry'])
-            ->where('email', 'like', '%@' . $domain)
+            ->whereRaw('LOWER(email) LIKE ?', ['%@'.$domain])
             ->where(function (Builder $query): void {
                 $query->where(function (Builder $studentQuery): void {
                     $studentQuery
@@ -222,18 +221,18 @@ class ScannerAssignmentService
                         });
                 });
             })
-            ->when($search, function ($query, string $search): void {
-                $query->where(function ($query) use ($search): void {
-                    $query->where('name', 'like', "%{$search}%")
-                        ->orWhere('email', 'like', "%{$search}%")
-                        ->orWhere('student_id_number', 'like', "%{$search}%")
-                        ->orWhereHas('activeOrganizationMemberships.organization', function (Builder $organizationQuery) use ($search): void {
-                            $organizationQuery->where('name', 'like', "%{$search}%")
-                                ->orWhere('acronym', 'like', "%{$search}%");
+            ->when($normalizedSearch !== '', function ($query) use ($searchNeedle): void {
+                $query->where(function ($query) use ($searchNeedle): void {
+                    $query->whereRaw('LOWER(name) LIKE ?', [$searchNeedle])
+                        ->orWhereRaw('LOWER(email) LIKE ?', [$searchNeedle])
+                        ->orWhereRaw('LOWER(student_id_number) LIKE ?', [$searchNeedle])
+                        ->orWhereHas('activeOrganizationMemberships.organization', function (Builder $organizationQuery) use ($searchNeedle): void {
+                            $organizationQuery->whereRaw('LOWER(name) LIKE ?', [$searchNeedle])
+                                ->orWhereRaw('LOWER(acronym) LIKE ?', [$searchNeedle]);
                         })
-                        ->orWhereHas('employeeRosterEntry', function (Builder $employeeQuery) use ($search): void {
-                            $employeeQuery->where('employee_id', 'like', "%{$search}%")
-                                ->orWhere('office_department', 'like', "%{$search}%");
+                        ->orWhereHas('employeeRosterEntry', function (Builder $employeeQuery) use ($searchNeedle): void {
+                            $employeeQuery->whereRaw('LOWER(employee_id) LIKE ?', [$searchNeedle])
+                                ->orWhereRaw('LOWER(office_department) LIKE ?', [$searchNeedle]);
                         });
                 });
             })
@@ -254,8 +253,9 @@ class ScannerAssignmentService
     {
         $scope = $this->adminScopes->forUser($admin);
 
-        if (!$scope) {
+        if (! $scope) {
             $query->whereRaw('1 = 0');
+
             return;
         }
 
@@ -273,12 +273,14 @@ class ScannerAssignmentService
                             ->orWhere('id', $scope->organizationId);
                     });
             });
+
             return;
         }
 
         if ($scope->isLsgAdmin()) {
-            if (!$scope->collegeId) {
+            if (! $scope->collegeId) {
                 $query->whereRaw('1 = 0');
+
                 return;
             }
 
@@ -288,16 +290,19 @@ class ScannerAssignmentService
                         $membershipQuery->where('college_id', $scope->collegeId);
                     });
             });
+
             return;
         }
 
         if ($scope->isHrAdmin()) {
             $query->whereHas('employeeRosterEntry', fn (Builder $employeeQuery) => $employeeQuery->where('status', 'active'));
+
             return;
         }
 
-        if (!$scope->organizationId) {
+        if (! $scope->organizationId) {
             $query->whereRaw('1 = 0');
+
             return;
         }
 
@@ -313,7 +318,7 @@ class ScannerAssignmentService
     {
         $domain = config('services.eaes.allowed_email_domain', 'usm.edu.ph');
 
-        if (!str_ends_with(strtolower($user->email), '@' . strtolower($domain))) {
+        if (! str_ends_with(strtolower($user->email), '@'.strtolower($domain))) {
             return false;
         }
 
@@ -345,7 +350,7 @@ class ScannerAssignmentService
     {
         $scope?->loadMissing('event');
 
-        if (!$this->isEligibleScanner($user, $scope)) {
+        if (! $this->isEligibleScanner($user, $scope)) {
             throw ValidationException::withMessages([
                 'scanner_user_id' => 'Select an institutional account with a completed scanner-ready profile for this attendance scope.',
             ]);
@@ -396,6 +401,7 @@ class ScannerAssignmentService
                 $label = trim((string) $label);
                 if ($label === '') {
                     $query->whereNull('label')->orWhere('label', '');
+
                     return;
                 }
 

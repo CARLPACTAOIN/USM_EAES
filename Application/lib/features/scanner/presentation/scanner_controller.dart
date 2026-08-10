@@ -25,6 +25,8 @@ class ScannerController extends ChangeNotifier {
     String Function()? dedupIdFactory,
     DateTime Function()? nowFactory,
     Duration? duplicateCooldown,
+    Future<void> Function(Duration)? syncRetryDelay,
+    int maxSyncRetries = 2,
   }) : _localDatabase = localDatabase,
        _apiClient = apiClient,
        _deviceId = deviceId,
@@ -32,6 +34,9 @@ class ScannerController extends ChangeNotifier {
            networkStatusChecker ?? ConnectivityStatusChecker(),
        _dedupIdFactory = dedupIdFactory ?? (() => const Uuid().v4()),
        _nowFactory = nowFactory ?? DateTime.now,
+       _syncRetryDelay =
+           syncRetryDelay ?? ((duration) => Future<void>.delayed(duration)),
+       _maxSyncRetries = maxSyncRetries,
        duplicateCooldown =
            duplicateCooldown ??
            Duration(seconds: AppConfig.duplicateCooldownSeconds);
@@ -54,6 +59,8 @@ class ScannerController extends ChangeNotifier {
   final NetworkStatusChecker _networkStatusChecker;
   final String Function() _dedupIdFactory;
   final DateTime Function() _nowFactory;
+  final Future<void> Function(Duration) _syncRetryDelay;
+  final int _maxSyncRetries;
 
   ScannerSession? session;
   ScanType scanType = ScanType.timeIn;
@@ -586,10 +593,7 @@ class ScannerController extends ChangeNotifier {
         batch.map((scan) => scan.dedupKey).toList(),
       );
 
-      final response = await _apiClient.syncScans(
-        session: activeSession,
-        scans: batch,
-      );
+      final response = await _syncBatchWithRetries(activeSession, batch);
 
       final ingested = (response['ingested_count'] as num?)?.toInt();
       final confirmedCount = ingested ?? batch.length;
@@ -644,6 +648,52 @@ class ScannerController extends ChangeNotifier {
       notifyListeners();
       await checkEventRetention();
     }
+  }
+
+  Future<Map<String, dynamic>> _syncBatchWithRetries(
+    ScannerSession activeSession,
+    List<OfflineScan> batch,
+  ) async {
+    for (var retryAttempt = 0; retryAttempt <= _maxSyncRetries; retryAttempt++) {
+      try {
+        return await _apiClient.syncScans(
+          session: activeSession,
+          scans: batch,
+        );
+      } catch (error) {
+        if (!_isRetryableSyncError(error) || retryAttempt == _maxSyncRetries) {
+          rethrow;
+        }
+
+        final delay = _retryDelayFor(error, retryAttempt);
+        statusMessage = 'Server is temporarily unavailable. Retrying sync shortly.';
+        notifyListeners();
+        await _syncRetryDelay(delay);
+      }
+    }
+
+    throw StateError('Sync retry loop completed without a response.');
+  }
+
+  bool _isRetryableSyncError(Object error) {
+    if (error is ScannerApiException) {
+      return error.statusCode == 429 || error.statusCode == 503;
+    }
+
+    return ScannerErrorMapper.map(error).category ==
+        ScannerErrorCategory.networkError;
+  }
+
+  Duration _retryDelayFor(Object error, int retryAttempt) {
+    if (error is ScannerApiException && error.retryAfter != null) {
+      return error.retryAfter!.inSeconds > 30
+          ? const Duration(seconds: 30)
+          : error.retryAfter!;
+    }
+
+    return retryAttempt == 0
+        ? const Duration(seconds: 2)
+        : const Duration(seconds: 4);
   }
 
   Future<void> checkEventRetention() async {

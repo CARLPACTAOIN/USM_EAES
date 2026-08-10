@@ -18,9 +18,13 @@ class LivewireFrontendBootstrapTest extends TestCase
         $this->assertStringContainsString('Livewire.start();', $appJs);
         $this->assertStringNotContainsString("import Alpine from 'alpinejs';", $appJs);
         $this->assertStringNotContainsString('Alpine.start();', $appJs);
+        $this->assertStringNotContainsString("from 'html5-qrcode'", $appJs);
+        $this->assertStringNotContainsString("Alpine.data('profileQrScanner'", $appJs);
 
         $this->assertStringContainsString('@livewireScriptConfig', $layout);
         $this->assertStringNotContainsString('@livewireScripts', $layout);
+        $this->assertStringContainsString('vendor/html5-qrcode/html5-qrcode.min.js', $layout);
+        $this->assertStringContainsString("window.Alpine.data('profileQrScanner'", $layout);
     }
 
     public function test_modal_editor_controls_use_immediate_alpine_state(): void
@@ -29,8 +33,15 @@ class LivewireFrontendBootstrapTest extends TestCase
         $createView = file_get_contents(resource_path('views/livewire/dashboard/event-proposal-create.blade.php'));
         $rulesView = file_get_contents(resource_path('views/livewire/dashboard/event-attendance-rules.blade.php'));
         $workflowView = file_get_contents(resource_path('views/livewire/dashboard/event-proposal-workflow.blade.php'));
+        $participantScopesView = file_get_contents(resource_path('views/livewire/dashboard/event-participant-scopes.blade.php'));
+        $assignAdminView = file_get_contents(resource_path('views/dashboard/admin-users/partials/assign-admin-form.blade.php'));
+        $adminAccessView = file_get_contents(resource_path('views/dashboard/admin-users/index.blade.php'));
+        $eventsIndexView = file_get_contents(resource_path('views/dashboard/events/index.blade.php'));
 
         $this->assertStringContainsString("Alpine.data('eventScheduleEditor'", $appJs);
+        $this->assertStringContainsString("Alpine.data('adminAssignmentForm'", $appJs);
+        $this->assertStringContainsString("Alpine.data('organizationForm'", $appJs);
+        $this->assertStringContainsString("Alpine.data('participantAudienceBuilder'", $appJs);
         $this->assertStringContainsString("\$wire.entangle('eventDays')", $createView);
         $this->assertStringContainsString('x-on:click="addDay()"', $createView);
         $this->assertStringContainsString('x-on:click="removeDay(index)"', $createView);
@@ -44,5 +55,21 @@ class LivewireFrontendBootstrapTest extends TestCase
         $this->assertStringNotContainsString('is-recommended', $rulesView);
 
         $this->assertStringContainsString('setTimeout(() => visible = false, 4000)', $workflowView);
+
+        $this->assertStringContainsString('name="person_query"', $assignAdminView);
+        $this->assertStringContainsString('x-on:submit="prepareSubmit()"', $assignAdminView);
+        $this->assertStringContainsString('oldPersonQuery', $assignAdminView);
+        $this->assertStringNotContainsString("window.Alpine.data('adminAssignmentForm'", $adminAccessView);
+
+        $this->assertStringContainsString('participantAudienceBuilder', $participantScopesView);
+        $this->assertStringContainsString("\$wire.entangle('audienceMode')", $participantScopesView);
+        $this->assertStringContainsString('x-on:click="setAudienceMode(\'all\')"', $participantScopesView);
+        $this->assertStringContainsString('x-model.debounce.150ms="organizationQuery"', $participantScopesView);
+        $this->assertStringNotContainsString('wire:click="setAudienceMode', $participantScopesView);
+        $this->assertStringNotContainsString('wire:model.live.debounce.250ms="organizationQuery"', $participantScopesView);
+
+        $this->assertStringContainsString("window.Livewire.hook('morphed'", $eventsIndexView);
+        $this->assertStringContainsString("component.name === 'dashboard.events-workspace'", $eventsIndexView);
+        $this->assertStringContainsString('requestAnimationFrame(() => window.initEventsDashboard?.())', $eventsIndexView);
     }
 }

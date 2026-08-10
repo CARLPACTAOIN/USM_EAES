@@ -12,9 +12,7 @@ use Illuminate\Support\Collection;
 
 class EventNotificationService
 {
-    public function __construct(private readonly AdminScopeService $adminScopes)
-    {
-    }
+    public function __construct(private readonly AdminScopeService $adminScopes) {}
 
     public function notifyParticipantScopeInvitation(EventParticipationScope $scope): int
     {
@@ -26,7 +24,7 @@ class EventNotificationService
 
         return $this->notifyUsers(
             $this->participantRecipientAdmins($scope),
-            'participant_scope_invitation:' . $scope->id,
+            'participant_scope_invitation:'.$scope->id,
             'participant_scope_invitation',
             $scope,
             [
@@ -56,7 +54,7 @@ class EventNotificationService
 
     public function acknowledgeInvitation(EventParticipationScope $scope, User $actor): bool
     {
-        if (!$this->canAcknowledgeInvitation($actor, $scope)) {
+        if (! $this->canAcknowledgeInvitation($actor, $scope)) {
             return false;
         }
 
@@ -71,7 +69,7 @@ class EventNotificationService
 
         $this->notifyUsers(
             $this->organizerAndOsaRecipients($scope),
-            'participant_scope_acknowledged:' . $scope->id,
+            'participant_scope_acknowledged:'.$scope->id,
             'participant_scope_acknowledged',
             $scope->fresh(['event.organization', 'organization', 'delegatedOrganization']),
             [
@@ -93,7 +91,7 @@ class EventNotificationService
 
         return $this->notifyUsers(
             $this->organizerAndOsaRecipients($scope),
-            'participant_scope_submitted:' . $scope->id . ':' . optional($scope->submitted_at)->timestamp,
+            'participant_scope_submitted:'.$scope->id.':'.optional($scope->submitted_at)->timestamp,
             'participant_scope_submitted',
             $scope,
             [
@@ -107,21 +105,41 @@ class EventNotificationService
         );
     }
 
+    public function notifyProposalRevisionRequested(EventParticipationScope $scope): int
+    {
+        $scope->loadMissing(['event.organization', 'organization', 'delegatedOrganization']);
+
+        return $this->notifyUsers(
+            $this->organizerRecipients($scope),
+            'event_proposal_revision_requested:'.$scope->event_id.':'.optional($scope->reviewed_at)->timestamp,
+            'event_proposal_revision_requested',
+            $scope,
+            [
+                'title' => 'Proposal revision requested',
+                'body' => "OSA returned {$scope->event->title} for revision.",
+                'action_label' => 'Revise proposal',
+                'action_url' => route('dashboard.events', ['status' => Event::STATUS_REVISION_REQUESTED]),
+                'severity' => 'warning',
+                'needs_action' => true,
+            ]
+        );
+    }
+
     public function notifyParticipantScopeReviewed(EventParticipationScope $scope, string $status): int
     {
         $scope->loadMissing(['event.organization', 'organization', 'delegatedOrganization']);
         $label = ucwords(str_replace('_', ' ', $status));
-        $needsAction = $status === EventParticipationScope::PPA_REJECTED;
+        $needsAction = $status === EventParticipationScope::PPA_REVISION_REQUESTED;
 
         return $this->notifyUsers(
             $this->participantRecipientAdmins($scope)->merge($this->organizerRecipients($scope))->unique('id'),
-            "participant_scope_{$status}:{$scope->id}:" . optional($scope->reviewed_at)->timestamp,
+            "participant_scope_{$status}:{$scope->id}:".optional($scope->reviewed_at)->timestamp,
             "participant_scope_{$status}",
             $scope,
             [
                 'title' => "Participant PPA {$label}",
                 'body' => "{$scope->displayName()} is now {$label} for {$scope->event->title}.",
-                'action_label' => $needsAction ? 'Resubmit PPA' : 'View event',
+                'action_label' => $needsAction ? 'Revise PPA' : 'View event',
                 'action_url' => route('dashboard.events', ['workspace' => 'participating']),
                 'severity' => $status === EventParticipationScope::PPA_APPROVED ? 'success' : ($needsAction ? 'warning' : 'info'),
                 'needs_action' => $needsAction,
@@ -143,7 +161,7 @@ class EventNotificationService
                 $query->whereNull('invitation_acknowledged_at')
                     ->orWhere(function ($query): void {
                         $query->where('ppa_required', true)
-                            ->whereIn('ppa_status', [EventParticipationScope::PPA_DRAFT, EventParticipationScope::PPA_REJECTED]);
+                            ->whereIn('ppa_status', [EventParticipationScope::PPA_DRAFT, EventParticipationScope::PPA_REVISION_REQUESTED]);
                     });
             })
             ->where(function ($query): void {
@@ -183,7 +201,7 @@ class EventNotificationService
             && $scope->status === EventParticipationScope::STATUS_ACTIVE
             && $scope->event?->status !== 'draft'
             && $adminScope
-            && !$adminScope->isSuperAdmin()
+            && ! $adminScope->isSuperAdmin()
             && $this->adminScopeOwnsParticipantScope($adminScope, $scope);
     }
 
@@ -199,12 +217,12 @@ class EventNotificationService
     {
         $adminScope = $this->adminScopes->forUser($user);
 
-        if (!$adminScope) {
+        if (! $adminScope) {
             return collect();
         }
 
         if ($adminScope->isSuperAdmin()) {
-            return EventParticipationScope::query()
+            $participantItems = EventParticipationScope::query()
                 ->with(['event.organization', 'organization'])
                 ->where('participation_role', EventParticipationScope::ROLE_PARTICIPANT)
                 ->where('status', EventParticipationScope::STATUS_ACTIVE)
@@ -214,22 +232,37 @@ class EventNotificationService
                 ->limit($limit)
                 ->get()
                 ->map(fn (EventParticipationScope $scope): array => $this->scopeActionItem($scope, 'Participant PPA submitted', route('dashboard.events')));
+
+            return $participantItems->values();
         }
 
         return EventParticipationScope::query()
             ->with(['event.organization', 'organization', 'delegatedOrganization'])
-            ->where('participation_role', EventParticipationScope::ROLE_PARTICIPANT)
             ->where('status', EventParticipationScope::STATUS_ACTIVE)
             ->whereHas('event', fn ($query) => $query->where('status', '!=', 'draft'))
             ->get()
-            ->filter(fn (EventParticipationScope $scope): bool => $this->adminScopeOwnsParticipantScope($adminScope, $scope))
-            ->filter(fn (EventParticipationScope $scope): bool => !$scope->invitation_acknowledged_at
-                || ($scope->ppa_required && in_array($scope->ppa_status, [EventParticipationScope::PPA_DRAFT, EventParticipationScope::PPA_REJECTED], true)))
+            ->filter(function (EventParticipationScope $scope) use ($adminScope): bool {
+                if ($scope->participation_role === EventParticipationScope::ROLE_ORGANIZER) {
+                    return $scope->event?->status === Event::STATUS_REVISION_REQUESTED
+                        && $scope->ppa_status === EventParticipationScope::PPA_REVISION_REQUESTED
+                        && $scope->event?->organization_id
+                        && $adminScope->organizationId === $scope->event->organization_id;
+                }
+
+                return $this->adminScopeOwnsParticipantScope($adminScope, $scope);
+            })
+            ->filter(fn (EventParticipationScope $scope): bool => $scope->participation_role === EventParticipationScope::ROLE_ORGANIZER
+                || ! $scope->invitation_acknowledged_at
+                || ($scope->ppa_required && in_array($scope->ppa_status, [EventParticipationScope::PPA_DRAFT, EventParticipationScope::PPA_REVISION_REQUESTED], true)))
             ->take($limit)
             ->map(fn (EventParticipationScope $scope): array => $this->scopeActionItem(
                 $scope,
-                $scope->invitation_acknowledged_at ? 'Participant PPA needs action' : 'Invitation needs acknowledgement',
-                route('dashboard.events', ['workspace' => 'participating'])
+                $scope->participation_role === EventParticipationScope::ROLE_ORGANIZER
+                    ? 'Proposal revision requested'
+                    : ($scope->invitation_acknowledged_at ? 'Participant PPA needs action' : 'Invitation needs acknowledgement'),
+                $scope->participation_role === EventParticipationScope::ROLE_ORGANIZER
+                    ? route('dashboard.events', ['status' => Event::STATUS_REVISION_REQUESTED])
+                    : route('dashboard.events', ['workspace' => 'participating'])
             ))
             ->values();
     }
@@ -277,7 +310,7 @@ class EventNotificationService
     {
         $scope->loadMissing(['organization', 'delegatedOrganization']);
 
-        if (!$scope->organization_id && !$scope->delegated_to_organization_id && !$scope->college_id) {
+        if (! $scope->organization_id && ! $scope->delegated_to_organization_id && ! $scope->college_id) {
             return collect();
         }
 
@@ -315,7 +348,7 @@ class EventNotificationService
         $scope->loadMissing('event.organization');
         $organizationId = $scope->event?->organization_id;
 
-        if (!$organizationId) {
+        if (! $organizationId) {
             return collect();
         }
 

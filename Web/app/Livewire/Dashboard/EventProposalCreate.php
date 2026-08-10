@@ -7,20 +7,31 @@ use App\Models\EventDay;
 use App\Models\Organization;
 use App\Models\User;
 use App\Services\AdminScopeService;
-use App\Services\ParticipationScopeService;
+use App\Services\EventProposalDraftService;
 use App\Support\AdminScope;
-use App\Support\EventEvaluationForm;
 use App\Support\EvaluationQuestions;
+use App\Support\EventEvaluationForm;
 use Carbon\Carbon;
+use DomainException;
+use Illuminate\Contracts\View\View;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Storage;
+use Livewire\Attributes\Locked;
 use Livewire\Component;
 use Livewire\Features\SupportFileUploads\WithFileUploads;
+use Throwable;
 
 class EventProposalCreate extends Component
 {
     use WithFileUploads;
+
+    #[Locked]
+    public ?string $eventId = null;
+
+    #[Locked]
+    public bool $editing = false;
+
+    #[Locked]
+    public ?string $currentProposalDocumentName = null;
 
     public ?string $organizerId = null;
 
@@ -68,9 +79,21 @@ class EventProposalCreate extends Component
 
     public ?string $errorNotice = null;
 
-    public function mount(): void
+    public function mount(?string $eventId = null): void
     {
         abort_unless(auth()->user()?->can('create-proposals'), 403);
+
+        $this->eventId = $eventId;
+        $this->editing = filled($eventId);
+
+        if ($this->editing) {
+            $event = Event::with(['eventDays', 'evaluationFormVersion', 'organization'])->findOrFail($eventId);
+            $this->authorizeEditableEvent($event);
+            $this->hydrateFromEvent($event);
+            $this->currentProposalDocumentName = $event->proposal_document_original_name;
+
+            return;
+        }
 
         if ($this->hydrateOldInput()) {
             return;
@@ -105,7 +128,7 @@ class EventProposalCreate extends Component
             $this->startDate = $value;
         }
 
-        if (!$this->dateIsBefore($value, $this->startDate)) {
+        if (! $this->dateIsBefore($value, $this->startDate)) {
             $this->syncEventDaysToDateRange();
         }
     }
@@ -123,8 +146,9 @@ class EventProposalCreate extends Component
             try {
                 $this->endDate = Carbon::parse($this->endDate)->addDay()->toDateString();
                 $this->syncEventDaysToDateRange();
+
                 return;
-            } catch (\Throwable) {
+            } catch (Throwable) {
                 // Fall through to the manual blank row.
             }
         }
@@ -144,14 +168,14 @@ class EventProposalCreate extends Component
 
     public function updated(string $property, mixed $value = null): void
     {
-        if (!$this->sameTimeForAllDays || !str_starts_with($property, 'eventDays.')) {
+        if (! $this->sameTimeForAllDays || ! str_starts_with($property, 'eventDays.')) {
             return;
         }
 
         $parts = explode('.', $property);
         $field = $parts[2] ?? null;
 
-        if (!in_array($field, ['start_time', 'end_time'], true)) {
+        if (! in_array($field, ['start_time', 'end_time'], true)) {
             return;
         }
 
@@ -202,119 +226,98 @@ class EventProposalCreate extends Component
         $this->evaluationQuestions = array_values($this->evaluationQuestions);
     }
 
-    public function createProposal()
+    public function createProposal(EventProposalDraftService $proposalDrafts): void
     {
         $this->resetFeedback();
         $user = auth()->user();
         abort_unless($user?->can('create-proposals'), 403);
 
-        $validated = $this->validatedPayload();
-        if ($validated === null) {
-            return null;
+        if ($this->editing) {
+            $this->updateProposal($proposalDrafts);
+
+            return;
         }
 
-        $organization = Organization::find($validated['organization_id']);
-        if (!$organization || !in_array($organization->type, ['society', 'usg', 'lsg', 'academic_unit', 'administrative_office', 'non_academic_org', 'hr_unit'], true)) {
-            $this->errorNotice = 'Select an active recognized organizer before creating a proposal.';
-            return null;
+        $validated = $this->validatedPayload();
+        if ($validated === null) {
+            return;
+        }
+
+        $isHrEvent = Organization::whereKey($validated['organization_id'])->value('type') === 'hr_unit';
+        if (! $isHrEvent && ! $this->proposalDocument) {
+            $this->addError('proposalDocument', 'Attach the official PPA proposal softcopy before saving this event.');
+
+            return;
+        }
+
+        try {
+            $proposalDrafts->create($user, $validated, $this->proposalDocument);
+        } catch (DomainException $exception) {
+            $this->errorNotice = $exception->getMessage();
+
+            return;
+        } catch (Throwable $exception) {
+            $this->errorNotice = 'Failed to create event: '.$exception->getMessage();
+
+            return;
+        }
+
+        session()->flash('success', $isHrEvent
+            ? 'HR attendance event created and scanner access is ready.'
+            : 'Event proposal created as draft with the official proposal softcopy attached.');
+
+        $this->redirectRoute('dashboard.events', navigate: true);
+    }
+
+    private function updateProposal(EventProposalDraftService $proposalDrafts): void
+    {
+        $event = Event::with(['eventDays', 'organization'])->findOrFail($this->eventId);
+        $this->authorizeEditableEvent($event);
+
+        $validated = $this->validatedPayload();
+        if ($validated === null) {
+            return;
+        }
+
+        $organization = $event->organization;
+        if (! $organization) {
+            $this->errorNotice = 'The proposal organizer could not be resolved.';
+
+            return;
         }
 
         $isHrEvent = $organization->type === 'hr_unit';
-        if (!$isHrEvent && !$this->proposalDocument) {
+        if (! $isHrEvent && ! $event->proposal_document_path && ! $this->proposalDocument) {
             $this->addError('proposalDocument', 'Attach the official PPA proposal softcopy before saving this event.');
-            return null;
+
+            return;
         }
 
-        if ($this->parentEventId !== '') {
-            $parentEvent = Event::with('organization')->findOrFail($this->parentEventId);
-            if (!in_array($parentEvent->organization?->type, ['usg', 'lsg', 'academic_unit', 'administrative_office'], true)) {
-                $this->errorNotice = 'Sub-events can only be linked to USG or LSG parent events.';
-                return null;
-            }
-        }
-
-        $documentPath = null;
-
-        DB::beginTransaction();
         try {
-            $documentPath = $this->proposalDocument
-                ? $this->proposalDocument->store('proposal-documents')
-                : null;
-            $hardcopySubmitted = $isHrEvent ? false : $this->hardcopySubmitted;
+            $event = $proposalDrafts->update($event, auth()->user(), $validated, $this->proposalDocument);
+        } catch (DomainException $exception) {
+            $this->errorNotice = $exception->getMessage();
 
-            $event = Event::create([
-                'organization_id' => $validated['organization_id'],
-                'parent_event_id' => $this->parentEventId !== '' ? $this->parentEventId : null,
-                'title' => $this->title,
-                'event_domain' => $isHrEvent ? 'hr' : 'student_affairs',
-                'proposal_category' => $this->proposalCategory,
-                'status' => $isHrEvent ? 'approved' : 'draft',
-                'start_date' => $this->startDate,
-                'end_date' => $this->endDate,
-                'location_type' => $this->locationType,
-                'location_details' => $this->blankToNull($this->locationDetails),
-                'target_demographics' => [
-                    'implementing_office' => $this->blankToNull($this->implementingOffice),
-                    'collaborating_office' => $this->blankToNull($this->collaboratingOffice),
-                    'target_participants' => $this->blankToNull($this->targetParticipants),
-                ],
-                'budget_allocations' => [
-                    'source_of_fund' => $this->blankToNull($this->sourceOfFund),
-                    'budget_cost' => $this->budgetCost !== '' ? $this->budgetCost : null,
-                ],
-                'proposal_document_path' => $documentPath,
-                'proposal_document_original_name' => $this->proposalDocument?->getClientOriginalName(),
-                'resolution_number' => $this->blankToNull($this->resolutionNumber),
-                'hardcopy_submitted' => $hardcopySubmitted,
-                'hardcopy_submitted_at' => $hardcopySubmitted ? now() : null,
-                'head_organization_signed' => $isHrEvent ? false : $this->headOrganizationSigned,
-                'adviser_signed' => $isHrEvent ? false : $this->adviserSigned,
-            ]);
+            return;
+        } catch (Throwable $exception) {
+            $this->errorNotice = 'Failed to update event: '.$exception->getMessage();
 
-            foreach ($this->eventDays as $index => $dayData) {
-                EventDay::create([
-                    'event_id' => $event->id,
-                    'day_number' => $index + 1,
-                    'date' => $dayData['date'],
-                    'start_time' => $dayData['start_time'],
-                    'end_time' => $dayData['end_time'],
-                ]);
-            }
-
-            EventEvaluationForm::createForEvent(
-                $event,
-                $user,
-                $this->evaluationQuestions,
-                'Evaluation - ' . $event->title
-            );
-
-            app(ParticipationScopeService::class)->ensureOrganizerScope($event->fresh(['organization']));
-
-            DB::commit();
-
-            session()->flash('success', $isHrEvent
-                ? 'HR attendance event created and scanner access is ready.'
-                : 'Event proposal created as draft with the official proposal softcopy attached.');
-
-            return $this->redirectRoute('dashboard.events', navigate: true);
-        } catch (\Throwable $e) {
-            DB::rollBack();
-
-            if ($documentPath) {
-                Storage::delete($documentPath);
-            }
-
-            $this->errorNotice = 'Failed to create event: ' . $e->getMessage();
-            return null;
+            return;
         }
+
+        session()->flash('success', 'Event proposal updated.');
+
+        $this->redirectRoute('dashboard.events', ['status' => $event->status], navigate: true);
     }
 
-    public function render()
+    public function render(): View
     {
         return view('livewire.dashboard.event-proposal-create', [
             'parentEvents' => $this->parentEvents(),
             'organizerOptions' => $this->organizerOptions(),
-            'isOsaCreator' => (bool) auth()->user()?->hasRole('Super Admin (OSA)'),
+            'isOsaCreator' => ! $this->editing && (bool) auth()->user()?->hasRole('Super Admin (OSA)'),
+            'editing' => $this->editing,
+            'currentProposalDocumentName' => $this->currentProposalDocumentName,
         ]);
     }
 
@@ -350,7 +353,7 @@ class EventProposalCreate extends Component
             'evaluationQuestions.*.description' => ['nullable', 'string', 'max:500'],
         ], [], $this->validationAttributes());
 
-        if (!$this->validateEventDays()) {
+        if (! $this->validateEventDays()) {
             return null;
         }
 
@@ -359,11 +362,35 @@ class EventProposalCreate extends Component
             ? $this->organizerId
             : $scope?->organizationId;
 
-        if (!$organizationId) {
+        if (! $organizationId) {
             abort(403, 'Your account must be assigned to an organization before creating proposals.');
         }
 
-        return ['organization_id' => $organizationId];
+        return [
+            'organization_id' => $organizationId,
+            'parent_event_id' => $this->parentEventId !== '' ? $this->parentEventId : null,
+            'title' => $this->title,
+            'proposal_category' => $this->proposalCategory,
+            'start_date' => $this->startDate,
+            'end_date' => $this->endDate,
+            'location_type' => $this->locationType,
+            'location_details' => $this->blankToNull($this->locationDetails),
+            'target_demographics' => [
+                'implementing_office' => $this->blankToNull($this->implementingOffice),
+                'collaborating_office' => $this->blankToNull($this->collaboratingOffice),
+                'target_participants' => $this->blankToNull($this->targetParticipants),
+            ],
+            'budget_allocations' => [
+                'source_of_fund' => $this->blankToNull($this->sourceOfFund),
+                'budget_cost' => $this->budgetCost !== '' ? $this->budgetCost : null,
+            ],
+            'resolution_number' => $this->blankToNull($this->resolutionNumber),
+            'hardcopy_submitted' => $this->hardcopySubmitted,
+            'head_organization_signed' => $this->headOrganizationSigned,
+            'adviser_signed' => $this->adviserSigned,
+            'event_days' => $this->eventDays,
+            'evaluation_questions' => $this->evaluationQuestions,
+        ];
     }
 
     private function validateEventDays(): bool
@@ -371,7 +398,7 @@ class EventProposalCreate extends Component
         try {
             $startDate = Carbon::parse($this->startDate)->startOfDay();
             $endDate = Carbon::parse($this->endDate)->startOfDay();
-        } catch (\Throwable) {
+        } catch (Throwable) {
             return false;
         }
 
@@ -379,7 +406,7 @@ class EventProposalCreate extends Component
         foreach ($this->eventDays as $index => $dayData) {
             try {
                 $dayDate = Carbon::parse($dayData['date'] ?? '')->startOfDay();
-            } catch (\Throwable) {
+            } catch (Throwable) {
                 continue;
             }
 
@@ -401,15 +428,84 @@ class EventProposalCreate extends Component
     {
         return Event::query()
             ->with('organization')
+            ->when($this->eventId, fn ($query) => $query->whereKeyNot($this->eventId))
             ->whereHas('organization', fn ($query) => $query->whereIn('type', ['usg', 'lsg', 'academic_unit', 'administrative_office']))
-            ->whereIn('status', ['draft', 'submitted', 'under_review', 'approved'])
+            ->whereIn('status', [
+                Event::STATUS_DRAFT,
+                Event::STATUS_SUBMITTED,
+                Event::STATUS_UNDER_REVIEW,
+                Event::STATUS_REVISION_REQUESTED,
+                Event::STATUS_APPROVED,
+            ])
             ->orderByDesc('created_at')
             ->get();
     }
 
+    private function hydrateFromEvent(Event $event): void
+    {
+        $target = $event->target_demographics ?? [];
+        $budget = $event->budget_allocations ?? [];
+
+        $this->organizerId = (string) $event->organization_id;
+        $this->title = (string) $event->title;
+        $this->proposalCategory = (string) $event->proposal_category;
+        $this->parentEventId = (string) ($event->parent_event_id ?? '');
+        $this->startDate = $event->start_date?->toDateString() ?? '';
+        $this->endDate = $event->end_date?->toDateString() ?? '';
+        $this->locationType = (string) ($event->location_type ?: 'on-campus');
+        $this->locationDetails = (string) ($event->location_details ?? '');
+        $this->implementingOffice = (string) ($target['implementing_office'] ?? '');
+        $this->collaboratingOffice = (string) ($target['collaborating_office'] ?? '');
+        $this->targetParticipants = (string) ($target['target_participants'] ?? '');
+        $this->sourceOfFund = (string) ($budget['source_of_fund'] ?? '');
+        $this->budgetCost = isset($budget['budget_cost']) && $budget['budget_cost'] !== null
+            ? (string) $budget['budget_cost']
+            : '';
+        $this->resolutionNumber = (string) ($event->resolution_number ?? '');
+        $this->hardcopySubmitted = (bool) $event->hardcopy_submitted;
+        $this->headOrganizationSigned = (bool) $event->head_organization_signed;
+        $this->adviserSigned = (bool) $event->adviser_signed;
+        $this->sameTimeForAllDays = true;
+        $this->eventDays = $event->eventDays
+            ->sortBy('day_number')
+            ->map(fn (EventDay $day): array => [
+                'date' => $day->date?->toDateString() ?? '',
+                'start_time' => $day->start_time ? substr((string) $day->start_time, 0, 5) : '',
+                'end_time' => $day->end_time ? substr((string) $day->end_time, 0, 5) : '',
+            ])
+            ->values()
+            ->all();
+
+        if ($this->eventDays === []) {
+            $this->eventDays = [$this->blankEventDay()];
+            $this->syncEventDaysToDateRange();
+        }
+
+        $this->evaluationQuestions = collect(EventEvaluationForm::questionsForEvent($event))
+            ->map(fn (array $question): array => [
+                'id' => $question['id'] ?? '',
+                'label' => $question['label'] ?? '',
+                'description' => $question['description'] ?? '',
+            ])
+            ->values()
+            ->all();
+    }
+
+    private function authorizeEditableEvent(Event $event): void
+    {
+        $user = auth()->user();
+        abort_unless($user?->can('create-proposals'), 403);
+        abort_if($user->hasRole('Super Admin (OSA)'), 403, 'OSA reviews proposals but does not edit organizer submissions.');
+
+        $scope = $this->adminScope();
+        abort_unless($scope?->organizationId === $event->organization_id, 403, 'Only the event organizer can edit this proposal.');
+
+        abort_unless(in_array($event->status, [Event::STATUS_DRAFT, Event::STATUS_REVISION_REQUESTED], true), 403, 'Only draft or revision-requested proposals can be edited.');
+    }
+
     private function organizerOptions(): Collection
     {
-        if (!auth()->user()?->hasRole('Super Admin (OSA)')) {
+        if (! auth()->user()?->hasRole('Super Admin (OSA)')) {
             return collect();
         }
 
@@ -515,7 +611,7 @@ class EventProposalCreate extends Component
 
     private function oldBoolean(array $old, string $key, bool $default = false): bool
     {
-        if (!array_key_exists($key, $old)) {
+        if (! array_key_exists($key, $old)) {
             return $default;
         }
 
@@ -527,7 +623,7 @@ class EventProposalCreate extends Component
         try {
             $startDate = Carbon::parse($this->startDate)->startOfDay();
             $endDate = Carbon::parse($this->endDate)->startOfDay();
-        } catch (\Throwable) {
+        } catch (Throwable) {
             return;
         }
 
@@ -566,7 +662,7 @@ class EventProposalCreate extends Component
 
     private function normalizeEventDays(mixed $days): array
     {
-        if (!is_array($days)) {
+        if (! is_array($days)) {
             return [];
         }
 
@@ -583,7 +679,7 @@ class EventProposalCreate extends Component
 
     private function normalizeEvaluationQuestions(mixed $questions): array
     {
-        if (!is_array($questions)) {
+        if (! is_array($questions)) {
             return [];
         }
 
@@ -623,7 +719,7 @@ class EventProposalCreate extends Component
     {
         try {
             return Carbon::parse($date)->startOfDay()->lt(Carbon::parse($comparison)->startOfDay());
-        } catch (\Throwable) {
+        } catch (Throwable) {
             return false;
         }
     }

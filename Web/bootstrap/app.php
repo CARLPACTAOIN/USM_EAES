@@ -1,12 +1,19 @@
 <?php
 
+use App\Http\Middleware\SecurityHeaders;
+use App\Http\Middleware\TenantScopeMiddleware;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
+use Predis\Connection\ConnectionException;
+use Spatie\Permission\Middleware\PermissionMiddleware;
+use Spatie\Permission\Middleware\RoleMiddleware;
+use Spatie\Permission\Middleware\RoleOrPermissionMiddleware;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 use Symfony\Component\HttpKernel\Exception\MethodNotAllowedHttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
+use Symfony\Component\HttpKernel\Exception\TooManyRequestsHttpException;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -16,18 +23,46 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        $middleware->append(\App\Http\Middleware\SecurityHeaders::class);
+        $middleware->append(SecurityHeaders::class);
 
         $middleware->alias([
-            'tenant.scope' => \App\Http\Middleware\TenantScopeMiddleware::class,
-            'role' => \Spatie\Permission\Middleware\RoleMiddleware::class,
-            'permission' => \Spatie\Permission\Middleware\PermissionMiddleware::class,
-            'role_or_permission' => \Spatie\Permission\Middleware\RoleOrPermissionMiddleware::class,
+            'tenant.scope' => TenantScopeMiddleware::class,
+            'role' => RoleMiddleware::class,
+            'permission' => PermissionMiddleware::class,
+            'role_or_permission' => RoleOrPermissionMiddleware::class,
         ]);
 
         $middleware->redirectGuestsTo('/');
     })
     ->withExceptions(function (Exceptions $exceptions): void {
+        $exceptions->render(function (ConnectionException $exception, Request $request) {
+            if (! ($request->expectsJson() || $request->is('api/*'))) {
+                return null;
+            }
+
+            $retryAfter = config('services.eaes.redis_unavailable_retry_after', 30);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Service coordination is temporarily unavailable. Please retry shortly.',
+                'retry_after' => $retryAfter,
+            ], 503, ['Retry-After' => $retryAfter]);
+        });
+
+        $exceptions->render(function (TooManyRequestsHttpException $exception, Request $request) {
+            if (! ($request->expectsJson() || $request->is('api/*'))) {
+                return null;
+            }
+
+            $headers = $exception->getHeaders();
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Too many requests. Please retry later.',
+                'retry_after' => isset($headers['Retry-After']) ? (int) $headers['Retry-After'] : null,
+            ], 429, $headers);
+        });
+
         $exceptions->render(function (MethodNotAllowedHttpException $exception, Request $request) {
             if ($request->expectsJson() || $request->is('api/*')) {
                 return null;

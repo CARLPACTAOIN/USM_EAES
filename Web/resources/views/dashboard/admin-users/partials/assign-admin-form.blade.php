@@ -32,6 +32,7 @@
         class="proposal-modal"
         aria-labelledby="assign-admin-modal-title"
         onclick="if (event.target === this) this.close()"
+        @if($errors->getBag('default')->any()) open @endif
         x-data="adminAssignmentForm({
             searchUrl: @js(route('dashboard.admin-users.search')),
             organizations: @js($assignmentOrganizations),
@@ -42,9 +43,11 @@
             oldEmail: @js(old('email', '')),
             oldStudentId: @js(old('student_id_number', '')),
             oldName: @js(old('name', '')),
+            oldPersonQuery: @js(old('person_query', '')),
         })">
     <form method="POST"
           action="{{ route('dashboard.admin-users.create') }}"
+          x-on:submit="prepareSubmit()"
           class="proposal-modal-form">
         @csrf
 
@@ -69,6 +72,16 @@
         </div>
 
         <div class="proposal-modal-body">
+        @if($errors->getBag('default')->any())
+            <div class="mb-4 rounded-lg border px-4 py-3 text-sm" style="background-color: var(--color-destructive-light); border-color: var(--color-destructive); color: var(--color-destructive);" role="alert">
+                <p class="font-semibold">Assignment was not activated.</p>
+                <ul class="mt-2 list-disc pl-5 space-y-1">
+                    @foreach($errors->getBag('default')->all() as $message)
+                        <li>{{ $message }}</li>
+                    @endforeach
+                </ul>
+            </div>
+        @endif
 
         {{-- 1. Person --}}
         <div class="admin-access-zone">
@@ -86,6 +99,7 @@
                 </span>
                 <input type="text"
                        id="user-search"
+                       name="person_query"
                        x-model="searchQuery"
                        @input.debounce.300ms="searchUsers()"
                        @focus="showResults = results.length > 0"
@@ -297,6 +311,7 @@
                 <input type="checkbox" name="is_primary_admin" value="1" class="rounded border-(--color-border) text-(--color-accent) focus:ring-(--color-accent)" @checked(old('is_primary_admin', '1') === '1' || old('is_primary_admin') === true)>
                 Primary admin for this role and scope in the selected academic year
             </label>
+            @error('is_primary_admin') <p class="form-error mt-2" role="alert">{{ $message }}</p> @enderror
         </div>
 
         </div>

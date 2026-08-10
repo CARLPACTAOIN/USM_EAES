@@ -4,38 +4,39 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Event;
-use App\Models\EventDay;
 use App\Models\EventParticipationScope;
-use App\Models\Organization;
 use App\Services\AdminScopeService;
+use App\Services\EventNotificationService;
+use App\Services\EventProposalDraftService;
 use App\Services\ParticipationScopeService;
 use App\Support\EventEvaluationForm;
 use App\Support\EventTenantScope;
+use DomainException;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Validator;
+use Throwable;
 
 class EventProposalController extends Controller
 {
     public function __construct(
         private readonly AdminScopeService $adminScopes,
-        private readonly ParticipationScopeService $participationScopes
-    ) {
-    }
+        private readonly ParticipationScopeService $participationScopes,
+        private readonly EventNotificationService $eventNotifications,
+        private readonly EventProposalDraftService $proposalDrafts
+    ) {}
 
     /**
      * Display a listing of events scoped by user organization/college tenancy.
-     *
-     * @param  \Illuminate\Http\Request  $request
-     * @return \Illuminate\Http\JsonResponse
      */
-    public function index(Request $request)
+    public function index(Request $request): JsonResponse
     {
         $user = $request->user();
         $query = Event::with(['organization', 'eventDays']);
         $scope = $this->adminScopes->forUser($user);
 
-        if (!$scope) {
+        if (! $scope) {
             abort(403, 'No active admin assignment found.');
         }
 
@@ -66,32 +67,34 @@ class EventProposalController extends Controller
 
         return response()->json([
             'success' => true,
-            'events' => $events
+            'events' => $events,
         ]);
     }
 
     /**
      * Store a newly created event proposal in storage (default status 'draft').
-     *
-     * @param  \Illuminate\Http\Request  $request
-     * @return \Illuminate\Http\JsonResponse
      */
-    public function store(Request $request)
+    public function store(Request $request): JsonResponse
     {
         $user = $request->user();
 
         $validator = Validator::make($request->all(), [
             'organization_id' => 'nullable|uuid|exists:organizations,id',
             'title' => 'required|string|max:255',
+            'proposal_category' => 'required|in:program,project,activity',
             'start_date' => 'required|date',
             'end_date' => 'required|date|after_or_equal:start_date',
             'location_type' => 'required|in:on-campus,off-campus',
             'location_details' => 'nullable|string',
             'target_demographics' => 'nullable|array',
             'budget_allocations' => 'nullable|array',
-            'event_late_cutoff_min' => 'nullable|integer|min:0|max:240',
+            'resolution_number' => 'nullable|string|max:100',
+            'proposal_document' => 'nullable|file|mimes:pdf,doc,docx|max:10240',
+            'hardcopy_submitted' => 'nullable|boolean',
+            'head_organization_signed' => 'nullable|boolean',
+            'adviser_signed' => 'nullable|boolean',
             'event_days' => 'required|array|min:1',
-            'event_days.*.day_number' => 'required|integer|min:1',
+            'event_days.*.day_number' => 'nullable|integer|min:1',
             'event_days.*.date' => 'required|date',
             'event_days.*.start_time' => 'required|date_format:H:i',
             'event_days.*.end_time' => 'required|date_format:H:i|after:event_days.*.start_time',
@@ -105,120 +108,212 @@ class EventProposalController extends Controller
         if ($validator->fails()) {
             return response()->json([
                 'success' => false,
-                'errors' => $validator->errors()
+                'errors' => $validator->errors(),
             ], 422);
         }
 
-        DB::beginTransaction();
+        $scope = $this->adminScopes->forUser($user);
+        if ($scope && ! $scope->isSuperAdmin() && $request->filled('organization_id') && $request->input('organization_id') !== $scope->organizationId) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Event proposals can only be created within your active organization scope.',
+            ], 403);
+        }
+
+        $organizationId = $scope?->isSuperAdmin()
+            ? $request->input('organization_id')
+            : $scope?->organizationId;
+
+        if (! $organizationId) {
+            return response()->json([
+                'success' => false,
+                'message' => 'An active admin organization scope is required to create an event proposal.',
+            ], 403);
+        }
+
         try {
-            $scope = $this->adminScopes->forUser($user);
-            $organizationId = $scope?->isSuperAdmin()
-                ? $request->input('organization_id')
-                : $scope?->organizationId;
-
-            if (!$organizationId) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'An active admin organization scope is required to create an event proposal.',
-                ], 403);
-            }
-
-            $organization = Organization::find($organizationId);
-            if (!$organization || !in_array($organization->type, ['society', 'usg', 'lsg', 'academic_unit', 'administrative_office', 'non_academic_org', 'hr_unit'], true)) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'An active recognized organizer is required to create an event proposal.',
-                ], 422);
-            }
-
-            $isHrEvent = $organization->type === 'hr_unit';
-
-            // Create the Event
-            $event = Event::create([
-                'organization_id' => $organizationId,
-                'parent_event_id' => $request->parent_event_id,
-                'title' => $request->title,
-                'event_domain' => $organization->type === 'hr_unit' ? 'hr' : 'student_affairs',
-                'status' => $isHrEvent ? 'approved' : 'draft',
-                'start_date' => $request->start_date,
-                'end_date' => $request->end_date,
-                'location_type' => $request->location_type,
-                'location_details' => $request->location_details,
-                'target_demographics' => $request->target_demographics,
-                'budget_allocations' => $request->budget_allocations,
-                'event_late_cutoff_min' => $request->filled('event_late_cutoff_min')
-                    ? (int) $request->input('event_late_cutoff_min')
-                    : null,
-            ]);
-
-            // Create Event Days
-            foreach ($request->event_days as $dayData) {
-                EventDay::create([
-                    'event_id' => $event->id,
-                    'day_number' => $dayData['day_number'],
-                    'date' => $dayData['date'],
-                    'start_time' => $dayData['start_time'],
-                    'end_time' => $dayData['end_time'],
-                ]);
-            }
-
-            EventEvaluationForm::createForEvent(
-                $event,
+            $event = $this->proposalDrafts->create(
                 $user,
-                $request->input('evaluation_questions', []),
-                'Evaluation - ' . $event->title
+                $this->proposalData($request, $organizationId),
+                $request->file('proposal_document')
             );
-
-            $this->participationScopes->ensureOrganizerScope($event->fresh(['organization']));
-
-            DB::commit();
 
             return response()->json([
                 'success' => true,
-                'message' => $isHrEvent
+                'message' => $event->event_domain === 'hr'
                     ? 'HR attendance event created and approved for scanner access.'
                     : 'Event PPA proposal created as draft.',
-                'event' => $event->load('eventDays', 'evaluationFormVersion')
+                'event' => $event,
             ], 201);
-        } catch (\Exception $e) {
-            DB::rollBack();
+        } catch (DomainException $exception) {
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to create event proposal: ' . $e->getMessage()
+                'message' => $exception->getMessage(),
+            ], 422);
+        } catch (Throwable) {
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to create event proposal.',
             ], 500);
         }
+    }
+
+    public function update(Request $request, Event $event): JsonResponse
+    {
+        EventTenantScope::authorize($event, $request->user());
+        $scope = $this->adminScopes->forUser($request->user());
+
+        if ($request->user()?->hasRole('Super Admin (OSA)') || $scope?->organizationId !== $event->organization_id) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Only the event organizer can edit this proposal.',
+            ], 403);
+        }
+
+        if (! in_array($event->status, [Event::STATUS_DRAFT, Event::STATUS_REVISION_REQUESTED], true)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Only draft or revision-requested proposals can be edited.',
+            ], 422);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'title' => 'required|string|max:255',
+            'proposal_category' => 'required|in:program,project,activity',
+            'start_date' => 'required|date',
+            'end_date' => 'required|date|after_or_equal:start_date',
+            'location_type' => 'required|in:on-campus,off-campus',
+            'location_details' => 'nullable|string',
+            'target_demographics' => 'nullable|array',
+            'budget_allocations' => 'nullable|array',
+            'resolution_number' => 'nullable|string|max:100',
+            'proposal_document' => 'nullable|file|mimes:pdf,doc,docx|max:10240',
+            'hardcopy_submitted' => 'nullable|boolean',
+            'head_organization_signed' => 'nullable|boolean',
+            'adviser_signed' => 'nullable|boolean',
+            'event_days' => 'required|array|min:1',
+            'event_days.*.day_number' => 'nullable|integer|min:1',
+            'event_days.*.date' => 'required|date',
+            'event_days.*.start_time' => 'required|date_format:H:i',
+            'event_days.*.end_time' => 'required|date_format:H:i',
+            'parent_event_id' => 'nullable|uuid|exists:events,id',
+            'evaluation_questions' => 'required|array|min:1|max:10',
+            'evaluation_questions.*.id' => 'nullable|string|max:80',
+            'evaluation_questions.*.label' => 'required|string|max:180',
+            'evaluation_questions.*.description' => 'nullable|string|max:500',
+        ]);
+
+        $validator->after(function ($validator) use ($request, $event): void {
+            if ($request->filled('parent_event_id') && $request->input('parent_event_id') === $event->id) {
+                $validator->errors()->add('parent_event_id', 'A proposal cannot be linked to itself as a parent permit.');
+            }
+        });
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        try {
+            $updatedEvent = $this->proposalDrafts->update(
+                $event,
+                $request->user(),
+                $this->proposalData($request, $event->organization_id),
+                $request->file('proposal_document')
+            );
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Event PPA proposal updated.',
+                'event' => $updatedEvent,
+            ]);
+        } catch (DomainException $exception) {
+            return response()->json([
+                'success' => false,
+                'message' => $exception->getMessage(),
+            ], 422);
+        } catch (Throwable) {
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to update event proposal.',
+            ], 500);
+        }
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function proposalData(Request $request, string $organizationId): array
+    {
+        return [
+            'organization_id' => $organizationId,
+            'parent_event_id' => $request->filled('parent_event_id') ? $request->string('parent_event_id')->toString() : null,
+            'title' => $request->string('title')->toString(),
+            'proposal_category' => $request->string('proposal_category')->toString(),
+            'start_date' => $request->input('start_date'),
+            'end_date' => $request->input('end_date'),
+            'location_type' => $request->string('location_type')->toString(),
+            'location_details' => $request->input('location_details'),
+            'target_demographics' => $request->input('target_demographics', []),
+            'budget_allocations' => $request->input('budget_allocations', []),
+            'resolution_number' => $request->input('resolution_number'),
+            'hardcopy_submitted' => $request->boolean('hardcopy_submitted'),
+            'head_organization_signed' => $request->boolean('head_organization_signed'),
+            'adviser_signed' => $request->boolean('adviser_signed'),
+            'event_days' => collect($request->input('event_days', []))
+                ->map(fn (array $day): array => [
+                    'date' => $day['date'],
+                    'start_time' => $day['start_time'],
+                    'end_time' => $day['end_time'],
+                ])
+                ->all(),
+            'evaluation_questions' => $request->input('evaluation_questions', []),
+        ];
     }
 
     /**
      * Submit PPA proposal for review.
      *
      * @param  string  $id
-     * @return \Illuminate\Http\JsonResponse
+     * @return JsonResponse
      */
     public function submit($id)
     {
         $event = Event::findOrFail($id);
         EventTenantScope::authorize($event, request()->user());
+        $scope = $this->adminScopes->forUser(request()->user());
 
-        if ($event->status !== 'draft') {
+        if (request()->user()?->hasRole('Super Admin (OSA)') || $scope?->organizationId !== $event->organization_id) {
             return response()->json([
                 'success' => false,
-                'message' => 'Only draft proposals can be submitted.'
+                'message' => 'Only the event organizer can submit this proposal.',
+            ], 403);
+        }
+
+        if (! in_array($event->status, [Event::STATUS_DRAFT, Event::STATUS_REVISION_REQUESTED], true)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Only draft or revision-requested proposals can be submitted.',
             ], 422);
         }
 
-        $event->status = 'submitted';
+        $event->status = Event::STATUS_SUBMITTED;
         $event->save();
         $this->participationScopes->ensureOrganizerScope($event)->update([
             'ppa_status' => EventParticipationScope::PPA_SUBMITTED,
             'submitted_by' => request()->user()?->id,
             'submitted_at' => now(),
+            'review_remarks' => null,
         ]);
 
         return response()->json([
             'success' => true,
             'message' => 'Event PPA proposal successfully submitted for review.',
-            'event' => $event
+            'event' => $event,
         ]);
     }
 
@@ -230,14 +325,14 @@ class EventProposalController extends Controller
         $event = Event::findOrFail($id);
         EventTenantScope::authorize($event, request()->user());
 
-        if ($event->status !== 'submitted') {
+        if ($event->status !== Event::STATUS_SUBMITTED) {
             return response()->json([
                 'success' => false,
-                'message' => 'Only submitted proposals can be reviewed.'
+                'message' => 'Only submitted proposals can be reviewed.',
             ], 422);
         }
 
-        $event->status = 'under_review';
+        $event->status = Event::STATUS_UNDER_REVIEW;
         $event->save();
         $this->participationScopes->ensureOrganizerScope($event)->update([
             'ppa_status' => EventParticipationScope::PPA_UNDER_REVIEW,
@@ -248,7 +343,7 @@ class EventProposalController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Proposal is now under review.',
-            'event' => $event
+            'event' => $event,
         ]);
     }
 
@@ -260,33 +355,75 @@ class EventProposalController extends Controller
         $event = Event::findOrFail($id);
         EventTenantScope::authorize($event, request()->user());
 
-        if ($event->status !== 'under_review' && $event->status !== 'submitted') {
+        if (! in_array($event->status, [Event::STATUS_UNDER_REVIEW, Event::STATUS_SUBMITTED], true)) {
             return response()->json([
                 'success' => false,
-                'message' => 'Proposals must be submitted or under review to be approved.'
+                'message' => 'Proposals must be submitted or under review to be approved.',
             ], 422);
         }
 
-        if (!EventEvaluationForm::hasLockedForm($event)) {
+        if (! EventEvaluationForm::hasLockedForm($event)) {
             return response()->json([
                 'success' => false,
-                'message' => 'A locked evaluation form with at least one question is required before approval.'
+                'message' => 'A locked evaluation form with at least one question is required before approval.',
             ], 422);
         }
 
-        $event->status = 'approved';
+        $event->status = Event::STATUS_APPROVED;
         $event->save();
         $this->participationScopes->ensureOrganizerScope($event->fresh())->update([
             'ppa_status' => EventParticipationScope::PPA_APPROVED,
             'reviewed_by' => request()->user()?->id,
             'reviewed_at' => now(),
             'approved_at' => now(),
+            'review_remarks' => null,
         ]);
 
         return response()->json([
             'success' => true,
             'message' => 'Event PPA proposal successfully approved. Scanning is now unlocked.',
-            'event' => $event
+            'event' => $event,
+        ]);
+    }
+
+    public function requestRevision(Request $request, $id)
+    {
+        $event = Event::findOrFail($id);
+        EventTenantScope::authorize($event, $request->user());
+
+        $validator = Validator::make($request->all(), [
+            'review_remarks' => 'required|string|max:1000',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        if (! in_array($event->status, [Event::STATUS_UNDER_REVIEW, Event::STATUS_SUBMITTED], true)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Proposals must be submitted or under review to request revision.',
+            ], 422);
+        }
+
+        $event->status = Event::STATUS_REVISION_REQUESTED;
+        $event->save();
+        $organizerScope = $this->participationScopes->ensureOrganizerScope($event);
+        $organizerScope->update([
+            'ppa_status' => EventParticipationScope::PPA_REVISION_REQUESTED,
+            'reviewed_by' => $request->user()?->id,
+            'reviewed_at' => now(),
+            'review_remarks' => trim($request->input('review_remarks')),
+        ]);
+        $this->eventNotifications->notifyProposalRevisionRequested($organizerScope->fresh(['event.organization', 'organization', 'delegatedOrganization']));
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Event PPA proposal was returned for revision.',
+            'event' => $event,
         ]);
     }
 
@@ -298,14 +435,14 @@ class EventProposalController extends Controller
         $event = Event::findOrFail($id);
         EventTenantScope::authorize($event, request()->user());
 
-        if ($event->status !== 'under_review' && $event->status !== 'submitted') {
+        if (! in_array($event->status, [Event::STATUS_UNDER_REVIEW, Event::STATUS_SUBMITTED], true)) {
             return response()->json([
                 'success' => false,
-                'message' => 'Proposals must be submitted or under review to be rejected.'
+                'message' => 'Proposals must be submitted or under review to be rejected.',
             ], 422);
         }
 
-        $event->status = 'rejected';
+        $event->status = Event::STATUS_REJECTED;
         $event->save();
         $this->participationScopes->ensureOrganizerScope($event)->update([
             'ppa_status' => EventParticipationScope::PPA_REJECTED,
@@ -316,14 +453,14 @@ class EventProposalController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Event PPA proposal was rejected.',
-            'event' => $event
+            'event' => $event,
         ]);
     }
 
     /**
      * Link a sub-organization PPA to a parent event (Multi-Org Event Linking).
      */
-    public function linkSubEvent(Request $request, $id)
+    public function linkSubEvent(Request $request, string $id): JsonResponse
     {
         $event = Event::findOrFail($id);
         EventTenantScope::authorize($event, $request->user());
@@ -335,7 +472,7 @@ class EventProposalController extends Controller
         if ($validator->fails()) {
             return response()->json([
                 'success' => false,
-                'errors' => $validator->errors()
+                'errors' => $validator->errors(),
             ], 422);
         }
 
@@ -343,55 +480,29 @@ class EventProposalController extends Controller
 
         // Verify the parent event belongs to a campus-wide organizer
         $parentOrg = $parentEvent->organization;
-        if (!in_array($parentOrg->type, ['usg', 'lsg', 'academic_unit', 'administrative_office'], true)) {
+        if (! in_array($parentOrg->type, ['usg', 'lsg', 'academic_unit', 'administrative_office'], true)) {
             return response()->json([
                 'success' => false,
-                'message' => 'Sub-events can only be linked to USG or LSG parent events.'
+                'message' => 'Sub-events can only be linked to USG or LSG parent events.',
             ], 422);
         }
 
-        $event->parent_event_id = $request->parent_event_id;
-        $event->save();
-        $this->syncParticipantScopeFromLinkedEvent($parentEvent, $event->fresh(['organization']));
+        try {
+            DB::transaction(function () use ($event, $parentEvent): void {
+                $event->update(['parent_event_id' => $parentEvent->id]);
+                $this->participationScopes->syncParticipantScopeFromLinkedEvent($parentEvent, $event);
+            });
+        } catch (DomainException $exception) {
+            return response()->json([
+                'success' => false,
+                'message' => $exception->getMessage(),
+            ], 422);
+        }
 
         return response()->json([
             'success' => true,
             'message' => 'Event successfully linked under the parent permit.',
-            'event' => $event->load('parentEvent')
+            'event' => $event->load('parentEvent'),
         ]);
-    }
-
-    private function syncParticipantScopeFromLinkedEvent(Event $parentEvent, Event $linkedEvent): EventParticipationScope
-    {
-        $linkedEvent->loadMissing('organization');
-        $parentScope = $this->participationScopes->ensureOrganizerScope($parentEvent);
-        $organization = $linkedEvent->organization;
-
-        return EventParticipationScope::updateOrCreate(
-            [
-                'event_id' => $parentEvent->id,
-                'linked_event_id' => $linkedEvent->id,
-            ],
-            [
-                'parent_scope_id' => $parentScope->id,
-                'participation_role' => EventParticipationScope::ROLE_PARTICIPANT,
-                'participant_type' => $this->participationScopes->participantTypeForOrganization($organization),
-                'organization_id' => $organization?->id,
-                'college_id' => $organization?->college_id,
-                'participant_name_snapshot' => $this->participationScopes->participantName($organization, 'Participant'),
-                'ppa_required' => true,
-                'ppa_status' => $this->participationScopes->ppaStatusFromEventStatus($linkedEvent->status),
-                'ppa_softcopy_path' => $linkedEvent->proposal_document_path,
-                'ppa_softcopy_original_name' => $linkedEvent->proposal_document_original_name,
-                'hardcopy_submitted' => (bool) $linkedEvent->hardcopy_submitted,
-                'org_head_signed' => (bool) $linkedEvent->head_organization_signed,
-                'adviser_signed' => (bool) $linkedEvent->adviser_signed,
-                'late_cutoff_min' => $linkedEvent->event_late_cutoff_min,
-                'approved_at' => in_array($linkedEvent->status, ['approved', 'completed'], true) ? now() : null,
-                'capture_mode' => 'self_scanning',
-                'analytics_rollup_enabled' => true,
-                'status' => EventParticipationScope::STATUS_ACTIVE,
-            ]
-        );
     }
 }

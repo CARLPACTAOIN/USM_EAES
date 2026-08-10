@@ -101,8 +101,7 @@
                    name="q"
                    x-ref="eventSearchInput"
                    x-model.debounce.150ms="eventSearch"
-                   wire:model="search"
-                   wire:input.debounce.350ms="searchTyped($event.target.value)"
+                   wire:model.live.debounce.650ms="search"
                    autocomplete="off"
                    enterkeyhint="search"
                    placeholder="Search events"
@@ -148,6 +147,9 @@
                     @forelse($events as $event)
                     @php
                         $eventScopes = $event->participationScopes;
+                        $organizerScope = $eventScopes
+                            ->firstWhere('participation_role', \App\Models\EventParticipationScope::ROLE_ORGANIZER);
+                        $revisionNote = $organizerScope?->review_remarks;
                         $participantScopes = $eventScopes
                             ->where('participation_role', \App\Models\EventParticipationScope::ROLE_PARTICIPANT)
                             ->values();
@@ -194,6 +196,7 @@
                             && $canCreateProposals
                             && $currentAdminScope?->organizationId
                             && $event->organization_id === $currentAdminScope->organizationId;
+                        $canEditProposal = $isEventOrganizerAdmin && in_array($event->status, ['draft', 'revision_requested'], true);
                         $canUseAttendanceRules = !$user->hasRole('Super Admin (OSA)')
                             && (
                                 $isEventOrganizerAdmin
@@ -201,9 +204,10 @@
                             );
 
                         // --- Exposed CTA & attention dot logic ---
-                        $needsHardcopy = !$isParticipatingWorkspace && $canCreateProposals && $event->status === 'draft' && !$event->hardcopy_submitted;
-                        $needsRulesAttention = $canUseAttendanceRules && !$event->attendance_policy_locked && $event->event_late_cutoff_min === null && in_array($event->status, ['draft', 'submitted', 'approved'], true);
-                        $overflowNeedsAttention = $needsHardcopy || $needsRulesAttention;
+                        $needsHardcopy = !$isParticipatingWorkspace && $canCreateProposals && in_array($event->status, ['draft', 'revision_requested'], true) && !$event->hardcopy_submitted;
+                        $needsRevisionAttention = $canEditProposal && $event->status === 'revision_requested';
+                        $needsRulesAttention = $canUseAttendanceRules && !$event->attendance_policy_locked && $event->event_late_cutoff_min === null && in_array($event->status, ['draft', 'revision_requested', 'submitted', 'approved'], true);
+                        $overflowNeedsAttention = $needsHardcopy || $needsRevisionAttention || $needsRulesAttention;
                     @endphp
                     <tr wire:key="events-workspace-row-{{ $event->id }}-{{ $workspace }}"
                         data-event-search="{{ Str::lower($event->title . ' ' . ($event->organization?->name ?? '') . ' ' . ($event->organization?->acronym ?? '') . ' ' . ($event->proposal_category ?? '') . ' ' . $event->status . ' ' . $scheduleSummary) }}"
@@ -215,6 +219,9 @@
                             </p>
                             @if($event->parentEvent)
                                 <p class="text-xs text-(--color-text-tertiary)">Parent: {{ Str::limit($event->parentEvent->title, 32) }}</p>
+                            @endif
+                            @if($event->status === 'revision_requested' && $revisionNote)
+                                <p class="text-xs text-(--color-warning)">OSA note: {{ Str::limit($revisionNote, 80) }}</p>
                             @endif
                         </td>
                         <td data-label="Organization">
@@ -237,20 +244,21 @@
                             </div>
                         </td>
                         <td data-label="PPA Packet" class="events-table-secondary">
-                            <livewire:dashboard.event-proposal-packet
-                                :event-id="$event->id"
-                                :is-participating-workspace="$isParticipatingWorkspace"
-                                :primary-participant-scope-id="$primaryParticipantScope?->id"
-                                :key="'event-proposal-packet-'.$event->id.'-'.$workspace"
-                            />
+                            @include('livewire.dashboard.events-workspace-packet', [
+                                'event' => $event,
+                                'isParticipatingWorkspace' => $isParticipatingWorkspace,
+                                'primaryParticipantScope' => $primaryParticipantScope,
+                                'approvedScopeCount' => $approvedScopeCount,
+                                'participantScopeCount' => $participantScopeCount,
+                            ])
                         </td>
                         <td data-label="Status">
-                            <livewire:dashboard.event-proposal-status
-                                :event-id="$event->id"
-                                :is-participating-workspace="$isParticipatingWorkspace"
-                                :primary-participant-scope-id="$primaryParticipantScope?->id"
-                                :key="'event-proposal-status-'.$event->id.'-'.$workspace"
-                            />
+                            @include('livewire.dashboard.events-workspace-status', [
+                                'event' => $event,
+                                'isParticipatingWorkspace' => $isParticipatingWorkspace,
+                                'primaryParticipantScope' => $primaryParticipantScope,
+                                'user' => $user,
+                            ])
                         </td>
                         <td data-label="Exports" class="events-table-secondary">
                             @if(!$isParticipatingWorkspace)
@@ -274,13 +282,54 @@
                         </td>
                         <td data-label="Actions" class="text-right">
                             <div class="event-actions-cell">
-                                {{-- ═══ EXPOSED PRIMARY CTAs ═══ --}}
-                                <livewire:dashboard.event-proposal-workflow
-                                    :event-id="$event->id"
-                                    :is-participating-workspace="$isParticipatingWorkspace"
-                                    :primary-participant-scope-id="$primaryParticipantScope?->id"
-                                    :key="'event-proposal-workflow-'.$event->id.'-'.$workspace"
-                                />
+                                <div class="event-primary-cta">
+                                    @if(!$isParticipatingWorkspace && $user->can('create-proposals') && in_array($event->status, ['draft', 'revision_requested'], true))
+                                        @if(!$event->hardcopy_submitted)
+                                            <button type="button"
+                                                    class="btn btn-sm btn-secondary"
+                                                    title="Record hardcopy submission"
+                                                    wire:click="openModal('workflow', '{{ $event->id }}')">
+                                                Hardcopy
+                                            </button>
+                                        @endif
+                                        <button type="button"
+                                                class="btn btn-sm btn-primary"
+                                                title="Submit for review"
+                                                wire:click="openModal('workflow', '{{ $event->id }}')">
+                                            Submit
+                                        </button>
+                                    @endif
+
+                                    @if($user->hasRole('Super Admin (OSA)') && in_array($event->status, ['submitted', 'under_review'], true))
+                                        <button type="button"
+                                                class="btn btn-sm btn-secondary"
+                                                title="Review proposal"
+                                                wire:click="openModal('workflow', '{{ $event->id }}')">
+                                            Review
+                                        </button>
+                                    @endif
+
+                                    @if(!$user->hasRole('Super Admin (OSA)') && $isParticipatingWorkspace && $primaryParticipantScope && !$primaryParticipantScope->invitation_acknowledged_at)
+                                        <button type="button"
+                                                class="btn btn-sm btn-primary"
+                                                title="Acknowledge participant invitation"
+                                                wire:click="openModal('workflow', '{{ $event->id }}')">
+                                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M9 12.75l2.25 2.25L15.75 9M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                                            Acknowledge
+                                        </button>
+                                    @endif
+
+                                    @if(!$isParticipatingWorkspace && in_array($event->status, ['approved', 'completed'], true))
+                                        <a href="{{ route('dashboard.events.analytics', $event) }}"
+                                           wire:navigate
+                                           class="btn btn-sm btn-secondary"
+                                           title="View event analytics"
+                                           style="background-color: var(--color-accent-subtle); color: var(--color-accent); border: 1px solid var(--color-accent-light);">
+                                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+                                            Analytics
+                                        </a>
+                                    @endif
+                                </div>
 
                                 {{-- ═══ OVERFLOW DROPDOWN (secondary actions) ═══ --}}
                                 <details class="event-action-menu" data-event-action-menu>
@@ -335,12 +384,23 @@
                                     @endif
 
                                     {{-- Scopes --}}
+                                    @if($canEditProposal)
+                                    <button type="button"
+                                            class="btn btn-sm btn-secondary"
+                                            title="{{ $event->status === 'revision_requested' ? 'Revise returned proposal' : 'Edit draft proposal' }}"
+                                            wire:click="openModal('proposal-edit', '{{ $event->id }}')">
+                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M11 5.5H6.75A2.25 2.25 0 004.5 7.75v9.5a2.25 2.25 0 002.25 2.25h9.5a2.25 2.25 0 002.25-2.25V13m-2.25-9.75l3 3m0 0l-9.5 9.5H6.75v-3l9.5-9.5z"/></svg>
+                                        {{ $event->status === 'revision_requested' ? 'Revise' : 'Edit' }}
+                                    </button>
+                                    @endif
+
+                                    {{-- Scopes --}}
                                     <button type="button"
                                             class="btn btn-sm btn-secondary"
                                             title="{{ $isParticipatingWorkspace ? 'Your participant PPA scope' : 'Manage participant scopes' }}"
-                                            onclick="document.getElementById('participant-scope-modal-{{ $event->id }}')?.showModal()">
+                                            wire:click="openModal('participant-scopes', '{{ $event->id }}')">
                                         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M8.25 6.75h7.5M8.25 12h7.5m-7.5 5.25h4.5M4.5 5.25A2.25 2.25 0 016.75 3h10.5a2.25 2.25 0 012.25 2.25v13.5A2.25 2.25 0 0117.25 21H6.75a2.25 2.25 0 01-2.25-2.25V5.25z"/></svg>
-                                        @if($isParticipatingWorkspace && $primaryParticipantScope && in_array($primaryParticipantScope->ppa_status, ['draft', 'rejected'], true))
+                                        @if($isParticipatingWorkspace && $primaryParticipantScope && in_array($primaryParticipantScope->ppa_status, ['draft', 'revision_requested'], true))
                                             Submit PPA
                                         @else
                                             Scopes
@@ -352,7 +412,7 @@
                                     <button type="button"
                                             class="btn btn-sm btn-secondary"
                                             title="Manage attendance rules{{ $needsRulesAttention ? ' — not yet configured' : '' }}"
-                                            onclick="document.getElementById('attendance-rules-modal-{{ $event->id }}')?.showModal()">
+                                            wire:click="openModal('attendance-rules', '{{ $event->id }}')">
                                         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M9 12.75l2 2 4-5.25M5.25 4.5h13.5A1.5 1.5 0 0120.25 6v12a1.5 1.5 0 01-1.5 1.5H5.25A1.5 1.5 0 013.75 18V6a1.5 1.5 0 011.5-1.5z"/></svg>
                                         Rules @if($needsRulesAttention)<span style="color: #e04545; font-size: 0.65rem; margin-left: 0.25rem;">● Setup needed</span>@endif
                                     </button>
@@ -363,7 +423,7 @@
                                     <button type="button"
                                             class="btn btn-sm btn-secondary"
                                             title="Manage scanner assignments"
-                                            onclick="document.getElementById('scanner-session-modal-{{ $event->id }}')?.showModal()">
+                                            wire:click="openModal('scanner-access', '{{ $event->id }}')">
                                         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m9-4.13a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
                                         Scanners
                                     </button>
@@ -371,10 +431,13 @@
 
                                     {{-- AI Sentiment --}}
                                     @if(!$isParticipatingWorkspace && ($event->unprocessed_comment_count ?? 0) > 0)
-                                    @livewire('dashboard.event-sentiment-action', [
-                                        'eventId' => $event->id,
-                                        'pendingComments' => $event->unprocessed_comment_count,
-                                    ], key('event-sentiment-action-' . $event->id . '-' . $workspace))
+                                    <button type="button"
+                                            class="btn btn-sm btn-secondary"
+                                            title="Queue sentiment analysis"
+                                            wire:click="openModal('sentiment', '{{ $event->id }}')">
+                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 3.75L8.25 7.5 4.5 9l3.75 1.5 1.5 3.75 1.5-3.75L15 9l-3.75-1.5-1.5-3.75z"/></svg>
+                                        AI
+                                    </button>
                                     @endif
                                         </div>
                                     </div>
@@ -427,112 +490,106 @@
         @endif
     </div>
 
-    @foreach($events as $event)
-        <dialog id="participant-scope-modal-{{ $event->id }}"
-                class="proposal-modal modal-md"
-                aria-labelledby="participant-scope-modal-title-{{ $event->id }}"
+    @if($activeModal && $activeEvent)
+        @php
+            $activeModalId = match ($activeModal) {
+                'proposal-edit' => 'edit-event-modal-'.$activeEvent->id,
+                'participant-scopes' => 'participant-scope-modal-'.$activeEvent->id,
+                'attendance-rules' => 'attendance-rules-modal-'.$activeEvent->id,
+                'scanner-access' => 'scanner-session-modal-'.$activeEvent->id,
+                'workflow' => 'event-workflow-modal-'.$activeEvent->id,
+                'sentiment' => 'event-sentiment-modal-'.$activeEvent->id,
+            };
+        @endphp
+        <dialog id="{{ $activeModalId }}"
+                wire:key="events-workspace-modal-{{ $activeModal }}-{{ $activeEvent->id }}"
+                class="proposal-modal {{ in_array($activeModal, ['participant-scopes', 'attendance-rules', 'scanner-access', 'workflow', 'sentiment'], true) ? 'modal-md' : '' }}"
+                x-init="$nextTick(() => $el.showModal())"
+                x-on:close="$wire.closeModal()"
                 onclick="if (event.target === this) this.close()">
-            <div class="proposal-modal-form">
-                <div class="proposal-modal-header">
-                    <div class="proposal-modal-title-row">
-                        <span class="proposal-modal-icon" aria-hidden="true">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" d="M8.25 6.75h7.5M8.25 12h7.5m-7.5 5.25h4.5M4.5 5.25A2.25 2.25 0 016.75 3h10.5a2.25 2.25 0 012.25 2.25v13.5A2.25 2.25 0 0117.25 21H6.75a2.25 2.25 0 01-2.25-2.25V5.25z"/></svg>
-                        </span>
+            @if($activeModal === 'proposal-edit')
+                @livewire('dashboard.event-proposal-create', ['eventId' => $activeEvent->id], key('event-proposal-edit-' . $activeEvent->id . '-' . $activeEvent->updated_at?->timestamp))
+            @elseif($activeModal === 'workflow')
+                <div class="proposal-modal-form">
+                    <div class="proposal-modal-header">
                         <div>
-                            <p class="proposal-modal-kicker">{{ $event->title }}</p>
-                            <h2 id="participant-scope-modal-title-{{ $event->id }}" class="proposal-modal-title">Participant Scopes</h2>
-                            <p class="proposal-modal-subtitle">Track invited participant PPAs, scanner ownership, and analytics roll-up boundaries.</p>
+                            <p class="proposal-modal-kicker">{{ $activeEvent->title }}</p>
+                            <h2 class="proposal-modal-title">Proposal Workflow</h2>
                         </div>
+                        <button type="button" class="btn-icon btn-ghost" aria-label="Close proposal workflow" onclick="this.closest('dialog')?.close()">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                        </button>
                     </div>
-                    <button type="button" class="btn-icon btn-ghost" aria-label="Close participant scopes" onclick="document.getElementById('participant-scope-modal-{{ $event->id }}')?.close()">
-                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-                    </button>
-                </div>
-
-                <div class="proposal-modal-body space-y-4">
-                    @livewire('dashboard.event-participant-scopes', [
-                        'eventId' => $event->id,
-                        'isParticipatingWorkspace' => $isParticipatingWorkspace,
-                    ], key('event-participant-scopes-' . $event->id . '-' . $workspace))
-                </div>
-
-                <div class="proposal-modal-footer">
-                    <p class="proposal-required-note">Approved runtime scopes unlock scoped scanner access</p>
-                    <div class="proposal-footer-actions">
-                        <button type="button" class="btn btn-secondary" onclick="document.getElementById('participant-scope-modal-{{ $event->id }}')?.close()">Close</button>
+                    <div class="proposal-modal-body">
+                        @livewire('dashboard.event-proposal-workflow', [
+                            'eventId' => $activeEvent->id,
+                            'isParticipatingWorkspace' => $isParticipatingWorkspace,
+                            'primaryParticipantScopeId' => $isParticipatingWorkspace
+                                ? $activeEvent->participationScopes->first()?->id
+                                : null,
+                        ], key('event-proposal-workflow-' . $activeEvent->id . '-' . $workspace))
                     </div>
                 </div>
-            </div>
-        </dialog>
-
-        <dialog id="attendance-rules-modal-{{ $event->id }}"
-                class="proposal-modal modal-md"
-                aria-labelledby="attendance-rules-modal-title-{{ $event->id }}"
-                onclick="if (event.target === this) this.close()">
-            <div class="proposal-modal-form">
-                <div class="proposal-modal-header">
-                    <div class="proposal-modal-title-row">
-                        <span class="proposal-modal-icon" aria-hidden="true">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" d="M9 12.75l2 2 4-5.25M5.25 4.5h13.5A1.5 1.5 0 0120.25 6v12a1.5 1.5 0 01-1.5 1.5H5.25A1.5 1.5 0 013.75 18V6a1.5 1.5 0 011.5-1.5z"/></svg>
-                        </span>
+            @elseif($activeModal === 'sentiment')
+                <div class="proposal-modal-form">
+                    <div class="proposal-modal-header">
                         <div>
-                            <p class="proposal-modal-kicker">{{ $event->title }}</p>
-                            <h2 id="attendance-rules-modal-title-{{ $event->id }}" class="proposal-modal-title">Attendance Rules</h2>
-                            <p class="proposal-modal-subtitle">Set the official late cutoff before scanning begins. OSA does not review this rule.</p>
+                            <p class="proposal-modal-kicker">{{ $activeEvent->title }}</p>
+                            <h2 class="proposal-modal-title">Sentiment Analysis</h2>
                         </div>
+                        <button type="button" class="btn-icon btn-ghost" aria-label="Close sentiment analysis" onclick="this.closest('dialog')?.close()">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                        </button>
                     </div>
-                    <button type="button" class="btn-icon btn-ghost" aria-label="Close attendance rules" onclick="document.getElementById('attendance-rules-modal-{{ $event->id }}')?.close()">
-                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-                    </button>
-                </div>
-
-                @livewire('dashboard.event-attendance-rules', [
-                    'eventId' => $event->id,
-                    'isParticipatingWorkspace' => $isParticipatingWorkspace,
-                ], key('event-attendance-rules-' . $event->id . '-' . $workspace))
-
-                <div class="proposal-modal-footer">
-                    <p class="proposal-required-note">Rules lock when the event starts</p>
-                    <div class="proposal-footer-actions">
-                        <button type="button" class="btn btn-secondary" onclick="document.getElementById('attendance-rules-modal-{{ $event->id }}')?.close()">Close</button>
+                    <div class="proposal-modal-body">
+                        @livewire('dashboard.event-sentiment-action', [
+                            'eventId' => $activeEvent->id,
+                            'pendingComments' => $activeEvent->unprocessed_comment_count,
+                            'buttonLabel' => 'Queue sentiment analysis',
+                            'fullWidth' => true,
+                        ], key('event-sentiment-action-' . $activeEvent->id . '-' . $workspace))
                     </div>
                 </div>
-            </div>
-        </dialog>
-
-        @if(in_array($event->status, ['approved', 'completed']))
-        <dialog id="scanner-session-modal-{{ $event->id }}"
-                class="proposal-modal modal-md"
-                aria-labelledby="scanner-session-modal-title-{{ $event->id }}"
-                onclick="if (event.target === this) this.close()">
-            <div class="proposal-modal-form">
-                <div class="proposal-modal-header">
-                    <div class="proposal-modal-title-row">
-                        <span class="proposal-modal-icon" aria-hidden="true">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" d="M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m9-4.13a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
-                        </span>
-                        <div>
-                            <p class="proposal-modal-kicker">{{ $event->title }}</p>
-                            <h2 id="scanner-session-modal-title-{{ $event->id }}" class="proposal-modal-title">Scanner Assignments</h2>
-                            <p class="proposal-modal-subtitle">Assign eligible student/officer accounts, then monitor their device-bound scanner sessions.</p>
+            @else
+                <div class="proposal-modal-form">
+                    <div class="proposal-modal-header">
+                        <div class="proposal-modal-title-row">
+                            <span class="proposal-modal-icon" aria-hidden="true">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" d="M8.25 6.75h7.5M8.25 12h7.5m-7.5 5.25h4.5M4.5 5.25A2.25 2.25 0 016.75 3h10.5a2.25 2.25 0 012.25 2.25v13.5A2.25 2.25 0 0117.25 21H6.75a2.25 2.25 0 01-2.25-2.25V5.25z"/></svg>
+                            </span>
+                            <div>
+                                <p class="proposal-modal-kicker">{{ $activeEvent->title }}</p>
+                                <h2 class="proposal-modal-title">
+                                    {{ match ($activeModal) {
+                                        'participant-scopes' => 'Participant Scopes',
+                                        'attendance-rules' => 'Attendance Rules',
+                                        'scanner-access' => 'Scanner Assignments',
+                                    } }}
+                                </h2>
+                            </div>
                         </div>
+                        <button type="button" class="btn-icon btn-ghost" aria-label="Close modal" onclick="this.closest('dialog')?.close()">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                        </button>
                     </div>
-                    <button type="button" class="btn-icon btn-ghost" aria-label="Close scanner sessions" onclick="document.getElementById('scanner-session-modal-{{ $event->id }}')?.close()">
-                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-                    </button>
-                </div>
-
-                @livewire('dashboard.event-scanner-access', ['eventId' => $event->id], key('scanner-access-' . $event->id))
-
-                <div class="proposal-modal-footer">
-                    <p class="proposal-required-note">Existing attendance data is preserved</p>
-                    <div class="proposal-footer-actions">
-                        <button type="button" class="btn btn-secondary" onclick="document.getElementById('scanner-session-modal-{{ $event->id }}')?.close()">Close</button>
+                    <div class="proposal-modal-body space-y-4">
+                        @if($activeModal === 'participant-scopes')
+                            @livewire('dashboard.event-participant-scopes', [
+                                'eventId' => $activeEvent->id,
+                                'isParticipatingWorkspace' => $isParticipatingWorkspace,
+                            ], key('event-participant-scopes-' . $activeEvent->id . '-' . $workspace))
+                        @elseif($activeModal === 'attendance-rules')
+                            @livewire('dashboard.event-attendance-rules', [
+                                'eventId' => $activeEvent->id,
+                                'isParticipatingWorkspace' => $isParticipatingWorkspace,
+                            ], key('event-attendance-rules-' . $activeEvent->id . '-' . $workspace))
+                        @elseif($activeModal === 'scanner-access')
+                            @livewire('dashboard.event-scanner-access', ['eventId' => $activeEvent->id], key('scanner-access-' . $activeEvent->id))
+                        @endif
                     </div>
                 </div>
-            </div>
+            @endif
         </dialog>
-        @endif
-    @endforeach
+    @endif
 
 </div>

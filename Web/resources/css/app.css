@@ -164,6 +164,7 @@ body {
 .badge-draft       { background: var(--color-surface-overlay); color: var(--color-text-secondary); }
 .badge-submitted   { background: var(--color-info-light); color: var(--color-info); }
 .badge-under-review { background: var(--color-warning-light); color: var(--color-warning); }
+.badge-revision-requested { background: var(--color-warning-light); color: var(--color-warning); }
 .badge-approved    { background: var(--color-success-light); color: var(--color-success); }
 .badge-rejected    { background: var(--color-destructive-light); color: var(--color-destructive); }
 .badge-completed   { background: var(--color-accent-light); color: var(--color-accent); }

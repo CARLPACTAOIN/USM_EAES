@@ -10,12 +10,26 @@ class Event extends Model
 {
     use HasFactory, HasUuids;
 
+    public const STATUS_DRAFT = 'draft';
+
+    public const STATUS_SUBMITTED = 'submitted';
+
+    public const STATUS_UNDER_REVIEW = 'under_review';
+
+    public const STATUS_REVISION_REQUESTED = 'revision_requested';
+
+    public const STATUS_APPROVED = 'approved';
+
+    public const STATUS_REJECTED = 'rejected';
+
+    public const STATUS_COMPLETED = 'completed';
+
     protected $fillable = [
         'organization_id',
         'parent_event_id',
         'title',
         'proposal_category',
-        'status', // Proposal workflow: "draft", "submitted", "under_review", "approved", "rejected", "completed"
+        'status', // Proposal workflow: "draft", "submitted", "under_review", "revision_requested", "approved", "rejected", "completed"
         'lifecycle_phase',
         'event_domain',
         'start_date',

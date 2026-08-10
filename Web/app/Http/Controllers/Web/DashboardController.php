@@ -5,11 +5,10 @@ namespace App\Http\Controllers\Web;
 use App\Http\Controllers\Controller;
 use App\Jobs\ResolveAttendanceJob;
 use App\Models\AuditLog;
-use App\Models\College;
 use App\Models\Event;
 use App\Models\EventDay;
-use App\Models\EventScannerAssignment;
 use App\Models\EventParticipationScope;
+use App\Models\EventScannerAssignment;
 use App\Models\Organization;
 use App\Models\PendingStudentLink;
 use App\Models\RawScan;
@@ -18,6 +17,7 @@ use App\Models\User;
 use App\Services\AdminAssignmentService;
 use App\Services\AdminScopeService;
 use App\Services\EventNotificationService;
+use App\Services\EventProposalDraftService;
 use App\Services\ParticipationScopeService;
 use App\Services\ScannerAssignmentService;
 use App\Services\ScannerSessionService;
@@ -25,11 +25,14 @@ use App\Support\AdminScope;
 use App\Support\EventEvaluationForm;
 use App\Support\EventTenantScope;
 use Carbon\Carbon;
+use DomainException;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
+use Throwable;
 
 class DashboardController extends Controller
 {
@@ -38,9 +41,9 @@ class DashboardController extends Controller
         private readonly ScannerAssignmentService $scannerAssignments,
         private readonly AdminScopeService $adminScopes,
         private readonly ParticipationScopeService $participationScopes,
-        private readonly EventNotificationService $eventNotifications
-    ) {
-    }
+        private readonly EventNotificationService $eventNotifications,
+        private readonly EventProposalDraftService $proposalDrafts
+    ) {}
 
     /**
      * Admin dashboard home.
@@ -99,7 +102,7 @@ class DashboardController extends Controller
 
     public function scannerCandidates(Request $request, Event $event)
     {
-        if (!in_array($event->status, ['approved', 'completed'], true)) {
+        if (! in_array($event->status, ['approved', 'completed'], true)) {
             return response()->json([
                 'data' => [],
                 'message' => 'Scanner candidates are available only after the event is approved.',
@@ -141,7 +144,7 @@ class DashboardController extends Controller
     /**
      * Create a new event proposal.
      */
-    public function createEvent(Request $request)
+    public function createEvent(Request $request): RedirectResponse
     {
         $user = $request->user();
         abort_unless($user->can('create-proposals'), 403);
@@ -200,7 +203,7 @@ class DashboardController extends Controller
             try {
                 $startDate = Carbon::parse($request->input('start_date'))->startOfDay();
                 $endDate = Carbon::parse($request->input('end_date'))->startOfDay();
-            } catch (\Throwable) {
+            } catch (Throwable) {
                 return;
             }
 
@@ -211,7 +214,7 @@ class DashboardController extends Controller
 
                 try {
                     $dayDate = Carbon::parse($dayData['date'])->startOfDay();
-                } catch (\Throwable) {
+                } catch (Throwable) {
                     continue;
                 }
 
@@ -244,105 +247,175 @@ class DashboardController extends Controller
             ? $request->input('organization_id')
             : $scope?->organizationId;
 
-        if (!$organizationId) {
+        if (! $organizationId) {
             abort(403, 'Your account must be assigned to an organization before creating proposals.');
         }
 
-        $organization = Organization::find($organizationId);
-        if (!$organization || !in_array($organization->type, ['society', 'usg', 'lsg', 'academic_unit', 'administrative_office', 'non_academic_org', 'hr_unit'], true)) {
-            return redirect()->back()
-                ->with('error', 'Select an active recognized organizer before creating a proposal.')
-                ->withInput();
-        }
-
-        $isHrEvent = $organization->type === 'hr_unit';
-        if (!$isHrEvent && !$request->hasFile('proposal_document')) {
-            return redirect()->back()
-                ->withErrors(['proposal_document' => 'Attach the official PPA proposal softcopy before saving this event.'])
-                ->withInput();
-        }
-
-        if ($request->filled('parent_event_id')) {
-            $parentEvent = Event::with('organization')->findOrFail($request->parent_event_id);
-            if (!in_array($parentEvent->organization?->type, ['usg', 'lsg', 'academic_unit', 'administrative_office'], true)) {
-                return redirect()->back()
-                    ->with('error', 'Sub-events can only be linked to USG or LSG parent events.')
-                    ->withInput();
-            }
-        }
-
-        DB::beginTransaction();
         try {
-            $documentPath = $request->hasFile('proposal_document')
-                ? $request->file('proposal_document')->store('proposal-documents')
-                : null;
-            $hardcopySubmitted = $isHrEvent ? false : $request->boolean('hardcopy_submitted');
-
-            $event = Event::create([
-                'organization_id' => $organizationId,
-                'parent_event_id' => $request->parent_event_id,
-                'title' => $request->title,
-                'event_domain' => $organization->type === 'hr_unit' ? 'hr' : 'student_affairs',
-                'proposal_category' => $request->proposal_category,
-                'status' => $isHrEvent ? 'approved' : 'draft',
-                'start_date' => $request->start_date,
-                'end_date' => $request->end_date,
-                'location_type' => $request->location_type,
-                'location_details' => $request->location_details,
-                'target_demographics' => [
-                    'implementing_office' => $request->input('implementing_office'),
-                    'collaborating_office' => $request->input('collaborating_office'),
-                    'target_participants' => $request->input('target_participants'),
-                ],
-                'budget_allocations' => [
-                    'source_of_fund' => $request->input('source_of_fund'),
-                    'budget_cost' => $request->input('budget_cost'),
-                ],
-                'proposal_document_path' => $documentPath,
-                'proposal_document_original_name' => $request->hasFile('proposal_document')
-                    ? $request->file('proposal_document')->getClientOriginalName()
-                    : null,
-                'resolution_number' => $request->resolution_number,
-                'hardcopy_submitted' => $hardcopySubmitted,
-                'hardcopy_submitted_at' => $hardcopySubmitted ? now() : null,
-                'head_organization_signed' => $isHrEvent ? false : $request->boolean('head_organization_signed'),
-                'adviser_signed' => $isHrEvent ? false : $request->boolean('adviser_signed'),
-            ]);
-
-            foreach ($request->event_days as $i => $dayData) {
-                EventDay::create([
-                    'event_id' => $event->id,
-                    'day_number' => $i + 1,
-                    'date' => $dayData['date'],
-                    'start_time' => $dayData['start_time'],
-                    'end_time' => $dayData['end_time'],
-                ]);
-            }
-
-            EventEvaluationForm::createForEvent(
-                $event,
+            $event = $this->proposalDrafts->create(
                 $user,
-                $request->input('evaluation_questions', []),
-                'Evaluation - ' . $event->title
+                $this->proposalData($request, $organizationId),
+                $request->file('proposal_document')
             );
 
-            $this->participationScopes->ensureOrganizerScope($event->fresh(['organization']));
-
-            DB::commit();
             return redirect()->route('dashboard.events')
-                ->with('success', $isHrEvent
+                ->with('success', $event->event_domain === 'hr'
                     ? 'HR attendance event created and scanner access is ready.'
                     : 'Event proposal created as draft with the official proposal softcopy attached.');
-        } catch (\Exception $e) {
-            DB::rollBack();
-            if (isset($documentPath)) {
-                Storage::delete($documentPath);
+        } catch (DomainException $exception) {
+            if ($exception->getMessage() === 'Attach the official PPA proposal softcopy before saving this event.') {
+                return redirect()->back()
+                    ->withErrors(['proposal_document' => $exception->getMessage()])
+                    ->withInput();
             }
 
             return redirect()->back()
-                ->with('error', 'Failed to create event: ' . $e->getMessage())
+                ->with('error', $exception->getMessage())
+                ->withInput();
+        } catch (Throwable) {
+            return redirect()->back()
+                ->with('error', 'Failed to create event proposal.')
                 ->withInput();
         }
+    }
+
+    public function updateEvent(Request $request, Event $event): RedirectResponse
+    {
+        $user = $request->user();
+        abort_unless($user->can('create-proposals'), 403);
+        abort_if($user->hasRole('Super Admin (OSA)'), 403, 'OSA reviews proposals but does not edit organizer submissions.');
+        $this->authorizeEventAccess($event, $user);
+        abort_unless($this->adminScopes->forUser($user)?->organizationId === $event->organization_id, 403, 'Only the event organizer can edit this proposal.');
+
+        if (! in_array($event->status, [Event::STATUS_DRAFT, Event::STATUS_REVISION_REQUESTED], true)) {
+            return redirect()->back()->with('error', 'Only draft or revision-requested proposals can be edited.');
+        }
+
+        $validator = Validator::make($request->all(), [
+            'title' => 'required|string|max:255',
+            'proposal_category' => 'required|in:program,project,activity',
+            'start_date' => 'required|date',
+            'end_date' => 'required|date|after_or_equal:start_date',
+            'location_type' => 'required|in:on-campus,off-campus',
+            'location_details' => 'nullable|string',
+            'implementing_office' => 'nullable|string|max:255',
+            'collaborating_office' => 'nullable|string|max:255',
+            'target_participants' => 'nullable|string|max:1000',
+            'source_of_fund' => 'nullable|string|max:255',
+            'budget_cost' => 'nullable|numeric|min:0',
+            'resolution_number' => 'nullable|string|max:100',
+            'parent_event_id' => 'nullable|uuid|exists:events,id',
+            'proposal_document' => 'nullable|file|mimes:pdf,doc,docx|max:10240',
+            'hardcopy_submitted' => 'nullable|boolean',
+            'head_organization_signed' => 'nullable|boolean',
+            'adviser_signed' => 'nullable|boolean',
+            'event_days' => 'required|array|min:1',
+            'event_days.*.date' => 'required|date',
+            'event_days.*.start_time' => 'required|date_format:H:i',
+            'event_days.*.end_time' => 'required|date_format:H:i',
+            'evaluation_questions' => 'required|array|min:1|max:10',
+            'evaluation_questions.*.id' => 'nullable|string|max:80',
+            'evaluation_questions.*.label' => 'required|string|max:180',
+            'evaluation_questions.*.description' => 'nullable|string|max:500',
+        ]);
+
+        $validator->after(function ($validator) use ($request, $event): void {
+            if ($request->filled('parent_event_id') && $request->input('parent_event_id') === $event->id) {
+                $validator->errors()->add('parent_event_id', 'A proposal cannot be linked to itself as a parent permit.');
+            }
+
+            try {
+                $startDate = Carbon::parse($request->input('start_date'))->startOfDay();
+                $endDate = Carbon::parse($request->input('end_date'))->startOfDay();
+            } catch (Throwable) {
+                return;
+            }
+
+            foreach ((array) $request->input('event_days', []) as $index => $dayData) {
+                if (empty($dayData['date'])) {
+                    continue;
+                }
+
+                try {
+                    $dayDate = Carbon::parse($dayData['date'])->startOfDay();
+                } catch (Throwable) {
+                    continue;
+                }
+
+                if ($dayDate->lt($startDate) || $dayDate->gt($endDate)) {
+                    $validator->errors()->add("event_days.$index.date", sprintf('Day %d date must be within the event start and end dates.', $index + 1));
+                }
+
+                $startTime = (string) ($dayData['start_time'] ?? '');
+                $endTime = (string) ($dayData['end_time'] ?? '');
+
+                if ($startTime !== '' && $endTime !== '' && $endTime <= $startTime) {
+                    $validator->errors()->add("event_days.$index.end_time", sprintf('Day %d end time must be later than the start time.', $index + 1));
+                }
+            }
+        });
+
+        if ($validator->fails()) {
+            return redirect()->back()->withErrors($validator)->withInput();
+        }
+
+        try {
+            $updatedEvent = $this->proposalDrafts->update(
+                $event,
+                $user,
+                $this->proposalData($request, $event->organization_id),
+                $request->file('proposal_document')
+            );
+
+            return redirect()->route('dashboard.events', ['status' => $updatedEvent->status])
+                ->with('success', 'Event proposal updated.');
+        } catch (DomainException $exception) {
+            if ($exception->getMessage() === 'Attach the official PPA proposal softcopy before saving this event.') {
+                return redirect()->back()
+                    ->withErrors(['proposal_document' => $exception->getMessage()])
+                    ->withInput();
+            }
+
+            return redirect()->back()
+                ->with('error', $exception->getMessage())
+                ->withInput();
+        } catch (Throwable) {
+            return redirect()->back()
+                ->with('error', 'Failed to update event proposal.')
+                ->withInput();
+        }
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function proposalData(Request $request, string $organizationId): array
+    {
+        return [
+            'organization_id' => $organizationId,
+            'parent_event_id' => $request->filled('parent_event_id') ? $request->string('parent_event_id')->toString() : null,
+            'title' => $request->string('title')->toString(),
+            'proposal_category' => $request->string('proposal_category')->toString(),
+            'start_date' => $request->input('start_date'),
+            'end_date' => $request->input('end_date'),
+            'location_type' => $request->string('location_type')->toString(),
+            'location_details' => $request->input('location_details'),
+            'target_demographics' => [
+                'implementing_office' => $request->input('implementing_office'),
+                'collaborating_office' => $request->input('collaborating_office'),
+                'target_participants' => $request->input('target_participants'),
+            ],
+            'budget_allocations' => [
+                'source_of_fund' => $request->input('source_of_fund'),
+                'budget_cost' => $request->input('budget_cost'),
+            ],
+            'resolution_number' => $request->input('resolution_number'),
+            'hardcopy_submitted' => $request->boolean('hardcopy_submitted'),
+            'head_organization_signed' => $request->boolean('head_organization_signed'),
+            'adviser_signed' => $request->boolean('adviser_signed'),
+            'event_days' => $request->input('event_days', []),
+            'evaluation_questions' => $request->input('evaluation_questions', []),
+        ];
     }
 
     /**
@@ -354,24 +427,26 @@ class DashboardController extends Controller
 
         $event = Event::findOrFail($eventId);
         $this->authorizeEventAccess($event, $request->user());
+        abort_unless($this->adminScopes->forUser($request->user())?->organizationId === $event->organization_id, 403, 'Only the event organizer can submit this proposal.');
 
-        if ($event->status !== 'draft') {
-            return redirect()->back()->with('error', 'Only draft proposals can be submitted.');
+        if (! in_array($event->status, [Event::STATUS_DRAFT, Event::STATUS_REVISION_REQUESTED], true)) {
+            return redirect()->back()->with('error', 'Only draft or revision-requested proposals can be submitted.');
         }
 
-        if (!$event->proposal_document_path) {
+        if (! $event->proposal_document_path) {
             return redirect()->back()->with('error', 'Attach the official PPA proposal softcopy before submitting for review.');
         }
 
-        if (!$event->hardcopy_submitted) {
+        if (! $event->hardcopy_submitted) {
             return redirect()->back()->with('error', 'Confirm hardcopy submission to OSA before submitting for review.');
         }
 
-        $event->update(['status' => 'submitted']);
+        $event->update(['status' => Event::STATUS_SUBMITTED]);
         $this->participationScopes->ensureOrganizerScope($event)->update([
             'ppa_status' => EventParticipationScope::PPA_SUBMITTED,
             'submitted_by' => $request->user()->id,
             'submitted_at' => now(),
+            'review_remarks' => null,
         ]);
         $this->eventNotifications->notifyPendingInvitationsForEvent($event->fresh(['organization', 'participationScopes.organization', 'participationScopes.delegatedOrganization']));
 
@@ -388,7 +463,7 @@ class DashboardController extends Controller
         $event = Event::findOrFail($eventId);
         $this->authorizeEventAccess($event, $request->user());
 
-        if (!in_array($event->status, ['draft', 'submitted', 'under_review'], true)) {
+        if (! in_array($event->status, [Event::STATUS_DRAFT, Event::STATUS_SUBMITTED, Event::STATUS_UNDER_REVIEW, Event::STATUS_REVISION_REQUESTED], true)) {
             return redirect()->back()->with('error', 'Hardcopy tracking can only be updated before approval or rejection.');
         }
 
@@ -417,16 +492,17 @@ class DashboardController extends Controller
 
         $event = Event::findOrFail($eventId);
 
-        if ($event->status !== 'submitted') {
+        if ($event->status !== Event::STATUS_SUBMITTED) {
             return redirect()->back()->with('error', 'Only submitted proposals can be reviewed.');
         }
 
-        $event->update(['status' => 'under_review']);
+        $event->update(['status' => Event::STATUS_UNDER_REVIEW]);
         $this->participationScopes->ensureOrganizerScope($event)->update([
             'ppa_status' => EventParticipationScope::PPA_UNDER_REVIEW,
             'reviewed_by' => $request->user()->id,
             'reviewed_at' => now(),
         ]);
+
         return redirect()->back()->with('success', 'Proposal is now under review.');
     }
 
@@ -439,26 +515,57 @@ class DashboardController extends Controller
 
         $event = Event::findOrFail($eventId);
 
-        if (!in_array($event->status, ['submitted', 'under_review'])) {
+        if (! in_array($event->status, [Event::STATUS_SUBMITTED, Event::STATUS_UNDER_REVIEW], true)) {
             return redirect()->back()->with('error', 'Proposal must be submitted or under review to approve.');
         }
 
-        if (!$event->proposal_document_path || !$event->hardcopy_submitted) {
+        if (! $event->proposal_document_path || ! $event->hardcopy_submitted) {
             return redirect()->back()->with('error', 'Proposal softcopy and hardcopy submission must be recorded before approval.');
         }
 
-        if (!EventEvaluationForm::hasLockedForm($event)) {
+        if (! EventEvaluationForm::hasLockedForm($event)) {
             return redirect()->back()->with('error', 'A locked evaluation form with at least one question is required before approval.');
         }
 
-        $event->update(['status' => 'approved']);
+        $event->update(['status' => Event::STATUS_APPROVED]);
         $this->participationScopes->ensureOrganizerScope($event->fresh())->update([
             'ppa_status' => EventParticipationScope::PPA_APPROVED,
             'reviewed_by' => $request->user()->id,
             'reviewed_at' => now(),
             'approved_at' => now(),
+            'review_remarks' => null,
         ]);
+
         return redirect()->back()->with('success', 'Event proposal approved. Scanning is now unlocked.');
+    }
+
+    public function requestEventRevision(Request $request, $eventId)
+    {
+        abort_unless($request->user()->hasRole('Super Admin (OSA)'), 403);
+
+        $validated = $request->validate([
+            'review_remarks' => 'required|string|max:1000',
+        ], [], [
+            'review_remarks' => 'revision note',
+        ]);
+
+        $event = Event::findOrFail($eventId);
+
+        if (! in_array($event->status, [Event::STATUS_SUBMITTED, Event::STATUS_UNDER_REVIEW], true)) {
+            return redirect()->back()->with('error', 'Proposal must be submitted or under review to request revision.');
+        }
+
+        $event->update(['status' => Event::STATUS_REVISION_REQUESTED]);
+        $organizerScope = $this->participationScopes->ensureOrganizerScope($event);
+        $organizerScope->update([
+            'ppa_status' => EventParticipationScope::PPA_REVISION_REQUESTED,
+            'reviewed_by' => $request->user()->id,
+            'reviewed_at' => now(),
+            'review_remarks' => trim($validated['review_remarks']),
+        ]);
+        $this->eventNotifications->notifyProposalRevisionRequested($organizerScope->fresh(['event.organization', 'organization', 'delegatedOrganization']));
+
+        return redirect()->back()->with('success', 'Event proposal returned for revision.');
     }
 
     /**
@@ -470,23 +577,24 @@ class DashboardController extends Controller
 
         $event = Event::findOrFail($eventId);
 
-        if (!in_array($event->status, ['submitted', 'under_review'])) {
+        if (! in_array($event->status, [Event::STATUS_SUBMITTED, Event::STATUS_UNDER_REVIEW], true)) {
             return redirect()->back()->with('error', 'Proposal must be submitted or under review to reject.');
         }
 
-        $event->update(['status' => 'rejected']);
+        $event->update(['status' => Event::STATUS_REJECTED]);
         $this->participationScopes->ensureOrganizerScope($event)->update([
             'ppa_status' => EventParticipationScope::PPA_REJECTED,
             'reviewed_by' => $request->user()->id,
             'reviewed_at' => now(),
         ]);
+
         return redirect()->back()->with('success', 'Event proposal rejected.');
     }
 
     /**
      * Link a proposal under a parent USG or LSG permit.
      */
-    public function linkEvent(Request $request, $eventId)
+    public function linkEvent(Request $request, string $eventId): RedirectResponse
     {
         abort_unless($request->user()->can('create-proposals'), 403);
 
@@ -502,20 +610,30 @@ class DashboardController extends Controller
         }
 
         $parentEvent = Event::with('organization')->findOrFail($request->parent_event_id);
-        if (!in_array($parentEvent->organization?->type, ['usg', 'lsg', 'academic_unit', 'administrative_office'], true)) {
+        if (! in_array($parentEvent->organization?->type, ['usg', 'lsg', 'academic_unit', 'administrative_office'], true)) {
             return redirect()->back()->with('error', 'Sub-events can only be linked to USG or LSG parent events.');
         }
 
-        $event->update(['parent_event_id' => $parentEvent->id]);
-        $participantScope = $this->syncParticipantScopeFromLinkedEvent($parentEvent, $event);
-        $this->eventNotifications->notifyParticipantScopeInvitation($participantScope->fresh(['event.organization', 'organization', 'delegatedOrganization']));
+        try {
+            $participantScope = DB::transaction(function () use ($event, $parentEvent): EventParticipationScope {
+                $event->update(['parent_event_id' => $parentEvent->id]);
+
+                return $this->participationScopes->syncParticipantScopeFromLinkedEvent($parentEvent, $event);
+            });
+        } catch (DomainException $exception) {
+            return redirect()->back()->with('error', $exception->getMessage());
+        }
+
+        if ($participantScope->wasRecentlyCreated) {
+            $this->eventNotifications->notifyParticipantScopeInvitation($participantScope->fresh(['event.organization', 'organization', 'delegatedOrganization']));
+        }
 
         return redirect()->back()->with('success', 'Event linked under the parent permit.');
     }
 
-    public function storeParticipantScope(Request $request, Event $event)
+    public function storeParticipantScope(Request $request, Event $event): RedirectResponse
     {
-        abort_unless($request->user()->can('create-proposals') && !$request->user()->hasRole('Super Admin (OSA)'), 403);
+        abort_unless($request->user()->can('create-proposals') && ! $request->user()->hasRole('Super Admin (OSA)'), 403);
 
         $this->authorizeEventAccess($event, $request->user());
 
@@ -551,17 +669,13 @@ class DashboardController extends Controller
             default => 'organization',
         };
 
-        if ($audienceMode === 'all') {
-            $collegeIds = College::orderBy('name')->pluck('id')->values();
-        }
-
         if ($audienceMode === 'organization' && $organizationIds->isEmpty()) {
             return redirect()->back()
                 ->withErrors(['organization_ids' => 'Select at least one organization audience.'])
                 ->withInput();
         }
 
-        if (in_array($audienceMode, ['all', 'college'], true) && $collegeIds->isEmpty()) {
+        if ($audienceMode === 'college' && $collegeIds->isEmpty()) {
             return redirect()->back()
                 ->withErrors(['college_ids' => 'Select at least one College audience.'])
                 ->withInput();
@@ -570,127 +684,25 @@ class DashboardController extends Controller
         $ppaRequired = $request->boolean('ppa_required', true);
         $analyticsRollupEnabled = $request->boolean('analytics_rollup_enabled', true);
         $captureMode = $validated['capture_mode'];
-        $parentScope = $this->participationScopes->ensureOrganizerScope($event);
-        $createdScopes = collect();
-        $skippedOrganizer = 0;
-        $skippedExisting = 0;
+        $result = $this->participationScopes->createParticipantScopes(
+            event: $event,
+            audienceMode: $audienceMode,
+            organizationIds: $organizationIds->all(),
+            collegeIds: $collegeIds->all(),
+            captureMode: $captureMode,
+            ppaRequired: $ppaRequired,
+            analyticsRollupEnabled: $analyticsRollupEnabled,
+            programId: $validated['program_id'] ?? null,
+            participantNameSnapshot: $validated['participant_name_snapshot'] ?? null,
+        );
+        $createdCount = $result['created_count'];
+        $skippedOrganizer = $result['skipped_organizer_count'];
+        $skippedExisting = $result['skipped_existing_count'];
 
-        DB::transaction(function () use (
-            $audienceMode,
-            $organizationIds,
-            $collegeIds,
-            $event,
-            $parentScope,
-            $validated,
-            $ppaRequired,
-            $analyticsRollupEnabled,
-            $captureMode,
-            &$createdScopes,
-            &$skippedOrganizer,
-            &$skippedExisting
-        ): void {
-            if ($audienceMode === 'organization') {
-                Organization::query()
-                    ->whereIn('id', $organizationIds)
-                    ->orderBy('name')
-                    ->get()
-                    ->each(function (Organization $organization) use (
-                        $event,
-                        $parentScope,
-                        $validated,
-                        $organizationIds,
-                        $ppaRequired,
-                        $analyticsRollupEnabled,
-                        $captureMode,
-                        &$createdScopes,
-                        &$skippedOrganizer,
-                        &$skippedExisting
-                    ): void {
-                        if ($organization->id === $event->organization_id) {
-                            $skippedOrganizer++;
-                            return;
-                        }
-
-                        $exists = $event->participationScopes()
-                            ->where('organization_id', $organization->id)
-                            ->where('status', EventParticipationScope::STATUS_ACTIVE)
-                            ->exists();
-
-                        if ($exists) {
-                            $skippedExisting++;
-                            return;
-                        }
-
-                        $createdScopes->push($event->participationScopes()->create([
-                            'parent_scope_id' => $parentScope->id,
-                            'participation_role' => EventParticipationScope::ROLE_PARTICIPANT,
-                            'participant_type' => $this->participationScopes->participantTypeForOrganization($organization),
-                            'organization_id' => $organization->id,
-                            'college_id' => $organization->college_id,
-                            'program_id' => $validated['program_id'] ?? null,
-                            'participant_name_snapshot' => $organizationIds->count() === 1
-                                ? ($validated['participant_name_snapshot'] ?? $this->participationScopes->participantName($organization, 'Participant scope'))
-                                : $this->participationScopes->participantName($organization, 'Participant scope'),
-                            'ppa_required' => $ppaRequired,
-                            'ppa_status' => $ppaRequired ? EventParticipationScope::PPA_DRAFT : EventParticipationScope::PPA_NOT_REQUIRED,
-                            'capture_mode' => $captureMode,
-                            'analytics_rollup_enabled' => $analyticsRollupEnabled,
-                            'status' => EventParticipationScope::STATUS_ACTIVE,
-                        ]));
-                    });
-
-                return;
-            }
-
-            College::query()
-                ->whereIn('id', $collegeIds)
-                ->orderBy('name')
-                ->get()
-                ->each(function (College $college) use (
-                    $event,
-                    $parentScope,
-                    $ppaRequired,
-                    $analyticsRollupEnabled,
-                    $captureMode,
-                    &$createdScopes,
-                    &$skippedExisting
-                ): void {
-                    $exists = $event->participationScopes()
-                        ->where('participant_type', 'college')
-                        ->whereNull('organization_id')
-                        ->where('college_id', $college->id)
-                        ->where('status', EventParticipationScope::STATUS_ACTIVE)
-                        ->exists();
-
-                    if ($exists) {
-                        $skippedExisting++;
-                        return;
-                    }
-
-                    $createdScopes->push($event->participationScopes()->create([
-                        'parent_scope_id' => $parentScope->id,
-                        'participation_role' => EventParticipationScope::ROLE_PARTICIPANT,
-                        'participant_type' => 'college',
-                        'organization_id' => null,
-                        'college_id' => $college->id,
-                        'program_id' => null,
-                        'participant_name_snapshot' => trim(($college->code ? "{$college->code} - " : '') . $college->name),
-                        'ppa_required' => $ppaRequired,
-                        'ppa_status' => $ppaRequired ? EventParticipationScope::PPA_DRAFT : EventParticipationScope::PPA_NOT_REQUIRED,
-                        'capture_mode' => $captureMode,
-                        'analytics_rollup_enabled' => $analyticsRollupEnabled,
-                        'status' => EventParticipationScope::STATUS_ACTIVE,
-                    ]));
-                });
-        });
-
-        $createdScopes->each(fn (EventParticipationScope $participantScope) => $this->eventNotifications
-            ->notifyParticipantScopeInvitation($participantScope->fresh(['event.organization', 'organization', 'college', 'delegatedOrganization'])));
-
-        if ($createdScopes->isNotEmpty()) {
-            $message = $createdScopes->count() === 1
+        if ($createdCount > 0) {
+            $message = $createdCount === 1
                 ? 'Participant scope added.'
-                : "{$createdScopes->count()} participant scopes added.";
+                : "{$createdCount} participant scopes added.";
 
             if ($skippedOrganizer > 0) {
                 $message .= ' Organizer audience was skipped because it is already included.';
@@ -714,7 +726,7 @@ class DashboardController extends Controller
     {
         abort_unless($participationScope->event_id === $event->id, 404);
 
-        if (!$this->eventNotifications->acknowledgeInvitation($participationScope, $request->user())) {
+        if (! $this->eventNotifications->acknowledgeInvitation($participationScope, $request->user())) {
             abort(403, 'Only the invited participant organization can acknowledge this invitation.');
         }
 
@@ -726,12 +738,12 @@ class DashboardController extends Controller
     {
         $this->authorizeParticipantScopeAccess($event, $participationScope, $request->user());
 
-        if (!$participationScope->ppa_required) {
+        if (! $participationScope->ppa_required) {
             return redirect()->back()->with('error', 'This participant scope does not require a PPA.');
         }
 
-        if (!in_array($participationScope->ppa_status, [EventParticipationScope::PPA_DRAFT, EventParticipationScope::PPA_REJECTED], true)) {
-            return redirect()->back()->with('error', 'Only draft or rejected participant PPAs can be submitted.');
+        if (! in_array($participationScope->ppa_status, [EventParticipationScope::PPA_DRAFT, EventParticipationScope::PPA_REVISION_REQUESTED], true)) {
+            return redirect()->back()->with('error', 'Only draft or revision-requested participant PPAs can be submitted.');
         }
 
         $validated = $request->validate([
@@ -764,7 +776,7 @@ class DashboardController extends Controller
 
     public function updateParticipantScopeAttendancePolicy(Request $request, Event $event, EventParticipationScope $participationScope)
     {
-        abort_unless(!$request->user()->hasRole('Super Admin (OSA)'), 403);
+        abort_unless(! $request->user()->hasRole('Super Admin (OSA)'), 403);
         $this->authorizeParticipantScopeAccess($event, $participationScope, $request->user());
 
         if ($this->attendancePolicyLocked($event)) {
@@ -803,7 +815,7 @@ class DashboardController extends Controller
     public function updateEventAttendancePolicy(Request $request, Event $event)
     {
         $user = $request->user();
-        abort_unless(!$user->hasRole('Super Admin (OSA)') && $user->can('create-proposals'), 403);
+        abort_unless(! $user->hasRole('Super Admin (OSA)') && $user->can('create-proposals'), 403);
         $this->authorizeEventAccess($event, $user);
         $adminScope = $this->adminScopes->forUser($user);
         abort_unless($adminScope?->organizationId && $event->organization_id === $adminScope->organizationId, 403, 'Only the event organizer can update attendance rules.');
@@ -849,11 +861,11 @@ class DashboardController extends Controller
         abort_unless($request->user()->hasRole('Super Admin (OSA)'), 403);
         abort_unless($participationScope->event_id === $event->id, 404);
 
-        if (!in_array($participationScope->ppa_status, [EventParticipationScope::PPA_SUBMITTED, EventParticipationScope::PPA_UNDER_REVIEW], true)) {
+        if (! in_array($participationScope->ppa_status, [EventParticipationScope::PPA_SUBMITTED, EventParticipationScope::PPA_UNDER_REVIEW], true)) {
             return redirect()->back()->with('error', 'Participant PPA must be submitted or under review before approval.');
         }
 
-        if ($participationScope->ppa_required && (!$participationScope->ppa_softcopy_path || !$participationScope->hardcopy_submitted)) {
+        if ($participationScope->ppa_required && (! $participationScope->ppa_softcopy_path || ! $participationScope->hardcopy_submitted)) {
             return redirect()->back()->with('error', 'Participant PPA softcopy and hardcopy submission are required before approval.');
         }
 
@@ -869,6 +881,32 @@ class DashboardController extends Controller
         return redirect()->back()->with('success', 'Participant PPA approved. Scoped scanner access is now available.');
     }
 
+    public function requestParticipantScopeRevision(Request $request, Event $event, EventParticipationScope $participationScope)
+    {
+        abort_unless($request->user()->hasRole('Super Admin (OSA)'), 403);
+        abort_unless($participationScope->event_id === $event->id, 404);
+
+        $validated = $request->validate([
+            'review_remarks' => 'required|string|max:1000',
+        ], [], [
+            'review_remarks' => 'revision note',
+        ]);
+
+        if (! in_array($participationScope->ppa_status, [EventParticipationScope::PPA_SUBMITTED, EventParticipationScope::PPA_UNDER_REVIEW], true)) {
+            return redirect()->back()->with('error', 'Participant PPA must be submitted or under review before requesting revision.');
+        }
+
+        $participationScope->update([
+            'ppa_status' => EventParticipationScope::PPA_REVISION_REQUESTED,
+            'reviewed_by' => $request->user()->id,
+            'reviewed_at' => now(),
+            'review_remarks' => trim($validated['review_remarks']),
+        ]);
+        $this->eventNotifications->notifyParticipantScopeReviewed($participationScope->fresh(['event.organization', 'organization', 'delegatedOrganization']), EventParticipationScope::PPA_REVISION_REQUESTED);
+
+        return redirect()->back()->with('success', 'Participant PPA returned for revision.');
+    }
+
     public function rejectParticipantScope(Request $request, Event $event, EventParticipationScope $participationScope)
     {
         abort_unless($request->user()->hasRole('Super Admin (OSA)'), 403);
@@ -878,7 +916,7 @@ class DashboardController extends Controller
             'review_remarks' => 'nullable|string|max:1000',
         ]);
 
-        if (!in_array($participationScope->ppa_status, [EventParticipationScope::PPA_SUBMITTED, EventParticipationScope::PPA_UNDER_REVIEW], true)) {
+        if (! in_array($participationScope->ppa_status, [EventParticipationScope::PPA_SUBMITTED, EventParticipationScope::PPA_UNDER_REVIEW], true)) {
             return redirect()->back()->with('error', 'Participant PPA must be submitted or under review before rejection.');
         }
 
@@ -951,7 +989,7 @@ class DashboardController extends Controller
 
         foreach ($scannerUserIds as $scannerUserId) {
             $scannerUser = $scannerUsers->get($scannerUserId);
-            if (!$scannerUser || !$this->scannerAssignments->canAssignScanner($request->user(), $scannerUser, $participationScope)) {
+            if (! $scannerUser || ! $this->scannerAssignments->canAssignScanner($request->user(), $scannerUser, $participationScope)) {
                 return redirect()->back()
                     ->with('error', 'Select scanners from the selected attendance scope.')
                     ->withInput();
@@ -1011,7 +1049,7 @@ class DashboardController extends Controller
         $event = Event::findOrFail($eventId);
         $this->authorizeEventAccess($event, $request->user());
 
-        if (!$event->proposal_document_path || !Storage::exists($event->proposal_document_path)) {
+        if (! $event->proposal_document_path || ! Storage::exists($event->proposal_document_path)) {
             abort(404, 'Proposal document not found.');
         }
 
@@ -1061,7 +1099,7 @@ class DashboardController extends Controller
         }
 
         $student = User::findOrFail($request->student_id);
-        if (!$this->canResolveStudentForPendingLink($pendingLink, $student, $user)) {
+        if (! $this->canResolveStudentForPendingLink($pendingLink, $student, $user)) {
             abort(403, 'Student is outside the pending link organization boundary.');
         }
 
@@ -1144,7 +1182,7 @@ class DashboardController extends Controller
     public function adminUsers(Request $request)
     {
         $user = $request->user();
-        if (!$user->hasRole('Super Admin (OSA)')) {
+        if (! $user->hasRole('Super Admin (OSA)')) {
             abort(403);
         }
 
@@ -1161,14 +1199,14 @@ class DashboardController extends Controller
     public function createAdminUser(Request $request, AdminAssignmentService $service)
     {
         $user = $request->user();
-        if (!$user->hasRole('Super Admin (OSA)')) {
+        if (! $user->hasRole('Super Admin (OSA)')) {
             abort(403);
         }
 
         $validator = Validator::make($request->all(), [
             'name' => 'required|string|max:255',
             'email' => 'required|email|unique:users,email',
-            'role' => 'required|string|in:' . implode(',', AdminAssignmentService::ADMIN_ROLES),
+            'role' => 'required|string|in:'.implode(',', AdminAssignmentService::ADMIN_ROLES),
             'organization_id' => 'nullable|uuid|exists:organizations,id',
             'password' => 'required|string|min:8',
         ]);
@@ -1193,7 +1231,7 @@ class DashboardController extends Controller
             roleName: $request->role,
             organization: $organization,
             college: $organization?->college,
-            academicYear: now()->year . '-' . (now()->year + 1),
+            academicYear: now()->year.'-'.(now()->year + 1),
             termStart: now()->toDateString(),
             termEnd: now()->addYear()->toDateString(),
             positionTitle: 'Direct OSA assignment',
@@ -1222,8 +1260,9 @@ class DashboardController extends Controller
     {
         $scope = $this->adminScopes->forUser($user);
 
-        if (!$scope) {
+        if (! $scope) {
             $query->whereRaw('1 = 0');
+
             return;
         }
 
@@ -1262,7 +1301,7 @@ class DashboardController extends Controller
                     ->orWhereHas('delegatedOrganization', fn ($organizationQuery) => $organizationQuery->where('college_id', $scope->collegeId));
             }
 
-            if (!$hasBoundary) {
+            if (! $hasBoundary) {
                 $boundaryQuery->whereRaw('1 = 0');
             }
         });
@@ -1309,7 +1348,7 @@ class DashboardController extends Controller
         $eventEndDate = $event->end_date?->copy()->startOfDay() ?? $eventStartDate;
         $startsAt = $event->eventDays
             ->filter(function (EventDay $day) use ($eventStartDate, $eventEndDate): bool {
-                if (!$eventStartDate || !$eventEndDate || !$day->date) {
+                if (! $eventStartDate || ! $eventEndDate || ! $day->date) {
                     return true;
                 }
 
@@ -1318,28 +1357,28 @@ class DashboardController extends Controller
                 return $dayDate->betweenIncluded($eventStartDate, $eventEndDate);
             })
             ->map(function (EventDay $day) use ($timezone): ?Carbon {
-                if (!$day->date || !$day->start_time) {
+                if (! $day->date || ! $day->start_time) {
                     return null;
                 }
 
-                return Carbon::parse($day->date->toDateString() . ' ' . $day->start_time, $timezone);
+                return Carbon::parse($day->date->toDateString().' '.$day->start_time, $timezone);
             })
             ->filter()
             ->sortBy(fn (Carbon $date) => $date->timestamp)
             ->first();
 
-        if (!$startsAt && $event->start_date) {
+        if (! $startsAt && $event->start_date) {
             $firstStartTime = $event->eventDays
                 ->sortBy('day_number')
                 ->first(fn (EventDay $day) => filled($day->start_time))
                 ?->start_time;
 
             if ($firstStartTime) {
-                $startsAt = Carbon::parse($event->start_date->toDateString() . ' ' . $firstStartTime, $timezone);
+                $startsAt = Carbon::parse($event->start_date->toDateString().' '.$firstStartTime, $timezone);
             }
         }
 
-        if (!$startsAt && $event->start_date) {
+        if (! $startsAt && $event->start_date) {
             $startsAt = Carbon::parse($event->start_date->toDateString(), $timezone)->startOfDay();
         }
 
@@ -1378,7 +1417,7 @@ class DashboardController extends Controller
 
     private function adminScopeMatchesParticipantScope(?AdminScope $adminScope, EventParticipationScope $scope): bool
     {
-        if (!$adminScope) {
+        if (! $adminScope) {
             return false;
         }
 
@@ -1403,25 +1442,31 @@ class DashboardController extends Controller
     {
         $scope = $this->adminScopes->forUser($user);
 
-        if (!$scope) {
+        if (! $scope) {
             $query->whereRaw('1 = 0');
+
             return;
         }
 
-        if ($scope->isSuperAdmin()) return;
+        if ($scope->isSuperAdmin()) {
+            return;
+        }
 
         if ($scope->isUsgAdmin()) {
-            $query->whereHas('organization', fn($q) => $q->where('type', 'usg')->orWhere('id', $scope->organizationId));
+            $query->whereHas('organization', fn ($q) => $q->where('type', 'usg')->orWhere('id', $scope->organizationId));
+
             return;
         }
 
         if ($scope->isLsgAdmin()) {
-            $query->whereHas('organization', fn($q) => $q->where('college_id', $scope->collegeId));
+            $query->whereHas('organization', fn ($q) => $q->where('college_id', $scope->collegeId));
+
             return;
         }
 
-        if (!$scope->organizationId) {
+        if (! $scope->organizationId) {
             $query->whereRaw('1 = 0');
+
             return;
         }
 
@@ -1432,7 +1477,7 @@ class DashboardController extends Controller
     {
         $scope = $this->adminScopes->forUser($user);
 
-        if (!$scope) {
+        if (! $scope) {
             abort(403, 'Access denied. No active admin assignment found.');
         }
 
@@ -1482,56 +1527,24 @@ class DashboardController extends Controller
         abort(403, 'Access denied. Restricted to the participant scope owner or event organizer.');
     }
 
-    private function syncParticipantScopeFromLinkedEvent(Event $parentEvent, Event $linkedEvent): EventParticipationScope
-    {
-        $linkedEvent->loadMissing('organization');
-        $parentScope = $this->participationScopes->ensureOrganizerScope($parentEvent);
-        $organization = $linkedEvent->organization;
-
-        return EventParticipationScope::updateOrCreate(
-            [
-                'event_id' => $parentEvent->id,
-                'linked_event_id' => $linkedEvent->id,
-            ],
-            [
-                'parent_scope_id' => $parentScope->id,
-                'participation_role' => EventParticipationScope::ROLE_PARTICIPANT,
-                'participant_type' => $this->participationScopes->participantTypeForOrganization($organization),
-                'organization_id' => $organization?->id,
-                'college_id' => $organization?->college_id,
-                'participant_name_snapshot' => $this->participationScopes->participantName($organization, 'Participant'),
-                'ppa_required' => true,
-                'ppa_status' => $this->participationScopes->ppaStatusFromEventStatus($linkedEvent->status),
-                'ppa_softcopy_path' => $linkedEvent->proposal_document_path,
-                'ppa_softcopy_original_name' => $linkedEvent->proposal_document_original_name,
-                'hardcopy_submitted' => (bool) $linkedEvent->hardcopy_submitted,
-                'org_head_signed' => (bool) $linkedEvent->head_organization_signed,
-                'adviser_signed' => (bool) $linkedEvent->adviser_signed,
-                'late_cutoff_min' => $linkedEvent->event_late_cutoff_min,
-                'approved_at' => in_array($linkedEvent->status, ['approved', 'completed'], true) ? now() : null,
-                'capture_mode' => 'self_scanning',
-                'analytics_rollup_enabled' => true,
-                'status' => EventParticipationScope::STATUS_ACTIVE,
-            ]
-        );
-    }
-
     private function authorizePendingLinkAccess(PendingStudentLink $pendingLink, User $user): void
     {
         $scope = $this->adminScopes->forUser($user);
 
-        if (!$scope) {
+        if (! $scope) {
             abort(403, 'Access denied. No active admin assignment found.');
         }
 
-        if ($scope->isSuperAdmin()) return;
+        if ($scope->isSuperAdmin()) {
+            return;
+        }
 
         if ($pendingLink->participationScope && $this->participationScopes->canViewScope($user, $pendingLink->participationScope)) {
             return;
         }
 
         $targetOrg = $pendingLink->organization;
-        if (!$scope->canAccessOrganization($targetOrg)) {
+        if (! $scope->canAccessOrganization($targetOrg)) {
             abort(403, $scope->isLsgAdmin()
                 ? 'Access denied. LSG Admin restricted to college boundary.'
                 : 'Access denied. Restricted to your organization boundary.');
@@ -1544,7 +1557,7 @@ class DashboardController extends Controller
             return true;
         }
 
-        if ($student->organization_id === $pendingLink->organization_id && !$pendingLink->event_participation_scope_id) {
+        if ($student->organization_id === $pendingLink->organization_id && ! $pendingLink->event_participation_scope_id) {
             return true;
         }
 

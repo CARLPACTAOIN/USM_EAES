@@ -171,6 +171,14 @@ class ScannerErrorMapper {
       );
     }
 
+    if (status == 429 || status == 503) {
+      return MappedScannerError(
+        message: 'The server is busy. Your scans remain saved and will retry shortly.',
+        category: ScannerErrorCategory.serverError,
+        technicalDetails: technical,
+      );
+    }
+
     if (status != null && status >= 500) {
       return MappedScannerError(
         message: 'Server error. Please try again or contact the admin.',

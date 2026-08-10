@@ -2,53 +2,258 @@
 
 namespace App\Services;
 
+use App\Models\College;
 use App\Models\Event;
 use App\Models\EventParticipationScope;
 use App\Models\Organization;
 use App\Models\User;
+use DomainException;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 
 class ParticipationScopeService
 {
-    public function __construct(private readonly AdminScopeService $adminScopes)
-    {
-    }
+    public function __construct(
+        private readonly AdminScopeService $adminScopes,
+        private readonly EventNotificationService $notifications,
+    ) {}
 
     public function ensureOrganizerScope(Event $event): EventParticipationScope
     {
         $event->loadMissing('organization');
 
-        $existing = $event->participationScopes()
-            ->where('participation_role', EventParticipationScope::ROLE_ORGANIZER)
-            ->first();
-
-        if ($existing) {
-            return $existing;
-        }
-
         $organization = $event->organization;
         $isHrDomain = $event->event_domain === 'hr' || $organization?->type === 'hr_unit';
 
-        return EventParticipationScope::create([
-            'event_id' => $event->id,
+        return $event->participationScopes()->firstOrCreate([
             'participation_role' => EventParticipationScope::ROLE_ORGANIZER,
+            'status' => EventParticipationScope::STATUS_ACTIVE,
+        ], [
             'participant_type' => $this->participantTypeForOrganization($organization),
             'organization_id' => $organization?->id,
             'college_id' => $organization?->college_id,
             'participant_name_snapshot' => $this->participantName($organization, 'Organizer'),
-            'ppa_required' => !$isHrDomain,
+            'ppa_required' => ! $isHrDomain,
             'ppa_status' => $isHrDomain ? EventParticipationScope::PPA_NOT_REQUIRED : $this->ppaStatusFromEventStatus($event->status),
             'ppa_softcopy_path' => $event->proposal_document_path,
             'ppa_softcopy_original_name' => $event->proposal_document_original_name,
             'hardcopy_submitted' => (bool) $event->hardcopy_submitted,
             'org_head_signed' => (bool) $event->head_organization_signed,
             'adviser_signed' => (bool) $event->adviser_signed,
-            'approved_at' => in_array($event->status, ['approved', 'completed'], true) ? now() : null,
+            'approved_at' => in_array($event->status, [Event::STATUS_APPROVED, Event::STATUS_COMPLETED], true) ? now() : null,
             'capture_mode' => in_array($organization?->type, ['usg', 'lsg', 'hr_unit'], true) ? 'central_gate' : 'self_scanning',
             'analytics_rollup_enabled' => true,
-            'status' => EventParticipationScope::STATUS_ACTIVE,
         ]);
+    }
+
+    /**
+     * @param  list<string>  $organizationIds
+     * @param  list<string>  $collegeIds
+     * @return array{created_count: int, skipped_organizer_count: int, skipped_existing_count: int}
+     */
+    public function createParticipantScopes(
+        Event $event,
+        string $audienceMode,
+        array $organizationIds,
+        array $collegeIds,
+        string $captureMode,
+        bool $ppaRequired,
+        bool $analyticsRollupEnabled,
+        ?string $programId = null,
+        ?string $participantNameSnapshot = null,
+    ): array {
+        $organizationIds = collect($organizationIds)->filter()->unique()->values();
+        $collegeIds = collect($collegeIds)->filter()->unique()->values();
+
+        if ($audienceMode === 'all') {
+            $collegeIds = College::query()->orderBy('name')->pluck('id')->values();
+        }
+
+        $createdScopes = collect();
+        $skippedOrganizerCount = 0;
+        $skippedExistingCount = 0;
+
+        DB::transaction(function () use (
+            $analyticsRollupEnabled,
+            $audienceMode,
+            $captureMode,
+            $collegeIds,
+            $event,
+            $organizationIds,
+            $ppaRequired,
+            $participantNameSnapshot,
+            $programId,
+            &$createdScopes,
+            &$skippedExistingCount,
+            &$skippedOrganizerCount,
+        ): void {
+            $parentScope = $this->ensureOrganizerScope($event);
+
+            if ($audienceMode === 'organization') {
+                Organization::query()
+                    ->whereIn('id', $organizationIds)
+                    ->orderBy('name')
+                    ->get()
+                    ->each(function (Organization $organization) use (
+                        $analyticsRollupEnabled,
+                        $captureMode,
+                        $event,
+                        $organizationIds,
+                        $parentScope,
+                        $ppaRequired,
+                        $participantNameSnapshot,
+                        $programId,
+                        &$createdScopes,
+                        &$skippedExistingCount,
+                        &$skippedOrganizerCount,
+                    ): void {
+                        if ($organization->id === $event->organization_id) {
+                            $skippedOrganizerCount++;
+
+                            return;
+                        }
+
+                        $participantScope = $event->participationScopes()->firstOrCreate([
+                            'participation_role' => EventParticipationScope::ROLE_PARTICIPANT,
+                            'organization_id' => $organization->id,
+                            'status' => EventParticipationScope::STATUS_ACTIVE,
+                        ], [
+                            'parent_scope_id' => $parentScope->id,
+                            'participant_type' => $this->participantTypeForOrganization($organization),
+                            'college_id' => $organization->college_id,
+                            'program_id' => $programId,
+                            'participant_name_snapshot' => $organizationIds->count() === 1 && $participantNameSnapshot
+                                ? $participantNameSnapshot
+                                : $this->participantName($organization, 'Participant scope'),
+                            'ppa_required' => $ppaRequired,
+                            'ppa_status' => $ppaRequired ? EventParticipationScope::PPA_DRAFT : EventParticipationScope::PPA_NOT_REQUIRED,
+                            'capture_mode' => $captureMode,
+                            'analytics_rollup_enabled' => $analyticsRollupEnabled,
+                        ]);
+
+                        if (! $participantScope->wasRecentlyCreated) {
+                            $skippedExistingCount++;
+
+                            return;
+                        }
+
+                        $createdScopes->push($participantScope);
+                    });
+
+                return;
+            }
+
+            College::query()
+                ->whereIn('id', $collegeIds)
+                ->orderBy('name')
+                ->get()
+                ->each(function (College $college) use (
+                    $analyticsRollupEnabled,
+                    $captureMode,
+                    $event,
+                    $parentScope,
+                    $ppaRequired,
+                    &$createdScopes,
+                    &$skippedExistingCount,
+                ): void {
+                    $participantScope = $event->participationScopes()->firstOrCreate([
+                        'participation_role' => EventParticipationScope::ROLE_PARTICIPANT,
+                        'participant_type' => 'college',
+                        'organization_id' => null,
+                        'college_id' => $college->id,
+                        'status' => EventParticipationScope::STATUS_ACTIVE,
+                    ], [
+                        'parent_scope_id' => $parentScope->id,
+                        'program_id' => null,
+                        'participant_name_snapshot' => trim(($college->code ? "{$college->code} - " : '').$college->name),
+                        'ppa_required' => $ppaRequired,
+                        'ppa_status' => $ppaRequired ? EventParticipationScope::PPA_DRAFT : EventParticipationScope::PPA_NOT_REQUIRED,
+                        'capture_mode' => $captureMode,
+                        'analytics_rollup_enabled' => $analyticsRollupEnabled,
+                    ]);
+
+                    if (! $participantScope->wasRecentlyCreated) {
+                        $skippedExistingCount++;
+
+                        return;
+                    }
+
+                    $createdScopes->push($participantScope);
+                });
+        });
+
+        $createdScopes->each(fn (EventParticipationScope $participantScope): int => $this->notifications
+            ->notifyParticipantScopeInvitation($participantScope->fresh(['event.organization', 'organization', 'college', 'delegatedOrganization'])));
+
+        return [
+            'created_count' => $createdScopes->count(),
+            'skipped_organizer_count' => $skippedOrganizerCount,
+            'skipped_existing_count' => $skippedExistingCount,
+        ];
+    }
+
+    public function syncParticipantScopeFromLinkedEvent(Event $parentEvent, Event $linkedEvent): EventParticipationScope
+    {
+        $linkedEvent->loadMissing('organization');
+        $organization = $linkedEvent->organization;
+
+        if (! $organization) {
+            throw new DomainException('The linked event must have an organizer before it can join a parent permit.');
+        }
+
+        try {
+            return DB::transaction(function () use ($linkedEvent, $organization, $parentEvent): EventParticipationScope {
+                $parentScope = $this->ensureOrganizerScope($parentEvent);
+                $participantScope = $parentEvent->participationScopes()->firstOrCreate([
+                    'participation_role' => EventParticipationScope::ROLE_PARTICIPANT,
+                    'organization_id' => $organization->id,
+                    'status' => EventParticipationScope::STATUS_ACTIVE,
+                ], [
+                    'parent_scope_id' => $parentScope->id,
+                    'linked_event_id' => $linkedEvent->id,
+                    'participant_type' => $this->participantTypeForOrganization($organization),
+                    'college_id' => $organization->college_id,
+                    'participant_name_snapshot' => $this->participantName($organization, 'Participant'),
+                    'ppa_required' => true,
+                    'ppa_status' => $this->ppaStatusFromEventStatus($linkedEvent->status),
+                    'ppa_softcopy_path' => $linkedEvent->proposal_document_path,
+                    'ppa_softcopy_original_name' => $linkedEvent->proposal_document_original_name,
+                    'hardcopy_submitted' => (bool) $linkedEvent->hardcopy_submitted,
+                    'org_head_signed' => (bool) $linkedEvent->head_organization_signed,
+                    'adviser_signed' => (bool) $linkedEvent->adviser_signed,
+                    'late_cutoff_min' => $linkedEvent->event_late_cutoff_min,
+                    'approved_at' => in_array($linkedEvent->status, [Event::STATUS_APPROVED, Event::STATUS_COMPLETED], true) ? now() : null,
+                    'capture_mode' => 'self_scanning',
+                    'analytics_rollup_enabled' => true,
+                ]);
+
+                if ($participantScope->wasRecentlyCreated || $participantScope->linked_event_id === $linkedEvent->id) {
+                    return $participantScope;
+                }
+
+                if ($participantScope->linked_event_id) {
+                    throw new DomainException('This organization already has an active participant scope linked to another event under the parent permit.');
+                }
+
+                $participantScope->update(['linked_event_id' => $linkedEvent->id]);
+
+                return $participantScope;
+            });
+        } catch (UniqueConstraintViolationException $exception) {
+            $existingLinkedScope = $parentEvent->participationScopes()
+                ->active()
+                ->where('participation_role', EventParticipationScope::ROLE_PARTICIPANT)
+                ->where('linked_event_id', $linkedEvent->id)
+                ->first();
+
+            if ($existingLinkedScope) {
+                throw new DomainException('This linked event already has an active participant scope under the parent permit.', previous: $exception);
+            }
+
+            throw $exception;
+        }
     }
 
     public function defaultScopeForAssignment(Event $event, ?User $scannerUser = null): EventParticipationScope
@@ -92,7 +297,7 @@ class ParticipationScopeService
     public function canManageScope(User $admin, EventParticipationScope $scope): bool
     {
         $adminScope = $this->adminScopes->forUser($admin);
-        if (!$adminScope) {
+        if (! $adminScope) {
             return false;
         }
 
@@ -124,7 +329,7 @@ class ParticipationScopeService
     public function canViewScope(User $admin, EventParticipationScope $scope): bool
     {
         $adminScope = $this->adminScopes->forUser($admin);
-        if (!$adminScope) {
+        if (! $adminScope) {
             return false;
         }
 
@@ -172,7 +377,7 @@ class ParticipationScopeService
         }
 
         if ($scope->participant_type === 'college' || ($organization?->type === 'lsg' && $scope->participation_role === EventParticipationScope::ROLE_ORGANIZER)) {
-            if (!$scope->college_id) {
+            if (! $scope->college_id) {
                 return $query->whereRaw('1 = 0');
             }
 
@@ -225,7 +430,7 @@ class ParticipationScopeService
 
     public function scopePayload(?EventParticipationScope $scope): ?array
     {
-        if (!$scope) {
+        if (! $scope) {
             return null;
         }
 
@@ -251,11 +456,11 @@ class ParticipationScopeService
 
     public function participantName(?Organization $organization, string $fallback): string
     {
-        if (!$organization) {
+        if (! $organization) {
             return $fallback;
         }
 
-        return trim(($organization->acronym ? "{$organization->acronym} - " : '') . $organization->name);
+        return trim(($organization->acronym ? "{$organization->acronym} - " : '').$organization->name);
     }
 
     public function participantTypeForOrganization(?Organization $organization): string
@@ -274,10 +479,11 @@ class ParticipationScopeService
     public function ppaStatusFromEventStatus(?string $status): string
     {
         return match ($status) {
-            'approved', 'completed' => EventParticipationScope::PPA_APPROVED,
-            'under_review' => EventParticipationScope::PPA_UNDER_REVIEW,
-            'submitted' => EventParticipationScope::PPA_SUBMITTED,
-            'rejected' => EventParticipationScope::PPA_REJECTED,
+            Event::STATUS_APPROVED, Event::STATUS_COMPLETED => EventParticipationScope::PPA_APPROVED,
+            Event::STATUS_UNDER_REVIEW => EventParticipationScope::PPA_UNDER_REVIEW,
+            Event::STATUS_REVISION_REQUESTED => EventParticipationScope::PPA_REVISION_REQUESTED,
+            Event::STATUS_SUBMITTED => EventParticipationScope::PPA_SUBMITTED,
+            Event::STATUS_REJECTED => EventParticipationScope::PPA_REJECTED,
             default => EventParticipationScope::PPA_DRAFT,
         };
     }

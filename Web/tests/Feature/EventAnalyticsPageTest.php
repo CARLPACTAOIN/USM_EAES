@@ -2,7 +2,7 @@
 
 namespace Tests\Feature;
 
-use App\Models\AdminAssignment;
+use App\Livewire\Dashboard\EventAnalyticsParticipantFilters;
 use App\Models\AttendanceRecord;
 use App\Models\College;
 use App\Models\Evaluation;
@@ -44,6 +44,7 @@ class EventAnalyticsPageTest extends TestCase
     {
         $fixture = $this->createAnalyticsFixture();
         $path = route('dashboard.events.analytics', $fixture['event']);
+        $apexChartsSource = asset('vendor/apexcharts/apexcharts.min.js');
 
         $this->actingAs($fixture['admin'])
             ->get(route('dashboard.events.analytics', $fixture['event']))
@@ -56,6 +57,18 @@ class EventAnalyticsPageTest extends TestCase
             ->assertSee('Participant Drilldown')
             ->assertSee('Year Level Mix')
             ->assertSee('All year levels')
+            ->assertSee('apexcharts.min.js', false)
+            ->assertDontSee('<script src="'.$apexChartsSource.'"></script>', false)
+            ->assertSee('script.async = true', false)
+            ->assertSee('renderChartsForTab', false)
+            ->assertSee('analytics-chart-loading', false)
+            ->assertSee('markChartsLoading', false)
+            ->assertSee('aria-busy', false)
+            ->assertSee('this.$nextTick(() => {', false)
+            ->assertSee("eaes-analytics-tab-change', { detail: { tab: this.activeTab }", false)
+            ->assertDontSee('scheduleInitialCharts', false)
+            ->assertSee('livewire:navigating', false)
+            ->assertDontSee('cdn.jsdelivr.net/npm/apexcharts', false)
             ->assertSee('method="GET"', false)
             ->assertSee('action="'.$path.'"', false)
             ->assertSee('wire:submit.prevent="applyFilters"', false)
@@ -177,7 +190,7 @@ class EventAnalyticsPageTest extends TestCase
         $fixture = $this->createAnalyticsFixture();
 
         Livewire::actingAs($fixture['admin'])
-            ->test(\App\Livewire\Dashboard\EventAnalyticsParticipantFilters::class, [
+            ->test(EventAnalyticsParticipantFilters::class, [
                 'eventId' => $fixture['event']->id,
             ])
             ->set('yearLevel', '2nd_year')
@@ -209,7 +222,7 @@ class EventAnalyticsPageTest extends TestCase
         }
 
         Livewire::actingAs($fixture['admin'])
-            ->test(\App\Livewire\Dashboard\EventAnalyticsParticipantFilters::class, [
+            ->test(EventAnalyticsParticipantFilters::class, [
                 'eventId' => $fixture['event']->id,
             ])
             ->set('perPage', 10)

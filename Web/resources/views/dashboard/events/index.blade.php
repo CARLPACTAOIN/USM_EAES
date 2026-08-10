@@ -673,6 +673,22 @@
             document.addEventListener('livewire:navigated', () => window.initEventsDashboard?.());
         }
 
+        const bindEventsWorkspaceMorphHook = () => {
+            if (window.__eventsWorkspaceMorphBound === true || !window.Livewire?.hook) {
+                return;
+            }
+
+            window.__eventsWorkspaceMorphBound = true;
+            window.Livewire.hook('morphed', ({ component }) => {
+                if (component.name === 'dashboard.events-workspace') {
+                    requestAnimationFrame(() => window.initEventsDashboard?.());
+                }
+            });
+        };
+
+        document.addEventListener('livewire:initialized', bindEventsWorkspaceMorphHook);
+        bindEventsWorkspaceMorphHook();
+
         document.addEventListener('alpine:init', () => {
             Alpine.data('analyticsModal', () => ({
                 loading: false,

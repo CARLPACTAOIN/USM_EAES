@@ -1,18 +1,26 @@
 <?php
 
-use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Auth\GoogleAuthController;
-use App\Http\Controllers\Web\AuthController;
-use App\Http\Controllers\Web\PortalController;
-use App\Http\Controllers\Web\DashboardController;
-use App\Http\Controllers\Web\AiInsightsController;
-use App\Http\Controllers\Web\EventExportController;
-use App\Http\Controllers\Web\AnalyticsOverviewController;
-use App\Http\Controllers\Web\EventAnalyticsController;
+use App\Http\Controllers\Dev\DevLoginController;
 use App\Http\Controllers\Web\AdminAccessController;
+use App\Http\Controllers\Web\AiInsightsController;
+use App\Http\Controllers\Web\AnalyticsOverviewController;
+use App\Http\Controllers\Web\AuthController;
+use App\Http\Controllers\Web\DashboardController;
+use App\Http\Controllers\Web\EventAnalyticsController;
+use App\Http\Controllers\Web\EventExportController;
 use App\Http\Controllers\Web\NotificationController;
 use App\Http\Controllers\Web\OrganizationProfileController;
-use App\Http\Controllers\Dev\DevLoginController;
+use App\Http\Controllers\Web\PortalController;
+use App\Models\AdminAssignment;
+use App\Models\College;
+use App\Models\Organization;
+use App\Models\Program;
+use App\Models\University;
+use App\Models\User;
+use App\Services\AdminAssignmentService;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Route;
 
 // ─── Public / Guest Routes ──────────────────────────────────
 Route::get('/', [AuthController::class, 'login'])->name('login');
@@ -55,9 +63,11 @@ Route::middleware(['auth'])->group(function () {
             // Events / PPA
             Route::get('/events', [DashboardController::class, 'events'])->name('dashboard.events');
             Route::post('/events', [DashboardController::class, 'createEvent'])->name('dashboard.events.create');
+            Route::post('/events/{event}/update', [DashboardController::class, 'updateEvent'])->name('dashboard.events.update');
             Route::post('/events/{event}/submit', [DashboardController::class, 'submitEvent'])->name('dashboard.events.submit');
             Route::post('/events/{event}/review', [DashboardController::class, 'reviewEvent'])->name('dashboard.events.review');
             Route::post('/events/{event}/approve', [DashboardController::class, 'approveEvent'])->name('dashboard.events.approve');
+            Route::post('/events/{event}/revision', [DashboardController::class, 'requestEventRevision'])->name('dashboard.events.revision');
             Route::post('/events/{event}/reject', [DashboardController::class, 'rejectEvent'])->name('dashboard.events.reject');
             Route::post('/events/{event}/link', [DashboardController::class, 'linkEvent'])->name('dashboard.events.link');
             Route::post('/events/{event}/hardcopy', [DashboardController::class, 'markHardcopy'])->name('dashboard.events.hardcopy');
@@ -67,6 +77,7 @@ Route::middleware(['auth'])->group(function () {
             Route::post('/events/{event}/participant-scopes/{participationScope}/attendance-policy', [DashboardController::class, 'updateParticipantScopeAttendancePolicy'])->name('dashboard.events.participant-scopes.attendance-policy');
             Route::post('/events/{event}/participant-scopes/{participationScope}/review', [DashboardController::class, 'reviewParticipantScope'])->name('dashboard.events.participant-scopes.review');
             Route::post('/events/{event}/participant-scopes/{participationScope}/approve', [DashboardController::class, 'approveParticipantScope'])->name('dashboard.events.participant-scopes.approve');
+            Route::post('/events/{event}/participant-scopes/{participationScope}/revision', [DashboardController::class, 'requestParticipantScopeRevision'])->name('dashboard.events.participant-scopes.revision');
             Route::post('/events/{event}/participant-scopes/{participationScope}/reject', [DashboardController::class, 'rejectParticipantScope'])->name('dashboard.events.participant-scopes.reject');
             Route::post('/events/{event}/participant-scopes/{participationScope}/acknowledge', [DashboardController::class, 'acknowledgeParticipantScope'])->name('dashboard.events.participant-scopes.acknowledge');
             Route::get('/events/{event}/proposal-document', [DashboardController::class, 'downloadProposal'])->name('dashboard.events.proposal-document');
@@ -107,132 +118,132 @@ Route::get('/dev/login/psits-admin', [DevLoginController::class, 'loginAsPsitsAd
     ->name('dev.login.psits-admin');
 
 Route::get('/dev/login/{role}', function (string $role) {
-        abort_unless(config('app.env') === 'local' && config('services.eaes.dev_login_enabled'), 404);
+    abort_unless(config('app.env') === 'local' && config('services.eaes.dev_login_enabled'), 404);
 
-        $validRoles = ['Super Admin (OSA)', 'USG Admin', 'LSG Admin', 'Society Admin', 'Academic Unit Admin', 'Office Event Admin', 'HR Admin', 'Student'];
-        if (!in_array($role, $validRoles)) {
-            abort(400, 'Invalid test role.');
-        }
+    $validRoles = ['Super Admin (OSA)', 'USG Admin', 'LSG Admin', 'Society Admin', 'Academic Unit Admin', 'Office Event Admin', 'HR Admin', 'Student'];
+    if (! in_array($role, $validRoles)) {
+        abort(400, 'Invalid test role.');
+    }
 
-        $emailPrefix = strtolower(str_replace([' ', '(', ')'], '', $role));
-        $email = "{$emailPrefix}@usm.edu.ph";
+    $emailPrefix = strtolower(str_replace([' ', '(', ')'], '', $role));
+    $email = "{$emailPrefix}@usm.edu.ph";
 
-        $university = \App\Models\University::firstOrCreate(
-            ['domain' => 'usm.edu.ph'],
-            ['name' => 'University of Southern Mindanao']
+    $university = University::firstOrCreate(
+        ['domain' => 'usm.edu.ph'],
+        ['name' => 'University of Southern Mindanao']
+    );
+
+    // Seed basic college and organization
+    $college = College::firstOrCreate(
+        ['code' => 'COE'],
+        [
+            'name' => 'College of Engineering',
+            'university_id' => $university->id,
+        ]
+    );
+
+    // Seed programs
+    $program1 = Program::firstOrCreate(
+        ['code' => 'BSIS'],
+        [
+            'college_id' => $college->id,
+            'name' => 'Bachelor of Science in Information Systems',
+        ]
+    );
+
+    $program2 = Program::firstOrCreate(
+        ['code' => 'BSCS'],
+        [
+            'college_id' => $college->id,
+            'name' => 'Bachelor of Science in Computer Science',
+        ]
+    );
+
+    $orgType = match ($role) {
+        'USG Admin' => 'usg',
+        'LSG Admin' => 'lsg',
+        'Academic Unit Admin' => 'academic_unit',
+        'Office Event Admin' => 'administrative_office',
+        'HR Admin' => 'hr_unit',
+        default => 'society',
+    };
+
+    $orgAcronym = match ($role) {
+        'USG Admin' => 'USG',
+        'LSG Admin' => 'COE LSG',
+        'Academic Unit Admin' => 'COE ACADEMIC',
+        'Office Event Admin' => 'OSA OFFICE',
+        'HR Admin' => 'HR',
+        default => 'TESTORG',
+    };
+
+    $org = Organization::firstOrCreate(
+        ['acronym' => $orgAcronym, 'type' => $orgType, 'college_id' => in_array($orgType, ['lsg', 'society', 'academic_unit'], true) ? $college->id : null],
+        [
+            'name' => match ($orgType) {
+                'lsg' => 'College of Engineering Local Student Government',
+                'usg' => 'University Student Government',
+                'academic_unit' => 'College of Engineering Academic Unit',
+                'administrative_office' => 'Office of Student Affairs',
+                'hr_unit' => 'Human Resource Management Office',
+                default => 'Test Organization',
+            },
+            'status' => 'active',
+        ]
+    );
+
+    // Link programs to organization
+    if (! $org->programs()->where('program_id', $program1->id)->exists()) {
+        $org->programs()->attach($program1->id);
+    }
+    if (! $org->programs()->where('program_id', $program2->id)->exists()) {
+        $org->programs()->attach($program2->id);
+    }
+
+    $user = User::firstOrCreate(
+        ['email' => $email],
+        [
+            'name' => "Test {$role}",
+            'google_sub' => "dev-{$emailPrefix}",
+            'password' => null,
+            'organization_id' => $role === 'Student' ? $org->id : null,
+            'college_id' => $role === 'Student' ? $college->id : null,
+            'program_id' => $role === 'Student' ? $program1->id : null,
+            'program_code' => $role === 'Student' ? 'BSIS' : null,
+        ]
+    );
+
+    if ($role === 'Student') {
+        $user->update([
+            'organization_id' => $org->id,
+            'college_id' => $college->id,
+            'program_id' => $program1->id,
+            'program_code' => 'BSIS',
+        ]);
+    }
+
+    if ($role === 'Student') {
+        $user->syncRoles('Student');
+    } elseif (! $user->adminAssignments()->where('role_name', $role)->where('status', AdminAssignment::STATUS_ACTIVE)->exists()) {
+        app(AdminAssignmentService::class)->createAssignment(
+            user: $user,
+            roleName: $role,
+            organization: $org,
+            college: $org->college,
+            academicYear: now()->year.'-'.(now()->year + 1),
+            termStart: now()->toDateString(),
+            termEnd: now()->addYear()->toDateString(),
+            positionTitle: 'Dev Login',
+            approvedBy: $user,
+            isPrimaryAdmin: true
         );
+    }
 
-        // Seed basic college and organization
-        $college = \App\Models\College::firstOrCreate(
-            ['code' => 'COE'],
-            [
-                'name' => 'College of Engineering',
-                'university_id' => $university->id
-            ]
-        );
+    Auth::login($user);
 
-        // Seed programs
-        $program1 = \App\Models\Program::firstOrCreate(
-            ['code' => 'BSIS'],
-            [
-                'college_id' => $college->id,
-                'name' => 'Bachelor of Science in Information Systems'
-            ]
-        );
+    if ($user->hasAnyRole(['Super Admin (OSA)', 'USG Admin', 'LSG Admin', 'Society Admin', 'Academic Unit Admin', 'Office Event Admin', 'HR Admin'])) {
+        return redirect()->route('dashboard')->with('success', "Logged in as test {$role}");
+    }
 
-        $program2 = \App\Models\Program::firstOrCreate(
-            ['code' => 'BSCS'],
-            [
-                'college_id' => $college->id,
-                'name' => 'Bachelor of Science in Computer Science'
-            ]
-        );
-
-        $orgType = match ($role) {
-            'USG Admin' => 'usg',
-            'LSG Admin' => 'lsg',
-            'Academic Unit Admin' => 'academic_unit',
-            'Office Event Admin' => 'administrative_office',
-            'HR Admin' => 'hr_unit',
-            default => 'society',
-        };
-
-        $orgAcronym = match ($role) {
-            'USG Admin' => 'USG',
-            'LSG Admin' => 'COE LSG',
-            'Academic Unit Admin' => 'COE ACADEMIC',
-            'Office Event Admin' => 'OSA OFFICE',
-            'HR Admin' => 'HR',
-            default => 'TESTORG',
-        };
-
-        $org = \App\Models\Organization::firstOrCreate(
-            ['acronym' => $orgAcronym, 'type' => $orgType, 'college_id' => in_array($orgType, ['lsg', 'society', 'academic_unit'], true) ? $college->id : null],
-            [
-                'name' => match ($orgType) {
-                    'lsg' => 'College of Engineering Local Student Government',
-                    'usg' => 'University Student Government',
-                    'academic_unit' => 'College of Engineering Academic Unit',
-                    'administrative_office' => 'Office of Student Affairs',
-                    'hr_unit' => 'Human Resource Management Office',
-                    default => 'Test Organization',
-                },
-                'status' => 'active'
-            ]
-        );
-
-        // Link programs to organization
-        if (!$org->programs()->where('program_id', $program1->id)->exists()) {
-            $org->programs()->attach($program1->id);
-        }
-        if (!$org->programs()->where('program_id', $program2->id)->exists()) {
-            $org->programs()->attach($program2->id);
-        }
-
-        $user = \App\Models\User::firstOrCreate(
-            ['email' => $email],
-            [
-                'name' => "Test {$role}",
-                'google_sub' => "dev-{$emailPrefix}",
-                'password' => null,
-                'organization_id' => $role === 'Student' ? $org->id : null,
-                'college_id' => $role === 'Student' ? $college->id : null,
-                'program_id' => $role === 'Student' ? $program1->id : null,
-                'program_code' => $role === 'Student' ? 'BSIS' : null
-            ]
-        );
-
-        if ($role === 'Student') {
-            $user->update([
-                'organization_id' => $org->id,
-                'college_id' => $college->id,
-                'program_id' => $program1->id,
-                'program_code' => 'BSIS'
-            ]);
-        }
-
-        if ($role === 'Student') {
-            $user->syncRoles('Student');
-        } elseif (!$user->adminAssignments()->where('role_name', $role)->where('status', \App\Models\AdminAssignment::STATUS_ACTIVE)->exists()) {
-            app(\App\Services\AdminAssignmentService::class)->createAssignment(
-                user: $user,
-                roleName: $role,
-                organization: $org,
-                college: $org->college,
-                academicYear: now()->year . '-' . (now()->year + 1),
-                termStart: now()->toDateString(),
-                termEnd: now()->addYear()->toDateString(),
-                positionTitle: 'Dev Login',
-                approvedBy: $user,
-                isPrimaryAdmin: true
-            );
-        }
-
-        \Illuminate\Support\Facades\Auth::login($user);
-
-        if ($user->hasAnyRole(['Super Admin (OSA)', 'USG Admin', 'LSG Admin', 'Society Admin', 'Academic Unit Admin', 'Office Event Admin', 'HR Admin'])) {
-            return redirect()->route('dashboard')->with('success', "Logged in as test {$role}");
-        }
-
-        return redirect()->route('portal')->with('success', "Logged in as test Student");
+    return redirect()->route('portal')->with('success', 'Logged in as test Student');
 })->name('dev.login');

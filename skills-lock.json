@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "skills": {
+    "laravel-best-practices": {
+      "source": "laravel/boost",
+      "sourceType": "github",
+      "skillPath": ".ai/laravel/skill/laravel-best-practices/SKILL.md",
+      "computedHash": "06fcb378b32925a9bd9a5e8b099811fa72183c390db09b63a66624575bdbfddd"
+    },
+    "livewire-development": {
+      "source": "laravel/boost",
+      "sourceType": "github",
+      "skillPath": "tests/Fixtures/vendor-skills/livewire-development/SKILL.md",
+      "computedHash": "1aa270613f86f776a4aa042623051841e10ce926bf3afa9401d530f97613c285"
+    },
+    "pest-testing": {
+      "source": "spatie/freek.dev",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/pest-testing/SKILL.md",
+      "computedHash": "244f1545e3c213fab6632f129110c382598a7a761640927cb07e647c35c1e754"
+    },
+    "tailwindcss-development": {
+      "source": "laravel/boost",
+      "sourceType": "github",
+      "skillPath": ".ai/tailwindcss/3/skill/tailwindcss-development/SKILL.md",
+      "computedHash": "9f8d2d6571d0f1890fed1771ce0a58b87368098d0703c8e546a79ce20893df9b"
+    }
+  }
+}

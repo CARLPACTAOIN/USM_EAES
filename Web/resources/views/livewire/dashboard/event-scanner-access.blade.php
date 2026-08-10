@@ -42,7 +42,7 @@
                         @error('scopeId') <p class="mt-1 text-xs text-red-600">{{ $message }}</p> @enderror
                     </div>
 
-                    <div class="relative">
+                    <div class="relative" x-data="{ scannerSearchFocused: false }">
                         <label for="scanner-search-{{ $event->id }}" class="sr-only">Search eligible scanner</label>
                         <input
                             id="scanner-search-{{ $event->id }}"
@@ -51,10 +51,15 @@
                             placeholder="Search and add scanners"
                             autocomplete="off"
                             wire:model.live.debounce.300ms="scannerQuery"
+                            x-on:focus="scannerSearchFocused = true"
+                            x-on:blur="setTimeout(() => scannerSearchFocused = false, 150)"
+                            x-on:keydown.escape="scannerSearchFocused = false"
                             @disabled(!$scopeId)
                         >
                         @if($scopeId && $eligibleScannerUsers->isNotEmpty())
-                            <div class="absolute z-30 mt-1 max-h-56 w-full overflow-auto rounded-lg border border-(--color-border) bg-(--color-surface) shadow-lg">
+                            <div x-show="scannerSearchFocused"
+                                 x-cloak
+                                 class="absolute z-30 mt-1 max-h-56 w-full overflow-auto rounded-lg border border-(--color-border) bg-(--color-surface) shadow-lg">
                                 @foreach($eligibleScannerUsers as $scanner)
                                     <button
                                         type="button"
@@ -72,7 +77,7 @@
                                 @endforeach
                             </div>
                         @elseif($scopeId && strlen(trim($scannerQuery)) > 0)
-                            <p class="mt-1 text-xs text-(--color-text-tertiary)">No eligible scanner matches your search.</p>
+                            <p x-show="scannerSearchFocused" x-cloak class="mt-1 text-xs text-(--color-text-tertiary)">No eligible scanner matches your search.</p>
                         @endif
                         <p wire:loading wire:target="scannerQuery" class="mt-1 text-xs text-(--color-text-tertiary)">Searching eligible scanners...</p>
                         @error('scannerQuery') <p class="mt-1 text-xs text-red-600">{{ $message }}</p> @enderror

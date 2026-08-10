@@ -2,38 +2,42 @@
 
 namespace Tests\Feature;
 
-use App\Models\University;
-use App\Models\College;
-use App\Models\Organization;
-use App\Models\Program;
-use App\Models\User;
+use App\Jobs\AnalyzeEventSentimentsJob;
+use App\Jobs\ResolveAttendanceJob;
 use App\Models\AdminAssignment;
+use App\Models\AttendanceRecord;
+use App\Models\College;
+use App\Models\Evaluation;
 use App\Models\Event;
 use App\Models\EventDay;
 use App\Models\EventParticipationScope;
-use App\Models\EventScannerAssignment;
+use App\Models\Organization;
 use App\Models\OrganizationMembership;
-use App\Models\RawScan;
-use App\Models\AttendanceRecord;
-use App\Models\Evaluation;
 use App\Models\PendingStudentLink;
+use App\Models\Program;
+use App\Models\RawScan;
 use App\Models\ScannerSession;
-use App\Jobs\AnalyzeEventSentimentsJob;
-use App\Jobs\ResolveAttendanceJob;
-use App\Services\EventLifecycleService;
+use App\Models\University;
+use App\Models\User;
 use App\Services\AdminAssignmentService;
-use App\Services\GeminiService;
 use App\Services\Contracts\AiServiceInterface;
+use App\Services\EventAnalyticsCache;
+use App\Services\EventLifecycleService;
+use App\Services\GeminiService;
+use App\Services\ParticipationScopeService;
 use App\Services\ScannerAssignmentService;
 use App\Services\ScannerSessionService;
 use App\Support\EvaluationQuestions;
+use Carbon\Carbon;
 use Database\Seeders\RolePermissionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\ValidationException;
 use Tests\TestCase;
-use Carbon\Carbon;
 
 class UsmEaesTest extends TestCase
 {
@@ -75,7 +79,7 @@ class UsmEaesTest extends TestCase
         $program = Program::create([
             'college_id' => $college->id,
             'name' => 'BS Information Systems',
-            'code' => 'BSIS'
+            'code' => 'BSIS',
         ]);
         $org->programs()->attach($program->id);
 
@@ -132,7 +136,7 @@ class UsmEaesTest extends TestCase
 
         // 5. Test Hydration API (Roster pre-caching)
         $hydrateResponse = $this->withHeaders([
-            'Authorization' => 'Bearer ' . $token,
+            'Authorization' => 'Bearer '.$token,
         ])->getJson("/api/v1/events/{$event->id}/hydrate");
 
         $hydrateResponse->assertStatus(200);
@@ -146,7 +150,7 @@ class UsmEaesTest extends TestCase
         $dedup2 = 'dedup_key_out_2';
 
         $syncResponse = $this->withHeaders([
-            'Authorization' => 'Bearer ' . $token,
+            'Authorization' => 'Bearer '.$token,
         ])->postJson('/api/v1/attendance/sync', [
             'event_id' => $event->id,
             'scans' => [
@@ -167,8 +171,8 @@ class UsmEaesTest extends TestCase
                     'device_id' => 'device_abc',
                     'manual_entry' => false,
                     'qr_code_value' => 'QR_JUAN_123',
-                ]
-            ]
+                ],
+            ],
         ]);
 
         $syncResponse->assertStatus(200);
@@ -178,7 +182,7 @@ class UsmEaesTest extends TestCase
 
         // 7. Verify duplicates are ignored
         $syncResponseDup = $this->withHeaders([
-            'Authorization' => 'Bearer ' . $token,
+            'Authorization' => 'Bearer '.$token,
         ])->postJson('/api/v1/attendance/sync', [
             'event_id' => $event->id,
             'scans' => [
@@ -189,13 +193,13 @@ class UsmEaesTest extends TestCase
                     'device_id' => 'device_abc',
                     'manual_entry' => false,
                     'qr_code_value' => 'QR_JUAN_123',
-                ]
-            ]
+                ],
+            ],
         ]);
 
         $syncResponseDup->assertStatus(200);
         $syncResponseDup->assertJsonFragment([
-            'message' => 'All scans in batch were duplicates, skipped.'
+            'message' => 'All scans in batch were duplicates, skipped.',
         ]);
 
         // Assert 2 raw scans exist
@@ -203,22 +207,22 @@ class UsmEaesTest extends TestCase
 
         // 8. Run Resolution Job & Verify Attendance Records
         $job = new ResolveAttendanceJob($event->id, [$student->id]);
-        $job->handle();
+        $job->handle(app(EventAnalyticsCache::class));
 
         $this->assertEquals(1, AttendanceRecord::count());
         $record = AttendanceRecord::first();
-        
+
         $this->assertEquals('present_on_time', $record->society_status);
         $this->assertEquals('present_on_time', $record->competition_status);
         $this->assertFalse($record->left_early);
         $this->assertFalse($record->valid); // Locked under the evaluation gate!
 
         // 9. Submit Evaluation (unlocks gate)
-        \Illuminate\Support\Facades\Auth::forgetGuards();
+        Auth::forgetGuards();
         $studentToken = $student->createToken('Student Phone')->plainTextToken;
 
         $evalResponse = $this->withHeaders([
-            'Authorization' => 'Bearer ' . $studentToken,
+            'Authorization' => 'Bearer '.$studentToken,
         ])->postJson('/api/v1/evaluations', [
             'event_id' => $event->id,
             'section_scores' => [
@@ -258,17 +262,17 @@ class UsmEaesTest extends TestCase
 
         $token = $this->scannerTokenForEvent($event, $scanner);
 
-        $this->withHeaders(['Authorization' => 'Bearer ' . $token])
+        $this->withHeaders(['Authorization' => 'Bearer '.$token])
             ->postJson('/api/v1/scanner/validate', ['event_id' => $event->id])
             ->assertStatus(423)
             ->assertJsonFragment(['event_status' => 'submitted']);
 
-        $this->withHeaders(['Authorization' => 'Bearer ' . $token])
+        $this->withHeaders(['Authorization' => 'Bearer '.$token])
             ->getJson("/api/v1/events/{$event->id}/hydrate")
             ->assertStatus(423)
             ->assertJsonFragment(['event_status' => 'submitted']);
 
-        $this->withHeaders(['Authorization' => 'Bearer ' . $token])
+        $this->withHeaders(['Authorization' => 'Bearer '.$token])
             ->postJson('/api/v1/attendance/sync', [
                 'event_id' => $event->id,
                 'scans' => [[
@@ -284,8 +288,10 @@ class UsmEaesTest extends TestCase
             ->assertJsonFragment(['event_status' => 'submitted']);
     }
 
-    public function test_usg_admin_can_create_university_event_in_own_scope()
+    public function test_usg_admin_can_create_university_event_in_own_scope(): void
     {
+        Storage::fake('local');
+
         $usgOrg = Organization::create([
             'college_id' => null,
             'name' => 'University Student Government',
@@ -325,18 +331,24 @@ class UsmEaesTest extends TestCase
 
         $token = $loginResponse->json('token');
 
-        $createResponse = $this->withHeaders(['Authorization' => 'Bearer ' . $token])
-            ->postJson('/api/v1/events', [
+        $createResponse = $this->withHeaders(['Authorization' => 'Bearer '.$token])
+            ->post('/api/v1/events', [
                 'title' => 'University General Assembly',
+                'proposal_category' => 'activity',
                 'start_date' => Carbon::today()->toDateString(),
                 'end_date' => Carbon::today()->toDateString(),
                 'location_type' => 'on-campus',
                 'location_details' => 'University Auditorium',
                 'target_demographics' => ['all_students' => true],
                 'budget_allocations' => ['program_materials' => 10000],
+                'resolution_number' => 'USG-2026-001',
+                'hardcopy_submitted' => '1',
+                'head_organization_signed' => '1',
+                'adviser_signed' => '1',
+                'proposal_document' => UploadedFile::fake()->create('usg-assembly.docx', 128, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'),
                 'evaluation_questions' => EvaluationQuestions::defaultSchema(),
                 'event_days' => [[
-                    'day_number' => 1,
+                    'day_number' => 7,
                     'date' => Carbon::today()->toDateString(),
                     'start_time' => '08:00',
                     'end_time' => '12:00',
@@ -350,13 +362,40 @@ class UsmEaesTest extends TestCase
             'id' => $eventId,
             'organization_id' => $usgOrg->id,
             'title' => 'University General Assembly',
+            'proposal_category' => 'activity',
+            'proposal_document_original_name' => 'usg-assembly.docx',
+            'resolution_number' => 'USG-2026-001',
+            'hardcopy_submitted' => true,
+            'head_organization_signed' => true,
+            'adviser_signed' => true,
         ]);
+        $event = Event::findOrFail($eventId);
+        $this->assertDatabaseHas('event_days', [
+            'event_id' => $eventId,
+            'day_number' => 1,
+            'start_time' => '08:00',
+            'end_time' => '12:00',
+        ]);
+        $this->assertDatabaseHas('evaluation_form_versions', [
+            'event_id' => $eventId,
+            'title' => 'Evaluation - University General Assembly',
+        ]);
+        $this->assertDatabaseHas('event_participation_scopes', [
+            'event_id' => $eventId,
+            'participation_role' => EventParticipationScope::ROLE_ORGANIZER,
+            'organization_id' => $usgOrg->id,
+            'ppa_softcopy_original_name' => 'usg-assembly.docx',
+            'hardcopy_submitted' => true,
+            'org_head_signed' => true,
+            'adviser_signed' => true,
+        ]);
+        Storage::disk('local')->assertExists($event->proposal_document_path);
 
-        $this->withHeaders(['Authorization' => 'Bearer ' . $token])
+        $this->withHeaders(['Authorization' => 'Bearer '.$token])
             ->postJson("/api/v1/events/{$eventId}/submit")
             ->assertStatus(200);
 
-        $this->withHeaders(['Authorization' => 'Bearer ' . $token])
+        $this->withHeaders(['Authorization' => 'Bearer '.$token])
             ->getJson("/api/v1/events/{$eventId}/analytics")
             ->assertStatus(200)
             ->assertJsonPath('attendance.total_demographic', 1);
@@ -368,7 +407,7 @@ class UsmEaesTest extends TestCase
             'status' => 'pending',
         ]);
 
-        $this->withHeaders(['Authorization' => 'Bearer ' . $token])
+        $this->withHeaders(['Authorization' => 'Bearer '.$token])
             ->postJson("/api/v1/pending-student-links/{$pending->id}/resolve", [
                 'student_id' => $student->id,
                 'notes' => 'Cross-organization resolution should remain OSA-only.',
@@ -383,9 +422,183 @@ class UsmEaesTest extends TestCase
             'end_date' => Carbon::today(),
         ]);
 
-        $this->withHeaders(['Authorization' => 'Bearer ' . $token])
+        $this->withHeaders(['Authorization' => 'Bearer '.$token])
             ->postJson("/api/v1/events/{$otherEvent->id}/submit")
             ->assertStatus(403);
+    }
+
+    public function test_student_affairs_api_enforces_document_parent_and_tenant_rules(): void
+    {
+        Storage::fake('local');
+
+        [$organization, $admin, $college] = $this->createOrganizationWithScanner();
+        $login = $this->postJson('/api/v1/auth/login', [
+            'email' => $admin->email,
+            'password' => 'password123',
+            'device_name' => 'Proposal API Test',
+        ])->assertOk();
+        $headers = ['Authorization' => 'Bearer '.$login->json('token')];
+
+        $crossTenantOrganization = Organization::create([
+            'college_id' => $college->id,
+            'name' => 'Cross Tenant Society',
+            'acronym' => 'CTS',
+            'type' => 'society',
+        ]);
+        $crossTenantPayload = $this->apiProposalPayload('Cross Tenant Proposal');
+        $crossTenantPayload['organization_id'] = $crossTenantOrganization->id;
+
+        $this->withHeaders($headers)
+            ->postJson('/api/v1/events', $crossTenantPayload)
+            ->assertStatus(403)
+            ->assertJsonPath('message', 'Access denied. Restricted to your assigned admin boundary.');
+
+        $this->withHeaders($headers)
+            ->postJson('/api/v1/events', $this->apiProposalPayload('Missing Document Proposal'))
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Attach the official PPA proposal softcopy before saving this event.');
+
+        $invalidParentOrganization = Organization::create([
+            'college_id' => $college->id,
+            'name' => 'Invalid Parent Society',
+            'acronym' => 'IPS',
+            'type' => 'society',
+        ]);
+        $invalidParent = Event::create([
+            'organization_id' => $invalidParentOrganization->id,
+            'title' => 'Invalid Parent Event',
+            'status' => Event::STATUS_APPROVED,
+            'start_date' => Carbon::today(),
+            'end_date' => Carbon::today(),
+        ]);
+
+        $invalidParentPayload = $this->apiProposalPayload('Invalid Parent Proposal');
+        $invalidParentPayload['parent_event_id'] = $invalidParent->id;
+        $invalidParentPayload['proposal_document'] = UploadedFile::fake()->create('invalid-parent.docx', 128, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+
+        $this->withHeaders($headers)
+            ->post('/api/v1/events', $invalidParentPayload)
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Sub-events can only be linked to USG or LSG parent events.');
+
+        $legacyEvent = Event::create([
+            'organization_id' => $organization->id,
+            'title' => 'Legacy Proposal Without Document',
+            'event_domain' => 'student_affairs',
+            'proposal_category' => 'activity',
+            'status' => Event::STATUS_DRAFT,
+            'start_date' => Carbon::today(),
+            'end_date' => Carbon::today(),
+            'location_type' => 'on-campus',
+        ]);
+
+        $this->withHeaders($headers)
+            ->patchJson("/api/v1/events/{$legacyEvent->id}", $this->apiProposalPayload('Legacy Proposal Updated'))
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Attach the official PPA proposal softcopy before saving this event.');
+
+        $otherOrganization = Organization::create([
+            'college_id' => $college->id,
+            'name' => 'Other Tenant Society',
+            'acronym' => 'OTS',
+            'type' => 'society',
+        ]);
+        $otherEvent = Event::create([
+            'organization_id' => $otherOrganization->id,
+            'title' => 'Other Tenant Proposal',
+            'event_domain' => 'student_affairs',
+            'proposal_category' => 'activity',
+            'status' => Event::STATUS_DRAFT,
+            'start_date' => Carbon::today(),
+            'end_date' => Carbon::today(),
+            'location_type' => 'on-campus',
+        ]);
+
+        $this->withHeaders($headers)
+            ->patchJson("/api/v1/events/{$otherEvent->id}", $this->apiProposalPayload('Unauthorized Tenant Update'))
+            ->assertStatus(403);
+    }
+
+    public function test_revision_requested_api_update_replaces_document_and_preserves_attendance_cutoff(): void
+    {
+        Storage::fake('local');
+
+        [$organization, $admin] = $this->createOrganizationWithScanner();
+        $login = $this->postJson('/api/v1/auth/login', [
+            'email' => $admin->email,
+            'password' => 'password123',
+            'device_name' => 'Proposal Revision Test',
+        ])->assertOk();
+
+        $oldDocumentPath = 'proposal-documents/original-proposal.docx';
+        Storage::disk('local')->put($oldDocumentPath, 'original proposal');
+
+        $event = Event::create([
+            'organization_id' => $organization->id,
+            'title' => 'Revision Requested Proposal',
+            'event_domain' => 'student_affairs',
+            'proposal_category' => 'activity',
+            'status' => Event::STATUS_REVISION_REQUESTED,
+            'start_date' => Carbon::today(),
+            'end_date' => Carbon::today(),
+            'location_type' => 'on-campus',
+            'proposal_document_path' => $oldDocumentPath,
+            'proposal_document_original_name' => 'original-proposal.docx',
+            'event_late_cutoff_min' => 25,
+        ]);
+        EventDay::create([
+            'event_id' => $event->id,
+            'day_number' => 1,
+            'date' => Carbon::today(),
+            'start_time' => '07:00',
+            'end_time' => '08:00',
+        ]);
+        app(ParticipationScopeService::class)->ensureOrganizerScope($event->fresh(['organization']));
+
+        $payload = $this->apiProposalPayload('Revised API Proposal');
+        $payload['proposal_category'] = 'project';
+        $payload['resolution_number'] = 'REV-2026-001';
+        $payload['hardcopy_submitted'] = '1';
+        $payload['head_organization_signed'] = '1';
+        $payload['adviser_signed'] = '1';
+        $payload['event_late_cutoff_min'] = 99;
+        $payload['event_days'][0]['day_number'] = 42;
+        $payload['proposal_document'] = UploadedFile::fake()->create('replacement-proposal.docx', 128, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+
+        $this->withHeaders(['Authorization' => 'Bearer '.$login->json('token')])
+            ->patch("/api/v1/events/{$event->id}", $payload)
+            ->assertOk()
+            ->assertJsonPath('event.title', 'Revised API Proposal')
+            ->assertJsonPath('event.proposal_category', 'project');
+
+        $event->refresh();
+        $this->assertSame(25, $event->event_late_cutoff_min);
+        $this->assertSame('replacement-proposal.docx', $event->proposal_document_original_name);
+        $this->assertSame('REV-2026-001', $event->resolution_number);
+        $this->assertTrue($event->hardcopy_submitted);
+        $this->assertTrue($event->head_organization_signed);
+        $this->assertTrue($event->adviser_signed);
+        $this->assertDatabaseHas('event_days', [
+            'event_id' => $event->id,
+            'day_number' => 1,
+            'start_time' => '08:00',
+            'end_time' => '12:00',
+        ]);
+        $this->assertDatabaseHas('evaluation_form_versions', [
+            'event_id' => $event->id,
+            'title' => 'Evaluation - Revised API Proposal',
+        ]);
+        $this->assertDatabaseHas('event_participation_scopes', [
+            'event_id' => $event->id,
+            'participation_role' => EventParticipationScope::ROLE_ORGANIZER,
+            'ppa_status' => EventParticipationScope::PPA_REVISION_REQUESTED,
+            'ppa_softcopy_original_name' => 'replacement-proposal.docx',
+            'hardcopy_submitted' => true,
+            'org_head_signed' => true,
+            'adviser_signed' => true,
+        ]);
+        Storage::disk('local')->assertMissing($oldDocumentPath);
+        Storage::disk('local')->assertExists($event->proposal_document_path);
     }
 
     public function test_unresolved_qr_sync_creates_pending_link_and_can_be_resolved()
@@ -410,7 +623,7 @@ class UsmEaesTest extends TestCase
 
         $token = $this->scannerTokenForEvent($event, $scanner);
 
-        $this->withHeaders(['Authorization' => 'Bearer ' . $token])
+        $this->withHeaders(['Authorization' => 'Bearer '.$token])
             ->postJson('/api/v1/attendance/sync', [
                 'event_id' => $event->id,
                 'scans' => [[
@@ -444,7 +657,7 @@ class UsmEaesTest extends TestCase
         ]);
         $student->assignRole('Student');
 
-        $this->withHeaders(['Authorization' => 'Bearer ' . $token])
+        $this->withHeaders(['Authorization' => 'Bearer '.$token])
             ->postJson("/api/v1/pending-student-links/{$pending->id}/resolve", [
                 'student_id' => $student->id,
                 'notes' => 'Matched after profile confirmation.',
@@ -508,11 +721,11 @@ class UsmEaesTest extends TestCase
 
         $mobileToken = $student->createToken('scanner-phone', ['scanner-assignments'])->plainTextToken;
 
-        $this->withHeaders(['Authorization' => 'Bearer ' . $mobileToken])
+        $this->withHeaders(['Authorization' => 'Bearer '.$mobileToken])
             ->getJson("/api/v1/events/{$event->id}/hydrate")
             ->assertStatus(403);
 
-        $activation = $this->withHeaders(['Authorization' => 'Bearer ' . $mobileToken])
+        $activation = $this->withHeaders(['Authorization' => 'Bearer '.$mobileToken])
             ->postJson("/api/v1/scanner/assignments/{$assignment->id}/activate", [
                 'device_id' => 'device_assignment_scanner',
             ])
@@ -523,7 +736,7 @@ class UsmEaesTest extends TestCase
 
         Auth::forgetGuards();
 
-        $this->withHeaders(['Authorization' => 'Bearer ' . $token])
+        $this->withHeaders(['Authorization' => 'Bearer '.$token])
             ->postJson('/api/v1/scanner/validate', [
                 'event_id' => $event->id,
                 'device_id' => 'device_assignment_scanner',
@@ -533,7 +746,7 @@ class UsmEaesTest extends TestCase
 
         Auth::forgetGuards();
 
-        $this->withHeaders(['Authorization' => 'Bearer ' . $token])
+        $this->withHeaders(['Authorization' => 'Bearer '.$token])
             ->getJson("/api/v1/events/{$event->id}/hydrate?device_id=device_assignment_scanner")
             ->assertStatus(200)
             ->assertJsonFragment(['qr_code_value' => 'QR_ASSIGNMENT_SCANNER'])
@@ -541,7 +754,7 @@ class UsmEaesTest extends TestCase
 
         Auth::forgetGuards();
 
-        $this->withHeaders(['Authorization' => 'Bearer ' . $token])
+        $this->withHeaders(['Authorization' => 'Bearer '.$token])
             ->postJson('/api/v1/attendance/sync', [
                 'event_id' => $event->id,
                 'scans' => [
@@ -580,7 +793,7 @@ class UsmEaesTest extends TestCase
 
         $this->assertSame(2, RawScan::where('event_id', $event->id)->count());
 
-        (new ResolveAttendanceJob($event->id, [$student->id]))->handle();
+        (new ResolveAttendanceJob($event->id, [$student->id]))->handle(app(EventAnalyticsCache::class));
 
         $this->assertDatabaseHas('attendance_records', [
             'event_id' => $event->id,
@@ -615,7 +828,7 @@ class UsmEaesTest extends TestCase
 
         $token = $student->createToken('student-phone')->plainTextToken;
 
-        $this->withHeaders(['Authorization' => 'Bearer ' . $token])
+        $this->withHeaders(['Authorization' => 'Bearer '.$token])
             ->postJson('/api/v1/scanner/validate', ['event_id' => $event->id])
             ->assertStatus(403)
             ->assertJsonFragment([
@@ -655,17 +868,17 @@ class UsmEaesTest extends TestCase
 
         $mobileToken = $student->createToken('scanner-phone', ['scanner-assignments'])->plainTextToken;
 
-        $this->withHeaders(['Authorization' => 'Bearer ' . $mobileToken])
+        $this->withHeaders(['Authorization' => 'Bearer '.$mobileToken])
             ->getJson("/api/v1/events/{$event->id}/hydrate")
             ->assertStatus(403);
 
-        $this->withHeaders(['Authorization' => 'Bearer ' . $mobileToken])
+        $this->withHeaders(['Authorization' => 'Bearer '.$mobileToken])
             ->getJson('/api/v1/scanner/assignments')
             ->assertStatus(200)
             ->assertJsonPath('assignments.0.id', $assignment->id)
             ->assertJsonPath('assignments.0.activation_allowed', true);
 
-        $activation = $this->withHeaders(['Authorization' => 'Bearer ' . $mobileToken])
+        $activation = $this->withHeaders(['Authorization' => 'Bearer '.$mobileToken])
             ->postJson("/api/v1/scanner/assignments/{$assignment->id}/activate", [
                 'device_id' => 'assigned-device-1',
             ])
@@ -675,7 +888,7 @@ class UsmEaesTest extends TestCase
         $scannerToken = $activation->json('token');
         Auth::forgetGuards();
 
-        $this->withHeaders(['Authorization' => 'Bearer ' . $scannerToken])
+        $this->withHeaders(['Authorization' => 'Bearer '.$scannerToken])
             ->getJson("/api/v1/events/{$event->id}/hydrate?device_id=assigned-device-1")
             ->assertStatus(200)
             ->assertJsonFragment(['qr_code_value' => 'QR_ASSIGNED_STUDENT']);
@@ -725,7 +938,7 @@ class UsmEaesTest extends TestCase
 
         $mobileToken = $unassignedStudent->createToken('scanner-phone', ['scanner-assignments'])->plainTextToken;
 
-        $this->withHeaders(['Authorization' => 'Bearer ' . $mobileToken])
+        $this->withHeaders(['Authorization' => 'Bearer '.$mobileToken])
             ->postJson("/api/v1/scanner/assignments/{$assignment->id}/activate", [
                 'device_id' => 'wrong-device',
             ])
@@ -766,7 +979,7 @@ class UsmEaesTest extends TestCase
         );
 
         $mobileToken = $student->createToken('scanner-phone', ['scanner-assignments'])->plainTextToken;
-        $activation = $this->withHeaders(['Authorization' => 'Bearer ' . $mobileToken])
+        $activation = $this->withHeaders(['Authorization' => 'Bearer '.$mobileToken])
             ->postJson("/api/v1/scanner/assignments/{$assignment->id}/activate", [
                 'device_id' => 'revoked-device',
             ])
@@ -775,7 +988,7 @@ class UsmEaesTest extends TestCase
         $scannerToken = $activation->json('token');
         app(ScannerAssignmentService::class)->revoke($assignment, $admin, 'Assignment revoked during event.');
 
-        $this->withHeaders(['Authorization' => 'Bearer ' . $mobileToken])
+        $this->withHeaders(['Authorization' => 'Bearer '.$mobileToken])
             ->postJson("/api/v1/scanner/assignments/{$assignment->id}/activate", [
                 'device_id' => 'revoked-device',
             ])
@@ -784,14 +997,14 @@ class UsmEaesTest extends TestCase
 
         Auth::forgetGuards();
 
-        $this->withHeaders(['Authorization' => 'Bearer ' . $scannerToken])
+        $this->withHeaders(['Authorization' => 'Bearer '.$scannerToken])
             ->getJson("/api/v1/events/{$event->id}/hydrate?device_id=revoked-device")
             ->assertStatus(401)
             ->assertJsonFragment(['reason' => 'revoked']);
 
         Auth::forgetGuards();
 
-        $this->withHeaders(['Authorization' => 'Bearer ' . $scannerToken])
+        $this->withHeaders(['Authorization' => 'Bearer '.$scannerToken])
             ->postJson('/api/v1/attendance/sync', [
                 'event_id' => $event->id,
                 'scans' => [[
@@ -838,7 +1051,7 @@ class UsmEaesTest extends TestCase
         );
         $mobileToken = $student->createToken('scanner-phone', ['scanner-assignments'])->plainTextToken;
 
-        $firstActivation = $this->withHeaders(['Authorization' => 'Bearer ' . $mobileToken])
+        $firstActivation = $this->withHeaders(['Authorization' => 'Bearer '.$mobileToken])
             ->postJson("/api/v1/scanner/assignments/{$assignment->id}/activate", [
                 'device_id' => 'gate-1-device',
             ])
@@ -851,7 +1064,7 @@ class UsmEaesTest extends TestCase
         Auth::forgetGuards();
 
         $this->withHeaders([
-            'Authorization' => 'Bearer ' . $mobileToken,
+            'Authorization' => 'Bearer '.$mobileToken,
             'X-Device-Id' => 'gate-1-device',
         ])
             ->getJson('/api/v1/scanner/assignments')
@@ -861,7 +1074,7 @@ class UsmEaesTest extends TestCase
 
         Auth::forgetGuards();
 
-        $secondActivation = $this->withHeaders(['Authorization' => 'Bearer ' . $mobileToken])
+        $secondActivation = $this->withHeaders(['Authorization' => 'Bearer '.$mobileToken])
             ->postJson("/api/v1/scanner/assignments/{$assignment->id}/activate", [
                 'device_id' => 'gate-1-device',
             ])
@@ -878,7 +1091,7 @@ class UsmEaesTest extends TestCase
         $secondToken = $secondActivation->json('token');
         Auth::forgetGuards();
 
-        $this->withHeaders(['Authorization' => 'Bearer ' . $secondToken])
+        $this->withHeaders(['Authorization' => 'Bearer '.$secondToken])
             ->postJson('/api/v1/scanner/validate', ['event_id' => $event->id, 'device_id' => 'gate-1-device'])
             ->assertStatus(200);
     }
@@ -914,7 +1127,7 @@ class UsmEaesTest extends TestCase
         );
         $mobileToken = $student->createToken('scanner-phone', ['scanner-assignments'])->plainTextToken;
 
-        $firstActivation = $this->withHeaders(['Authorization' => 'Bearer ' . $mobileToken])
+        $firstActivation = $this->withHeaders(['Authorization' => 'Bearer '.$mobileToken])
             ->postJson("/api/v1/scanner/assignments/{$assignment->id}/activate", [
                 'device_id' => 'gate-1-device',
             ])
@@ -926,7 +1139,7 @@ class UsmEaesTest extends TestCase
         Auth::forgetGuards();
 
         $this->withHeaders([
-            'Authorization' => 'Bearer ' . $mobileToken,
+            'Authorization' => 'Bearer '.$mobileToken,
             'X-Device-Id' => 'gate-1-replacement',
         ])
             ->getJson('/api/v1/scanner/assignments')
@@ -936,7 +1149,7 @@ class UsmEaesTest extends TestCase
 
         Auth::forgetGuards();
 
-        $this->withHeaders(['Authorization' => 'Bearer ' . $mobileToken])
+        $this->withHeaders(['Authorization' => 'Bearer '.$mobileToken])
             ->postJson("/api/v1/scanner/assignments/{$assignment->id}/activate", [
                 'device_id' => 'gate-1-replacement',
             ])
@@ -950,7 +1163,7 @@ class UsmEaesTest extends TestCase
 
         Auth::forgetGuards();
 
-        $this->withHeaders(['Authorization' => 'Bearer ' . $firstToken])
+        $this->withHeaders(['Authorization' => 'Bearer '.$firstToken])
             ->postJson('/api/v1/scanner/validate', ['event_id' => $event->id, 'device_id' => 'gate-1-device'])
             ->assertStatus(200);
     }
@@ -986,7 +1199,7 @@ class UsmEaesTest extends TestCase
         );
         $mobileToken = $student->createToken('scanner-phone', ['scanner-assignments'])->plainTextToken;
 
-        $firstActivation = $this->withHeaders(['Authorization' => 'Bearer ' . $mobileToken])
+        $firstActivation = $this->withHeaders(['Authorization' => 'Bearer '.$mobileToken])
             ->postJson("/api/v1/scanner/assignments/{$assignment->id}/activate", [
                 'device_id' => 'gate-1-device',
             ])
@@ -997,7 +1210,7 @@ class UsmEaesTest extends TestCase
 
         Auth::forgetGuards();
 
-        $secondActivation = $this->withHeaders(['Authorization' => 'Bearer ' . $mobileToken])
+        $secondActivation = $this->withHeaders(['Authorization' => 'Bearer '.$mobileToken])
             ->postJson("/api/v1/scanner/assignments/{$assignment->id}/activate", [
                 'device_id' => 'gate-1-replacement',
             ])
@@ -1048,7 +1261,7 @@ class UsmEaesTest extends TestCase
         );
         $mobileToken = $student->createToken('scanner-phone', ['scanner-assignments'])->plainTextToken;
 
-        $firstActivation = $this->withHeaders(['Authorization' => 'Bearer ' . $mobileToken])
+        $firstActivation = $this->withHeaders(['Authorization' => 'Bearer '.$mobileToken])
             ->postJson("/api/v1/scanner/assignments/{$firstAssignment->id}/activate", [
                 'device_id' => 'gate-1-device',
             ])
@@ -1058,7 +1271,7 @@ class UsmEaesTest extends TestCase
 
         Auth::forgetGuards();
 
-        $this->withHeaders(['Authorization' => 'Bearer ' . $mobileToken])
+        $this->withHeaders(['Authorization' => 'Bearer '.$mobileToken])
             ->postJson("/api/v1/scanner/assignments/{$secondAssignment->id}/activate", [
                 'device_id' => 'gate-2-device',
             ])
@@ -1110,7 +1323,7 @@ class UsmEaesTest extends TestCase
         );
         $mobileToken = $student->createToken('scanner-phone', ['scanner-assignments'])->plainTextToken;
 
-        $firstActivation = $this->withHeaders(['Authorization' => 'Bearer ' . $mobileToken])
+        $firstActivation = $this->withHeaders(['Authorization' => 'Bearer '.$mobileToken])
             ->postJson("/api/v1/scanner/assignments/{$firstAssignment->id}/activate", [
                 'device_id' => 'gate-1-device',
             ])
@@ -1121,7 +1334,7 @@ class UsmEaesTest extends TestCase
 
         Auth::forgetGuards();
 
-        $secondActivation = $this->withHeaders(['Authorization' => 'Bearer ' . $mobileToken])
+        $secondActivation = $this->withHeaders(['Authorization' => 'Bearer '.$mobileToken])
             ->postJson("/api/v1/scanner/assignments/{$secondAssignment->id}/activate", [
                 'device_id' => 'gate-2-device',
             ])
@@ -1140,11 +1353,11 @@ class UsmEaesTest extends TestCase
         $event = $this->createApprovedEvent($org);
         $token = $this->scannerTokenForEvent($event, $scanner);
 
-        $this->withHeaders(['Authorization' => 'Bearer ' . $token])
+        $this->withHeaders(['Authorization' => 'Bearer '.$token])
             ->postJson('/api/v1/scanner/validate', ['event_id' => $event->id, 'device_id' => 'device-a'])
             ->assertStatus(200);
 
-        $this->withHeaders(['Authorization' => 'Bearer ' . $token])
+        $this->withHeaders(['Authorization' => 'Bearer '.$token])
             ->postJson('/api/v1/scanner/validate', ['event_id' => $event->id, 'device_id' => 'device-b'])
             ->assertStatus(403)
             ->assertJsonFragment(['reason' => 'device_mismatch']);
@@ -1171,23 +1384,23 @@ class UsmEaesTest extends TestCase
             $eventDay = $event->eventDays()->firstOrFail();
             $eventTimezone = config('services.eaes.event_timezone', 'Asia/Manila');
             $expectedScanWindowStart = Carbon::parse(
-                $eventDay->date->toDateString() . ' ' . $eventDay->start_time,
+                $eventDay->date->toDateString().' '.$eventDay->start_time,
                 $eventTimezone
             )->subHour()->toIso8601String();
             $expectedScanWindowEnd = Carbon::parse(
-                $eventDay->date->toDateString() . ' ' . $eventDay->end_time,
+                $eventDay->date->toDateString().' '.$eventDay->end_time,
                 $eventTimezone
             )->addHour()->toIso8601String();
             $expectedTimeInWindowEnd = Carbon::parse(
-                $eventDay->date->toDateString() . ' ' . $eventDay->end_time,
+                $eventDay->date->toDateString().' '.$eventDay->end_time,
                 $eventTimezone
             )->toIso8601String();
             $expectedTimeOutWindowStart = Carbon::parse(
-                $eventDay->date->toDateString() . ' ' . $eventDay->start_time,
+                $eventDay->date->toDateString().' '.$eventDay->start_time,
                 $eventTimezone
             )->toIso8601String();
 
-            $this->withHeaders(['Authorization' => 'Bearer ' . $token])
+            $this->withHeaders(['Authorization' => 'Bearer '.$token])
                 ->postJson('/api/v1/scanner/validate', ['event_id' => $event->id, 'device_id' => 'device-a'])
                 ->assertStatus(200)
                 ->assertJsonPath('scanner_session.scan_window_start', $expectedScanWindowStart)
@@ -1211,7 +1424,7 @@ class UsmEaesTest extends TestCase
             'expires_at' => now()->subMinute(),
         ]);
 
-        $this->withHeaders(['Authorization' => 'Bearer ' . $token])
+        $this->withHeaders(['Authorization' => 'Bearer '.$token])
             ->postJson('/api/v1/attendance/sync', [
                 'event_id' => $event->id,
                 'scans' => [[
@@ -1238,7 +1451,7 @@ class UsmEaesTest extends TestCase
         $event = $this->createApprovedEvent($org);
         $token = $this->scannerTokenForEvent($event, $scanner);
 
-        $this->withHeaders(['Authorization' => 'Bearer ' . $token])
+        $this->withHeaders(['Authorization' => 'Bearer '.$token])
             ->postJson('/api/v1/attendance/sync', [
                 'event_id' => $event->id,
                 'scans' => [
@@ -1352,12 +1565,12 @@ class UsmEaesTest extends TestCase
 
         $token = $societyAdmin->createToken('cross-tenant-scanner', ['scan-qr-codes'])->plainTextToken;
 
-        $this->withHeaders(['Authorization' => 'Bearer ' . $token])
+        $this->withHeaders(['Authorization' => 'Bearer '.$token])
             ->postJson('/api/v1/scanner/validate', ['event_id' => $event->id])
             ->assertStatus(403)
             ->assertJsonFragment(['message' => 'Unauthorized event boundary check.']);
 
-        $this->withHeaders(['Authorization' => 'Bearer ' . $token])
+        $this->withHeaders(['Authorization' => 'Bearer '.$token])
             ->getJson("/api/v1/events/{$event->id}/hydrate")
             ->assertStatus(403);
 
@@ -1388,7 +1601,7 @@ class UsmEaesTest extends TestCase
         $scanner->assignRole('Student');
 
         $event = $this->createApprovedEvent($organizerOrg);
-        $parentScope = app(\App\Services\ParticipationScopeService::class)->ensureOrganizerScope($event);
+        $parentScope = app(ParticipationScopeService::class)->ensureOrganizerScope($event);
         $participantScope = EventParticipationScope::create([
             'event_id' => $event->id,
             'parent_scope_id' => $parentScope->id,
@@ -1412,7 +1625,7 @@ class UsmEaesTest extends TestCase
                 participationScope: $participantScope
             );
             $this->fail('Pending participant PPA should block scanner assignment.');
-        } catch (\Illuminate\Validation\ValidationException $exception) {
+        } catch (ValidationException $exception) {
             $this->assertArrayHasKey('event_participation_scope_id', $exception->errors());
         }
 
@@ -1424,7 +1637,7 @@ class UsmEaesTest extends TestCase
             participationScope: $participantScope
         );
         $mobileToken = $scanner->createToken('scanner-phone', ['scanner-assignments'])->plainTextToken;
-        $activation = $this->withHeaders(['Authorization' => 'Bearer ' . $mobileToken])
+        $activation = $this->withHeaders(['Authorization' => 'Bearer '.$mobileToken])
             ->postJson("/api/v1/scanner/assignments/{$assignment->id}/activate", [
                 'device_id' => 'participant-device',
             ])
@@ -1435,7 +1648,7 @@ class UsmEaesTest extends TestCase
         $participantScope->update(['ppa_status' => EventParticipationScope::PPA_REJECTED]);
         Auth::forgetGuards();
 
-        $this->withHeaders(['Authorization' => 'Bearer ' . $scannerToken])
+        $this->withHeaders(['Authorization' => 'Bearer '.$scannerToken])
             ->getJson("/api/v1/events/{$event->id}/hydrate?device_id=participant-device")
             ->assertStatus(423)
             ->assertJsonFragment(['reason' => 'participant_ppa_locked']);
@@ -1477,7 +1690,7 @@ class UsmEaesTest extends TestCase
         $event = $this->createApprovedEvent($organizerOrg);
         $scope = EventParticipationScope::create([
             'event_id' => $event->id,
-            'parent_scope_id' => app(\App\Services\ParticipationScopeService::class)->ensureOrganizerScope($event)->id,
+            'parent_scope_id' => app(ParticipationScopeService::class)->ensureOrganizerScope($event)->id,
             'participation_role' => EventParticipationScope::ROLE_PARTICIPANT,
             'participant_type' => 'society',
             'organization_id' => $scopeOrg->id,
@@ -1498,20 +1711,20 @@ class UsmEaesTest extends TestCase
             participationScope: $scope
         );
         $mobileToken = $scanner->createToken('scanner-phone', ['scanner-assignments'])->plainTextToken;
-        $activation = $this->withHeaders(['Authorization' => 'Bearer ' . $mobileToken])
+        $activation = $this->withHeaders(['Authorization' => 'Bearer '.$mobileToken])
             ->postJson("/api/v1/scanner/assignments/{$assignment->id}/activate", ['device_id' => 'scope-device'])
             ->assertStatus(200);
         $scannerToken = $activation->json('token');
 
         Auth::forgetGuards();
-        $hydrate = $this->withHeaders(['Authorization' => 'Bearer ' . $scannerToken])
+        $hydrate = $this->withHeaders(['Authorization' => 'Bearer '.$scannerToken])
             ->getJson("/api/v1/events/{$event->id}/hydrate?device_id=scope-device")
             ->assertStatus(200)
             ->assertJsonFragment(['qr_code_value' => 'QR_SCOPE_SCANNER']);
         $this->assertStringNotContainsString('QR_OUTSIDE_SCOPE', $hydrate->getContent());
 
         Auth::forgetGuards();
-        $this->withHeaders(['Authorization' => 'Bearer ' . $scannerToken])
+        $this->withHeaders(['Authorization' => 'Bearer '.$scannerToken])
             ->postJson('/api/v1/attendance/sync', [
                 'event_id' => $event->id,
                 'scans' => [
@@ -1546,7 +1759,7 @@ class UsmEaesTest extends TestCase
         $this->assertSame($outsideStudent->id, User::where('qr_code_value', 'QR_OUTSIDE_SCOPE')->first()->id);
     }
 
-    public function test_hr_admin_can_create_hr_event_without_osa_ppa()
+    public function test_hr_admin_can_create_hr_event_without_osa_ppa(): void
     {
         $hrOrg = Organization::create([
             'name' => 'Human Resource Management Office',
@@ -1567,9 +1780,10 @@ class UsmEaesTest extends TestCase
             'device_name' => 'HR Workstation',
         ])->assertStatus(200);
 
-        $response = $this->withHeaders(['Authorization' => 'Bearer ' . $login->json('token')])
+        $response = $this->withHeaders(['Authorization' => 'Bearer '.$login->json('token')])
             ->postJson('/api/v1/events', [
                 'title' => 'Faculty Assembly Attendance',
+                'proposal_category' => 'activity',
                 'start_date' => Carbon::today()->toDateString(),
                 'end_date' => Carbon::today()->toDateString(),
                 'location_type' => 'on-campus',
@@ -1627,7 +1841,7 @@ class UsmEaesTest extends TestCase
         ]);
 
         $event = $this->createApprovedEvent($organizerOrg);
-        $parentScope = app(\App\Services\ParticipationScopeService::class)->ensureOrganizerScope($event);
+        $parentScope = app(ParticipationScopeService::class)->ensureOrganizerScope($event);
         $firstScope = EventParticipationScope::create([
             'event_id' => $event->id,
             'parent_scope_id' => $parentScope->id,
@@ -1675,7 +1889,7 @@ class UsmEaesTest extends TestCase
         ]);
 
         $token = $organizerAdmin->createToken('admin')->plainTextToken;
-        $response = $this->withHeaders(['Authorization' => 'Bearer ' . $token])
+        $response = $this->withHeaders(['Authorization' => 'Bearer '.$token])
             ->getJson("/api/v1/events/{$event->id}/analytics")
             ->assertStatus(200)
             ->assertJsonPath('attendance.global_unique_attended', 1)
@@ -1742,10 +1956,9 @@ class UsmEaesTest extends TestCase
             'competition_status' => 'present_on_time',
         ]);
 
-        $this->app->instance(AiServiceInterface::class, new class extends GeminiService {
-            public function __construct()
-            {
-            }
+        $this->app->instance(AiServiceInterface::class, new class extends GeminiService
+        {
+            public function __construct() {}
 
             public function parseNaturalLanguageQuery(string $query, User $user): array
             {
@@ -1764,7 +1977,7 @@ class UsmEaesTest extends TestCase
 
         $token = $societyAdmin->createToken('Admin')->plainTextToken;
 
-        $response = $this->withHeaders(['Authorization' => 'Bearer ' . $token])
+        $response = $this->withHeaders(['Authorization' => 'Bearer '.$token])
             ->postJson('/api/v1/admin/nlp-query', [
                 'query' => 'Show all attendance records.',
             ])
@@ -1801,7 +2014,7 @@ class UsmEaesTest extends TestCase
             ], 200),
         ]);
 
-        $results = (new GeminiService())->analyzeSentiments([
+        $results = (new GeminiService)->analyzeSentiments([
             ['id' => 'eval-1', 'comment' => 'Great event.'],
             ['id' => 'eval-2', 'comment' => 'Venue was hot.'],
         ]);
@@ -1838,7 +2051,7 @@ class UsmEaesTest extends TestCase
             ], 200),
         ]);
 
-        $results = (new GeminiService())->analyzeSentiments([
+        $results = (new GeminiService)->analyzeSentiments([
             ['id' => 'eval-1', 'comment' => 'Very useful.'],
         ]);
 
@@ -1865,7 +2078,7 @@ class UsmEaesTest extends TestCase
             '*gemini-2.0-flash*' => Http::response('server error', 500),
         ]);
 
-        $results = (new GeminiService())->analyzeSentiments([
+        $results = (new GeminiService)->analyzeSentiments([
             ['id' => 'eval-1', 'comment' => 'Comment.'],
         ]);
 
@@ -1876,7 +2089,7 @@ class UsmEaesTest extends TestCase
     {
         config(['services.gemini.api_key' => null]);
 
-        $results = (new GeminiService())->analyzeSentiments([
+        $results = (new GeminiService)->analyzeSentiments([
             ['id' => 'eval-1', 'comment' => 'Comment.'],
         ]);
 
@@ -1934,10 +2147,9 @@ class UsmEaesTest extends TestCase
             'submitted_at' => now(),
         ]);
 
-        $this->app->instance(AiServiceInterface::class, new class extends GeminiService {
-            public function __construct()
-            {
-            }
+        $this->app->instance(AiServiceInterface::class, new class extends GeminiService
+        {
+            public function __construct() {}
 
             public function analyzeSentiments(array $comments): array
             {
@@ -1948,13 +2160,31 @@ class UsmEaesTest extends TestCase
                 ], $comments);
             }
         });
+        $cache = app(EventAnalyticsCache::class);
+        $summaryCalls = 0;
 
-        (new AnalyzeEventSentimentsJob($event->id))->handle(app(AiServiceInterface::class));
+        $cache->remember($event, function () use (&$summaryCalls): array {
+            $summaryCalls++;
+
+            return ['calls' => $summaryCalls];
+        });
+
+        (new AnalyzeEventSentimentsJob($event->id))->handle(
+            app(AiServiceInterface::class),
+            $cache,
+        );
+
+        $summary = $cache->remember($event, function () use (&$summaryCalls): array {
+            $summaryCalls++;
+
+            return ['calls' => $summaryCalls];
+        });
 
         $this->assertSame('negative', $target->fresh()->sentiment);
         $this->assertSame(0.22, $target->fresh()->sentiment_score);
         $this->assertSame('unprocessed', $blank->fresh()->sentiment);
         $this->assertSame('positive', $existing->fresh()->sentiment);
+        $this->assertSame(['calls' => 2], $summary);
     }
 
     public function test_closed_evaluation_command_dispatches_only_closed_events_with_unprocessed_comments()
@@ -2091,7 +2321,7 @@ class UsmEaesTest extends TestCase
             'dedup_key' => 'policy-event-wins',
         ]);
 
-        (new ResolveAttendanceJob($event->id, [$student->id], $scope->id))->handle();
+        (new ResolveAttendanceJob($event->id, [$student->id], $scope->id))->handle(app(EventAnalyticsCache::class));
 
         $record = AttendanceRecord::firstOrFail();
         $this->assertSame('late', $record->society_status);
@@ -2164,7 +2394,7 @@ class UsmEaesTest extends TestCase
             'dedup_key' => 'policy-scope-fallback',
         ]);
 
-        (new ResolveAttendanceJob($event->id, [$student->id], $scope->id))->handle();
+        (new ResolveAttendanceJob($event->id, [$student->id], $scope->id))->handle(app(EventAnalyticsCache::class));
 
         $record = AttendanceRecord::firstOrFail();
         $this->assertSame('late_cutoff', $record->society_status);
@@ -2198,7 +2428,7 @@ class UsmEaesTest extends TestCase
 
         $scanner = User::create([
             'name' => "{$organizationAcronym} Officer",
-            'email' => strtolower($organizationAcronym) . '.officer@usm.edu.ph',
+            'email' => strtolower($organizationAcronym).'.officer@usm.edu.ph',
             'password' => bcrypt('password123'),
         ]);
         $this->assignAdminScope($scanner, 'Society Admin', $org, $college);
@@ -2231,7 +2461,7 @@ class UsmEaesTest extends TestCase
             termEnd: '2027-06-30',
             positionTitle: 'Test assignment',
             approvedBy: $user,
-            isPrimaryAdmin: !$existingPrimary
+            isPrimaryAdmin: ! $existingPrimary
         );
     }
 
@@ -2268,5 +2498,29 @@ class UsmEaesTest extends TestCase
         ]);
 
         return $event;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function apiProposalPayload(string $title): array
+    {
+        return [
+            'title' => $title,
+            'proposal_category' => 'activity',
+            'start_date' => Carbon::today()->toDateString(),
+            'end_date' => Carbon::today()->toDateString(),
+            'location_type' => 'on-campus',
+            'location_details' => 'University Auditorium',
+            'target_demographics' => [],
+            'budget_allocations' => [],
+            'event_days' => [[
+                'day_number' => 1,
+                'date' => Carbon::today()->toDateString(),
+                'start_time' => '08:00',
+                'end_time' => '12:00',
+            ]],
+            'evaluation_questions' => EvaluationQuestions::defaultSchema(),
+        ];
     }
 }

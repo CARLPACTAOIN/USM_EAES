@@ -3,10 +3,10 @@
 namespace App\Services;
 
 use App\Models\AttendanceRecord;
+use App\Models\Evaluation;
 use App\Models\Event;
 use App\Models\EventParticipationScope;
 use App\Models\EventScannerAssignment;
-use App\Models\Evaluation;
 use App\Models\PendingStudentLink;
 use App\Models\RawScan;
 use App\Models\ScannerSession;
@@ -19,11 +19,17 @@ use Illuminate\Support\Facades\DB;
 
 class EventAnalyticsService
 {
-    public function __construct(private readonly ParticipationScopeService $participationScopes)
-    {
-    }
+    public function __construct(
+        private readonly ParticipationScopeService $participationScopes,
+        private readonly EventAnalyticsCache $cache,
+    ) {}
 
     public function summary(Event $event): array
+    {
+        return $this->cache->remember($event, fn (): array => $this->buildSummary($event));
+    }
+
+    private function buildSummary(Event $event): array
     {
         $event->loadMissing([
             'organization.college',
@@ -342,7 +348,7 @@ class EventAnalyticsService
 
         foreach ($evaluations as $evaluation) {
             $sentiment = $evaluation->sentiment ?: 'unprocessed';
-            if (!array_key_exists($sentiment, $counts)) {
+            if (! array_key_exists($sentiment, $counts)) {
                 $sentiment = 'unprocessed';
             }
             $counts[$sentiment]++;
@@ -632,30 +638,30 @@ class EventAnalyticsService
 
         return $rows
             ->filter(function (array $row) use ($scopeId, $dayId, $status, $validation, $yearLevel, $search) {
-                if ($scopeId && !$row['scope_ids']->contains($scopeId)) {
+                if ($scopeId && ! $row['scope_ids']->contains($scopeId)) {
                     return false;
                 }
 
-                if ($dayId && !$row['day_status']) {
+                if ($dayId && ! $row['day_status']) {
                     return false;
                 }
 
                 $effectiveStatus = $dayId ? ($row['day_status']['status'] ?? $row['status']) : $row['status'];
                 if ($status && $status !== 'all' && $effectiveStatus !== $status) {
-                    if (!($status === 'attended' && $row['attended'])) {
+                    if (! ($status === 'attended' && $row['attended'])) {
                         return false;
                     }
                 }
 
-                if ($validation === 'valid' && !$row['valid']) {
+                if ($validation === 'valid' && ! $row['valid']) {
                     return false;
                 }
 
-                if ($validation === 'invalid' && (!$row['attended'] || $row['valid'])) {
+                if ($validation === 'invalid' && (! $row['attended'] || $row['valid'])) {
                     return false;
                 }
 
-                if ($validation === 'evaluated' && !$row['evaluation_submitted']) {
+                if ($validation === 'evaluated' && ! $row['evaluation_submitted']) {
                     return false;
                 }
 
@@ -690,7 +696,7 @@ class EventAnalyticsService
         return $event->participationScopes
             ->filter(fn (EventParticipationScope $scope) => $scope->status === EventParticipationScope::STATUS_ACTIVE)
             ->filter(fn (EventParticipationScope $scope) => $scope->analytics_rollup_enabled)
-            ->filter(fn (EventParticipationScope $scope) => !$this->participationScopes->runtimeGuard($scope))
+            ->filter(fn (EventParticipationScope $scope) => ! $this->participationScopes->runtimeGuard($scope))
             ->values();
     }
 
@@ -748,7 +754,7 @@ class EventAnalyticsService
         $query = User::role('Student');
         $eventOrg = $event->organization;
 
-        if (!$eventOrg) {
+        if (! $eventOrg) {
             return $query->whereRaw('1 = 0');
         }
 
@@ -776,7 +782,7 @@ class EventAnalyticsService
 
     private function dateTime($value): ?string
     {
-        if (!$value) {
+        if (! $value) {
             return null;
         }
 

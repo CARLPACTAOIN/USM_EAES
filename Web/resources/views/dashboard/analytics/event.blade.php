@@ -413,12 +413,41 @@
     }
 
     .analytics-chart {
+        position: relative;
         min-height: 16rem;
         width: 100%;
     }
 
     .analytics-chart-short {
         min-height: 13rem;
+    }
+
+    .analytics-chart-loading {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.625rem;
+        color: #526258;
+        font-size: 0.8125rem;
+        font-weight: 700;
+        background: rgba(255, 255, 255, 0.86);
+    }
+
+    .analytics-chart-loading-spinner {
+        width: 1.125rem;
+        height: 1.125rem;
+        border: 2px solid rgba(14, 93, 54, 0.2);
+        border-top-color: #0e5d36;
+        border-radius: 9999px;
+        animation: analytics-chart-spin 700ms linear infinite;
+    }
+
+    @keyframes analytics-chart-spin {
+        to {
+            transform: rotate(360deg);
+        }
     }
 
     .analytics-table-wrap {
@@ -640,7 +669,6 @@
 @endpush
 
 @push('scripts')
-<script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
 <script>
     window.eventAnalyticsPage = function () {
         const validTabs = ['overview', 'attendance', 'evaluations', 'sentiment', 'scopes', 'scanner', 'exports'];
@@ -650,6 +678,10 @@
             init() {
                 const requested = window.location.hash ? window.location.hash.substring(1) : new URLSearchParams(window.location.search).get('tab');
                 this.activeTab = validTabs.includes(requested) ? requested : 'overview';
+
+                this.$nextTick(() => {
+                    window.dispatchEvent(new CustomEvent('eaes-analytics-tab-change', { detail: { tab: this.activeTab } }));
+                });
 
                 window.addEventListener('popstate', () => {
                     const hashTab = window.location.hash ? window.location.hash.substring(1) : 'overview';
@@ -670,8 +702,14 @@
     };
 
     (function () {
+        window.eaesEventAnalyticsRuntime?.destroy();
+
         const payload = @js($chartPayload);
-        const charts = [];
+        const chartSource = @js(asset('vendor/apexcharts/apexcharts.min.js'));
+        const charts = new Map();
+        const cleanupCallbacks = [];
+        let destroyed = false;
+        let apexChartsPromise = window.eaesApexChartsPromise;
         const palette = {
             green: '#0e5d36',
             blue: '#2563eb',
@@ -706,44 +744,92 @@
             };
         }
 
+        function addListener(target, event, callback, options) {
+            target.addEventListener(event, callback, options);
+            cleanupCallbacks.push(() => target.removeEventListener(event, callback, options));
+        }
+
         function renderChart(id, options) {
             const element = document.getElementById(id);
-            if (!element || !window.ApexCharts) {
+            if (!element || !window.ApexCharts || charts.has(id)) {
                 return;
             }
 
             const chart = new ApexCharts(element, { ...baseOptions(), ...options });
-            chart.render();
-            charts.push(chart);
+            charts.set(id, chart);
+            chart.render()
+                .then(() => setChartLoading(id, false))
+                .catch(() => {
+                    charts.delete(id);
+                    markChartsUnavailable([id]);
+                });
         }
 
-        function initCharts() {
-            if (!window.ApexCharts) {
-                document.querySelectorAll('.analytics-chart').forEach((element) => {
-                    element.innerHTML = '<p class="analytics-empty">Charts are unavailable. The table data remains available below.</p>';
-                });
+        function setChartLoading(id, loading) {
+            const element = document.getElementById(id);
+            if (!element) {
                 return;
             }
 
-            renderChart('demographicsChart', {
-                series: [{ name: 'Attendees', data: payload.demographics.series }],
-                chart: { ...baseOptions().chart, type: 'bar', height: 300 },
-                colors: [palette.green],
-                plotOptions: { bar: { horizontal: true, borderRadius: 4, dataLabels: { position: 'right' } } },
-                xaxis: { categories: payload.demographics.labels, labels: { formatter: (value) => Math.round(value) } },
-                dataLabels: { enabled: true },
-            });
+            let indicator = element.querySelector('.analytics-chart-loading');
 
-            renderChart('yearLevelChart', {
-                series: payload.yearLevels.series.length ? payload.yearLevels.series : [0],
-                chart: { ...baseOptions().chart, type: 'donut', height: 300 },
-                colors: [palette.green, palette.amber, palette.blue, palette.indigo, '#0f766e', '#64748b'],
-                labels: payload.yearLevels.labels.length ? payload.yearLevels.labels : ['No data'],
-                legend: { position: 'bottom' },
-                dataLabels: { enabled: true },
-            });
+            if (loading) {
+                element.setAttribute('aria-busy', 'true');
 
-            renderChart('attendanceTrendChart', {
+                if (!indicator) {
+                    indicator = document.createElement('div');
+                    indicator.className = 'analytics-chart-loading';
+                    indicator.setAttribute('role', 'status');
+                    indicator.innerHTML = '<span class="analytics-chart-loading-spinner" aria-hidden="true"></span><span>Loading chart</span>';
+                    element.appendChild(indicator);
+                }
+
+                return;
+            }
+
+            element.setAttribute('aria-busy', 'false');
+            indicator?.remove();
+        }
+
+        function markChartsLoading(chartIds) {
+            chartIds
+                .filter((id) => !charts.has(id))
+                .forEach((id) => setChartLoading(id, true));
+        }
+
+        function markChartsUnavailable(chartIds) {
+            chartIds.forEach((id) => {
+                const element = document.getElementById(id);
+                if (!element) {
+                    return;
+                }
+
+                setChartLoading(id, false);
+                element.innerHTML = '<p class="analytics-empty">Charts are unavailable. The table data remains available below.</p>';
+            });
+        }
+
+        const chartGroups = {
+            overview: () => {
+                renderChart('demographicsChart', {
+                    series: [{ name: 'Attendees', data: payload.demographics.series }],
+                    chart: { ...baseOptions().chart, type: 'bar', height: 300 },
+                    colors: [palette.green],
+                    plotOptions: { bar: { horizontal: true, borderRadius: 4, dataLabels: { position: 'right' } } },
+                    xaxis: { categories: payload.demographics.labels, labels: { formatter: (value) => Math.round(value) } },
+                    dataLabels: { enabled: true },
+                });
+
+                renderChart('yearLevelChart', {
+                    series: payload.yearLevels.series.length ? payload.yearLevels.series : [0],
+                    chart: { ...baseOptions().chart, type: 'donut', height: 300 },
+                    colors: [palette.green, palette.amber, palette.blue, palette.indigo, '#0f766e', '#64748b'],
+                    labels: payload.yearLevels.labels.length ? payload.yearLevels.labels : ['No data'],
+                    legend: { position: 'bottom' },
+                    dataLabels: { enabled: true },
+                });
+            },
+            attendance: () => renderChart('attendanceTrendChart', {
                 series: [
                     { name: 'Attendance rate', data: payload.attendanceTrend.attendance },
                     { name: 'Valid attendance rate', data: payload.attendanceTrend.valid }
@@ -755,51 +841,101 @@
                 xaxis: { categories: payload.attendanceTrend.labels },
                 yaxis: { min: 0, max: 100, labels: { formatter: (value) => value + '%' } },
                 dataLabels: { enabled: false },
-            });
+            }),
+            evaluations: () => {
+                renderChart('evaluationRateChart', {
+                    series: payload.evaluationRate,
+                    chart: { ...baseOptions().chart, type: 'radialBar', height: 230 },
+                    colors: [palette.amber],
+                    plotOptions: { radialBar: { hollow: { size: '62%' }, dataLabels: { name: { show: true }, value: { formatter: (value) => value + '%' } } } },
+                    labels: ['Response'],
+                });
 
-            renderChart('evaluationRateChart', {
-                series: payload.evaluationRate,
-                chart: { ...baseOptions().chart, type: 'radialBar', height: 230 },
-                colors: [palette.amber],
-                plotOptions: { radialBar: { hollow: { size: '62%' }, dataLabels: { name: { show: true }, value: { formatter: (value) => value + '%' } } } },
-                labels: ['Response'],
-            });
+                renderChart('categoryAverageChart', {
+                    series: [{ name: 'Average', data: payload.categoryAverages.series }],
+                    chart: { ...baseOptions().chart, type: 'bar', height: 230 },
+                    colors: [palette.blue],
+                    plotOptions: { bar: { horizontal: true, borderRadius: 4 } },
+                    xaxis: { categories: payload.categoryAverages.labels, min: 0, max: 5 },
+                    dataLabels: { enabled: true, formatter: (value) => Number(value).toFixed(2) },
+                });
 
-            renderChart('categoryAverageChart', {
-                series: [{ name: 'Average', data: payload.categoryAverages.series }],
-                chart: { ...baseOptions().chart, type: 'bar', height: 230 },
-                colors: [palette.blue],
-                plotOptions: { bar: { horizontal: true, borderRadius: 4 } },
-                xaxis: { categories: payload.categoryAverages.labels, min: 0, max: 5 },
-                dataLabels: { enabled: true, formatter: (value) => Number(value).toFixed(2) },
-            });
+                renderChart('scoreDistributionChart', {
+                    series: payload.scoreDistribution.series,
+                    chart: { ...baseOptions().chart, type: 'bar', stacked: true, height: 320 },
+                    colors: ['#dc2626', '#f97316', '#d97706', '#2563eb', '#0e5d36'],
+                    plotOptions: { bar: { horizontal: true, borderRadius: 4 } },
+                    xaxis: { categories: payload.scoreDistribution.labels },
+                    dataLabels: { enabled: true },
+                    legend: { position: 'top' },
+                });
+            },
+            sentiment: () => {
+                renderChart('sentimentChart', {
+                    series: payload.sentiments.series,
+                    chart: { ...baseOptions().chart, type: 'donut', height: 300 },
+                    labels: payload.sentiments.labels,
+                    colors: [palette.green, palette.amber, palette.red, palette.slate],
+                    dataLabels: { enabled: true },
+                    legend: { position: 'bottom' },
+                });
 
-            renderChart('scoreDistributionChart', {
-                series: payload.scoreDistribution.series,
-                chart: { ...baseOptions().chart, type: 'bar', stacked: true, height: 320 },
-                colors: ['#dc2626', '#f97316', '#d97706', '#2563eb', '#0e5d36'],
-                plotOptions: { bar: { horizontal: true, borderRadius: 4 } },
-                xaxis: { categories: payload.scoreDistribution.labels },
-                dataLabels: { enabled: true },
-                legend: { position: 'top' },
-            });
+                renderChart('sentimentHealthChart', {
+                    series: payload.sentimentHealth,
+                    chart: { ...baseOptions().chart, type: 'radialBar', height: 260 },
+                    colors: [palette.indigo],
+                    plotOptions: { radialBar: { hollow: { size: '64%' }, dataLabels: { name: { show: true }, value: { formatter: (value) => value + '%' } } } },
+                    labels: ['Health'],
+                });
+            }
+        };
 
-            renderChart('sentimentChart', {
-                series: payload.sentiments.series,
-                chart: { ...baseOptions().chart, type: 'donut', height: 300 },
-                labels: payload.sentiments.labels,
-                colors: [palette.green, palette.amber, palette.red, palette.slate],
-                dataLabels: { enabled: true },
-                legend: { position: 'bottom' },
-            });
+        const chartIdsByTab = {
+            overview: ['demographicsChart', 'yearLevelChart'],
+            attendance: ['attendanceTrendChart'],
+            evaluations: ['evaluationRateChart', 'categoryAverageChart', 'scoreDistributionChart'],
+            sentiment: ['sentimentChart', 'sentimentHealthChart']
+        };
 
-            renderChart('sentimentHealthChart', {
-                series: payload.sentimentHealth,
-                chart: { ...baseOptions().chart, type: 'radialBar', height: 260 },
-                colors: [palette.indigo],
-                plotOptions: { radialBar: { hollow: { size: '64%' }, dataLabels: { name: { show: true }, value: { formatter: (value) => value + '%' } } } },
-                labels: ['Health'],
+        function loadApexCharts() {
+            if (window.ApexCharts) {
+                return Promise.resolve();
+            }
+
+            if (apexChartsPromise) {
+                return apexChartsPromise;
+            }
+
+            apexChartsPromise = new Promise((resolve, reject) => {
+                const script = document.createElement('script');
+                script.src = chartSource;
+                script.async = true;
+                script.dataset.eaesApexcharts = 'true';
+                script.addEventListener('load', () => window.ApexCharts ? resolve() : reject());
+                script.addEventListener('error', reject);
+                document.head.appendChild(script);
             });
+            window.eaesApexChartsPromise = apexChartsPromise;
+
+            return apexChartsPromise;
+        }
+
+        function renderChartsForTab(tab) {
+            const renderGroup = chartGroups[tab];
+            if (!renderGroup || destroyed) {
+                return;
+            }
+
+            markChartsLoading(chartIdsByTab[tab]);
+            loadApexCharts()
+                .then(() => {
+                    if (destroyed) {
+                        return;
+                    }
+
+                    renderGroup();
+                })
+                .catch(() => markChartsUnavailable(chartIdsByTab[tab]));
         }
 
         function refreshChartTheme() {
@@ -809,12 +945,47 @@
             }, false, true));
         }
 
-        document.addEventListener('DOMContentLoaded', initCharts);
-        window.addEventListener('eaes-analytics-tab-change', () => window.setTimeout(() => charts.forEach((chart) => chart.resize()), 60));
-        window.addEventListener('resize', () => charts.forEach((chart) => chart.resize()));
-        window.matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', refreshChartTheme);
-        new MutationObserver(refreshChartTheme).observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
-        new MutationObserver(refreshChartTheme).observe(document.body, { attributes: true, attributeFilter: ['class'] });
+        function resizeCharts() {
+            charts.forEach((chart) => chart.resize());
+        }
+
+        function activeTab() {
+            const requested = window.location.hash ? window.location.hash.substring(1) : new URLSearchParams(window.location.search).get('tab');
+
+            return Object.hasOwn(chartGroups, requested) ? requested : 'overview';
+        }
+
+        function destroy() {
+            if (destroyed) {
+                return;
+            }
+
+            destroyed = true;
+            cleanupCallbacks.splice(0).forEach((cleanup) => cleanup());
+            charts.forEach((chart) => chart.destroy());
+            charts.clear();
+            themeObserver.disconnect();
+            bodyThemeObserver.disconnect();
+
+            if (window.eaesEventAnalyticsRuntime?.destroy === destroy) {
+                delete window.eaesEventAnalyticsRuntime;
+            }
+        }
+
+        const themeObserver = new MutationObserver(refreshChartTheme);
+        const bodyThemeObserver = new MutationObserver(refreshChartTheme);
+        themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+        bodyThemeObserver.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+
+        addListener(window, 'eaes-analytics-tab-change', (event) => {
+            renderChartsForTab(event.detail.tab);
+            window.setTimeout(resizeCharts, 60);
+        });
+        addListener(window, 'resize', resizeCharts);
+        addListener(window.matchMedia('(prefers-color-scheme: dark)'), 'change', refreshChartTheme);
+        addListener(document, 'livewire:navigating', destroy, { once: true });
+
+        window.eaesEventAnalyticsRuntime = { destroy };
     })();
 </script>
 @endpush

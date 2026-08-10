@@ -1,13 +1,15 @@
 <?php
 
-use Illuminate\Foundation\Inspiring;
-use Illuminate\Support\Facades\Artisan;
-use Illuminate\Support\Facades\Schedule;
 use App\Jobs\AnalyzeEventSentimentsJob;
 use App\Models\Event;
 use App\Services\EventLifecycleService;
 use App\Services\EventNotificationService;
 use App\Support\EvaluationWindow;
+use Illuminate\Foundation\Inspiring;
+use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Redis;
+use Illuminate\Support\Facades\Schedule;
+use Predis\Client;
 
 Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
@@ -27,7 +29,7 @@ Artisan::command('eaes:analyze-closed-evaluations', function () {
     $dispatched = 0;
 
     foreach ($events as $event) {
-        if (!EvaluationWindow::isClosed($event)) {
+        if (! EvaluationWindow::isClosed($event)) {
             continue;
         }
 
@@ -77,15 +79,15 @@ Artisan::command('eaes:deployment-check {--profile= : demo or production}', func
         $errors[] = 'APP_DEBUG must be false for demo/production readiness.';
     }
 
-    if (!str_starts_with($appUrl, 'https://')) {
+    if (! str_starts_with($appUrl, 'https://')) {
         $errors[] = 'APP_URL must use https:// for encrypted transport.';
     }
 
-    if (!config('session.secure')) {
+    if (! config('session.secure')) {
         $errors[] = 'SESSION_SECURE_COOKIE must be true.';
     }
 
-    if (!config('session.encrypt')) {
+    if (! config('session.encrypt')) {
         $errors[] = 'SESSION_ENCRYPT must be true.';
     }
 
@@ -101,7 +103,7 @@ Artisan::command('eaes:deployment-check {--profile= : demo or production}', func
         $errors[] = 'Production queue connection must be redis.';
     }
 
-    if (!$isProduction && !in_array($queueConnection, ['database', 'redis'], true)) {
+    if (! $isProduction && ! in_array($queueConnection, ['database', 'redis'], true)) {
         $errors[] = 'Demo queue connection must be database or redis.';
     }
 
@@ -109,20 +111,39 @@ Artisan::command('eaes:deployment-check {--profile= : demo or production}', func
         $errors[] = 'Production cache store must be redis.';
     }
 
-    if (!$isProduction && !in_array($cacheStore, ['database', 'redis', 'file', 'array'], true)) {
+    if (! $isProduction && ! in_array($cacheStore, ['database', 'redis', 'file', 'array'], true)) {
         $errors[] = 'Demo cache store must be database, redis, file, or array.';
     }
 
     if ($queueConnection === 'redis' || $cacheStore === 'redis') {
         $redisClientReady = match ($redisClient) {
-            'predis' => class_exists(\Predis\Client::class),
+            'predis' => class_exists(Client::class),
             'phpredis' => extension_loaded('redis'),
             default => false,
         };
 
-        if (!$redisClientReady) {
+        if (! $redisClientReady) {
             $errors[] = "Redis is configured but REDIS_CLIENT={$redisClient} is not available to PHP.";
+        } else {
+            try {
+                Redis::connection()->ping();
+            } catch (Throwable) {
+                $errors[] = 'Redis connectivity check failed.';
+            }
         }
+    }
+
+    $retryAfter = (int) config("queue.connections.{$queueConnection}.retry_after", 0);
+    if (in_array($queueConnection, ['database', 'redis'], true) && $retryAfter <= 180) {
+        $errors[] = 'Queue retry_after must exceed the longest EAES job timeout of 180 seconds.';
+    }
+
+    if ($isProduction && ! config('services.eaes.queue_worker_managed')) {
+        $errors[] = 'EAES_QUEUE_WORKER_MANAGED must be true when production workers are supervised.';
+    }
+
+    if ($isProduction && ! config('services.eaes.scheduler_managed')) {
+        $errors[] = 'EAES_SCHEDULER_MANAGED must be true when the production scheduler is supervised.';
     }
 
     if (empty($sanctumDomains)) {
@@ -138,7 +159,7 @@ Artisan::command('eaes:deployment-check {--profile= : demo or production}', func
     }
 
     $storageLinkReady = is_link(public_path('storage')) || is_dir(public_path('storage'));
-    if (!$storageLinkReady) {
+    if (! $storageLinkReady) {
         $message = 'Run php artisan storage:link before serving uploaded proposal files.';
         $isProduction ? $errors[] = $message : $warnings[] = $message;
     }
@@ -148,25 +169,28 @@ Artisan::command('eaes:deployment-check {--profile= : demo or production}', func
         $isProduction ? $errors[] = $message : $warnings[] = $message;
     }
 
-    $warnings[] = 'Ensure a queue worker and scheduler are running: php artisan queue:work and php artisan schedule:work.';
+    $warnings[] = 'Use the EAES Supervisor configuration for attendance, default, AI, and scheduler processes.';
 
     foreach ($warnings as $warning) {
-        $this->warn('[warn] ' . $warning);
+        $this->warn('[warn] '.$warning);
     }
 
     foreach ($errors as $error) {
-        $this->error('[fail] ' . $error);
+        $this->error('[fail] '.$error);
     }
 
-    if (!empty($errors)) {
+    if (! empty($errors)) {
         $this->error("Deployment check failed for {$profile} profile.");
+
         return 1;
     }
 
     $this->info("Deployment check passed for {$profile} profile.");
+
     return 0;
 })->purpose('Validate EAES demo/production deployment readiness');
 
 Schedule::command('eaes:analyze-closed-evaluations')->hourly();
 Schedule::command('eaes:update-event-lifecycles')->everyFifteenMinutes();
 Schedule::command('eaes:send-participant-scope-reminders')->dailyAt('08:00');
+Schedule::command('eaes:dispatch-queue-outbox')->everyMinute()->withoutOverlapping()->onOneServer();

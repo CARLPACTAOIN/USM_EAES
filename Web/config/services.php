@@ -46,9 +46,9 @@ return [
     ],
 
     'gemini' => [
-        'api_key'         => env('GEMINI_API_KEY'),
-        'model'           => env('GEMINI_MODEL', 'gemini-1.5-pro'),
-        'fallback_model'  => env('GEMINI_FALLBACK_MODEL', 'gemini-2.0-flash'),
+        'api_key' => env('GEMINI_API_KEY'),
+        'model' => env('GEMINI_MODEL', 'gemini-1.5-pro'),
+        'fallback_model' => env('GEMINI_FALLBACK_MODEL', 'gemini-2.0-flash'),
         'request_timeout' => (int) env('GEMINI_REQUEST_TIMEOUT', 60),
     ],
 
@@ -72,11 +72,29 @@ return [
         'scan_early_checkin_buffer_min' => (int) env('EAES_SCAN_EARLY_CHECKIN_BUFFER_MIN', 60),
         'checkout_grace_period_min' => (int) env('EAES_CHECKOUT_GRACE_PERIOD_MIN', 60),
         'sync_grace_period_hours' => (int) env('EAES_SYNC_GRACE_PERIOD_HOURS', 72),
+        'sentiment_queue_batch_size' => (int) env('EAES_SENTIMENT_QUEUE_BATCH_SIZE', 100),
+        'redis_unavailable_retry_after' => (int) env('EAES_REDIS_UNAVAILABLE_RETRY_AFTER', 30),
+        'queue_health' => [
+            'max_queue_depth' => (int) env('EAES_QUEUE_HEALTH_MAX_QUEUE_DEPTH', 10000),
+            'max_pending_outbox_entries' => (int) env('EAES_QUEUE_HEALTH_MAX_PENDING_OUTBOX_ENTRIES', 1000),
+            'max_outbox_age_seconds' => (int) env('EAES_QUEUE_HEALTH_MAX_OUTBOX_AGE_SECONDS', 600),
+            'max_recent_failed_jobs' => (int) env('EAES_QUEUE_HEALTH_MAX_RECENT_FAILED_JOBS', 0),
+        ],
         'frontend_url' => env('FRONTEND_URL', 'http://localhost:5173'),
         'mobile_deep_link_scheme' => env('EAES_MOBILE_DEEP_LINK_SCHEME', 'eaes'),
         'force_https' => (bool) env('EAES_FORCE_HTTPS', false),
         'security_headers' => (bool) env('EAES_SECURITY_HEADERS', true),
         'dev_login_enabled' => (bool) env('EAES_ENABLE_DEV_LOGIN', false),
+        'queue_worker_managed' => (bool) env('EAES_QUEUE_WORKER_MANAGED', false),
+        'scheduler_managed' => (bool) env('EAES_SCHEDULER_MANAGED', false),
+        'rate_limits' => [
+            'login_per_minute' => (int) env('EAES_RATE_LIMIT_LOGIN_PER_MINUTE', 5),
+            'google_login_per_minute' => (int) env('EAES_RATE_LIMIT_GOOGLE_LOGIN_PER_MINUTE', 10),
+            'authenticated_per_minute' => (int) env('EAES_RATE_LIMIT_AUTHENTICATED_PER_MINUTE', 120),
+            'scanner_sync_per_minute' => (int) env('EAES_RATE_LIMIT_SCANNER_SYNC_PER_MINUTE', 30),
+            'write_per_minute' => (int) env('EAES_RATE_LIMIT_WRITE_PER_MINUTE', 30),
+            'nlp_per_minute' => (int) env('EAES_RATE_LIMIT_NLP_PER_MINUTE', 10),
+        ],
     ],
 
 ];

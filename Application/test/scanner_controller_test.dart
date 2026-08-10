@@ -26,6 +26,7 @@ void main() {
     String Function()? dedupIdFactory,
     DateTime Function()? nowFactory,
     Duration duplicateCooldown = const Duration(seconds: 5),
+    Future<void> Function(Duration)? syncRetryDelay,
   }) {
     return ScannerController(
       localDatabase: localStore ?? FakeLocalStore(),
@@ -36,6 +37,7 @@ void main() {
       dedupIdFactory: dedupIdFactory,
       nowFactory: nowFactory,
       duplicateCooldown: duplicateCooldown,
+      syncRetryDelay: syncRetryDelay,
     );
   }
 
@@ -814,6 +816,35 @@ void main() {
       },
     );
 
+    test('retries a retryable sync response before marking scans failed', () async {
+      final local = FakeLocalStore();
+      final remote = FakeRemoteApi(
+        syncErrors: [
+          const ScannerApiException(
+            'Service coordination is temporarily unavailable.',
+            statusCode: 503,
+            retryAfter: Duration(seconds: 7),
+          ),
+        ],
+      );
+      final retryDelays = <Duration>[];
+      final controller = buildController(
+        localStore: local,
+        remoteApi: remote,
+        syncRetryDelay: (delay) async => retryDelays.add(delay),
+      );
+      await controller.activateSession(session);
+      await controller.recordQr('99-99999', manual: true);
+
+      await controller.syncPending();
+
+      expect(retryDelays, [const Duration(seconds: 7)]);
+      expect(remote.syncedBatches, hasLength(2));
+      expect(controller.pendingCount, 0);
+      expect(controller.failedCount, 0);
+      expect(controller.syncedCount, 1);
+    });
+
     test(
       'auto-wipes roster only after completed event and all scans synced',
       () async {
@@ -938,7 +969,8 @@ class FakeRemoteApi implements ScannerRemoteApi {
     this.timeOutWindowEnd,
     this.eventDays = const [],
     this.validateError,
-  });
+    List<Object> syncErrors = const [],
+  }) : syncErrors = List.of(syncErrors);
 
   final List<RosterStudent> roster;
   final Map<String, dynamic> syncResponse;
@@ -952,6 +984,7 @@ class FakeRemoteApi implements ScannerRemoteApi {
   final String? timeOutWindowEnd;
   final List<EventScheduleDay> eventDays;
   final Object? validateError;
+  final List<Object> syncErrors;
   final List<List<OfflineScan>> syncedBatches = [];
 
   @override
@@ -994,6 +1027,9 @@ class FakeRemoteApi implements ScannerRemoteApi {
     required List<OfflineScan> scans,
   }) async {
     syncedBatches.add(scans);
+    if (syncErrors.isNotEmpty) {
+      throw syncErrors.removeAt(0);
+    }
     return syncResponse;
   }
 }

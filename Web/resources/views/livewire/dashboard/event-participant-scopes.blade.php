@@ -24,6 +24,7 @@
                 $ackTarget = "acknowledgeInvitation('{$scope->id}')";
                 $reviewTarget = "reviewParticipantPpa('{$scope->id}')";
                 $approveTarget = "approveParticipantPpa('{$scope->id}')";
+                $revisionTarget = "requestParticipantPpaRevision('{$scope->id}')";
                 $rejectTarget = "rejectParticipantPpa('{$scope->id}')";
             @endphp
             <div class="rounded-lg border border-(--color-border) bg-(--color-surface-raised) p-3">
@@ -104,7 +105,7 @@
                         @endif
 
                         @if($actions['canFinalize'] ?? false)
-                            <div class="grid gap-2 sm:grid-cols-2">
+                            <div class="grid gap-2 xl:grid-cols-3">
                                 <button type="button"
                                         class="btn btn-sm justify-center"
                                         style="background-color: var(--color-success); color: white;"
@@ -114,10 +115,26 @@
                                     <span wire:loading.remove wire:target="{{ $approveTarget }}">Approve</span>
                                     <span wire:loading wire:target="{{ $approveTarget }}">Approving...</span>
                                 </button>
+                                <form wire:submit="requestParticipantPpaRevision('{{ $scope->id }}')" class="grid gap-2">
+                                    <input type="text"
+                                           class="form-input text-xs @error('reviewRemarks.'.$scope->id) form-input-error @enderror"
+                                           placeholder="Revision note"
+                                           wire:model="reviewRemarks.{{ $scope->id }}">
+                                    @error('reviewRemarks.'.$scope->id)
+                                        <p class="form-error" role="alert">{{ $message }}</p>
+                                    @enderror
+                                    <button type="submit"
+                                            class="btn btn-sm btn-secondary justify-center"
+                                            wire:loading.attr="disabled"
+                                            wire:target="{{ $revisionTarget }}">
+                                        <span wire:loading.remove wire:target="{{ $revisionTarget }}">Request Revision</span>
+                                        <span wire:loading wire:target="{{ $revisionTarget }}">Returning...</span>
+                                    </button>
+                                </form>
                                 <form wire:submit="rejectParticipantPpa('{{ $scope->id }}')" class="grid gap-2">
                                     <input type="text"
                                            class="form-input text-xs @error('reviewRemarks.'.$scope->id) form-input-error @enderror"
-                                           placeholder="Return note"
+                                           placeholder="Rejection note"
                                            wire:model="reviewRemarks.{{ $scope->id }}">
                                     @error('reviewRemarks.'.$scope->id)
                                         <p class="form-error" role="alert">{{ $message }}</p>
@@ -151,13 +168,35 @@
  </section>
 
 @if($canAddScopes)
-    <section class="proposal-modal-section participant-audience-builder">
+    <section class="proposal-modal-section participant-audience-builder"
+             x-data="participantAudienceBuilder({
+                audienceMode: $wire.entangle('audienceMode'),
+                selectedCollegeIds: $wire.entangle('selectedCollegeIds'),
+                selectedOrganizationIds: $wire.entangle('selectedOrganizationIds'),
+                collegeQuery: $wire.entangle('collegeQuery'),
+                organizationQuery: $wire.entangle('organizationQuery'),
+                captureMode: $wire.entangle('captureMode'),
+                ppaRequired: $wire.entangle('ppaRequired'),
+                analyticsRollupEnabled: $wire.entangle('analyticsRollupEnabled'),
+                colleges: @js($collegeOptions->map(fn ($college) => [
+                    'id' => $college->id,
+                    'code' => $college->code,
+                    'name' => $college->name,
+                ])->values()),
+                organizations: @js($organizationOptions->map(fn ($organization) => [
+                    'id' => $organization->id,
+                    'acronym' => $organization->acronym,
+                    'name' => $organization->name,
+                    'college_code' => $organization->college?->code,
+                    'college_name' => $organization->college?->name,
+                ])->values()),
+             })">
         <div class="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
             <div>
                 <h3 class="font-semibold text-sm text-(--color-text-primary)">Add Participant Scope</h3>
                 <p class="text-xs text-(--color-text-tertiary)">Choose who can participate; each selected College or org becomes its own scope.</p>
             </div>
-            <p class="participant-audience-count" aria-live="polite">
+            <p class="participant-audience-count" aria-live="polite" x-text="selectionLabel()">
                 @if($audienceMode === 'all')
                     {{ $selectionCount }} College {{ Str::plural('scope', $selectionCount) }}
                 @elseif($selectionCount === 0)
@@ -172,91 +211,86 @@
             <div class="participant-audience-segments" role="group" aria-label="Audience mode">
                 <button type="button"
                         class="participant-audience-segment {{ $audienceMode === 'all' ? 'is-active' : '' }}"
-                        aria-pressed="{{ $audienceMode === 'all' ? 'true' : 'false' }}"
-                        wire:click="setAudienceMode('all')">
+                        x-bind:class="{ 'is-active': audienceMode === 'all' }"
+                        x-bind:aria-pressed="audienceMode === 'all' ? 'true' : 'false'"
+                        x-on:click="setAudienceMode('all')">
                     All can participate
                 </button>
                 <button type="button"
                         class="participant-audience-segment {{ $audienceMode === 'college' ? 'is-active' : '' }}"
-                        aria-pressed="{{ $audienceMode === 'college' ? 'true' : 'false' }}"
-                        wire:click="setAudienceMode('college')">
+                        x-bind:class="{ 'is-active': audienceMode === 'college' }"
+                        x-bind:aria-pressed="audienceMode === 'college' ? 'true' : 'false'"
+                        x-on:click="setAudienceMode('college')">
                     College
                 </button>
                 <button type="button"
                         class="participant-audience-segment {{ $audienceMode === 'organization' ? 'is-active' : '' }}"
-                        aria-pressed="{{ $audienceMode === 'organization' ? 'true' : 'false' }}"
-                        wire:click="setAudienceMode('organization')">
+                        x-bind:class="{ 'is-active': audienceMode === 'organization' }"
+                        x-bind:aria-pressed="audienceMode === 'organization' ? 'true' : 'false'"
+                        x-on:click="setAudienceMode('organization')">
                     Specific org
                 </button>
             </div>
 
             @error('audienceMode') <p class="form-error" role="alert">{{ $message }}</p> @enderror
 
-            @if($audienceMode === 'all')
-                <div class="participant-audience-panel">
+            <div class="participant-audience-panel" x-show="audienceMode === 'all'" x-cloak>
                     <p class="text-sm font-medium text-(--color-text-primary)">Every College audience will be invited.</p>
                     <p class="mt-1 text-xs text-(--color-text-secondary)">This creates one College participant scope per College so scanner access, PPAs, acknowledgements, and analytics stay separate.</p>
-                </div>
-            @endif
+            </div>
 
-            @if($audienceMode === 'college')
-                <div class="participant-audience-panel">
+            <div class="participant-audience-panel" x-show="audienceMode === 'college'" x-cloak>
                     <label for="scope-college-search-{{ $event->id }}" class="text-xs font-semibold text-(--color-text-secondary)">Find Colleges</label>
                     <input id="scope-college-search-{{ $event->id }}"
                            type="search"
                            class="form-input text-sm mt-1"
                            placeholder="Search College name or code"
-                           wire:model.live.debounce.250ms="collegeQuery">
+                           x-model.debounce.150ms="collegeQuery">
                     @error('selectedCollegeIds') <p class="form-error mt-2" role="alert">{{ $message }}</p> @enderror
                     <div class="participant-audience-list mt-3">
-                        @forelse($collegeOptions as $college)
+                        <template x-for="college in filteredColleges()" :key="college.id">
                             <label class="participant-audience-option">
                                 <input type="checkbox"
-                                       value="{{ $college->id }}"
-                                       wire:model.live="selectedCollegeIds">
+                                       x-bind:value="college.id"
+                                       x-model="selectedCollegeIds">
                                 <span>
-                                    <strong>{{ $college->code }}</strong>
-                                    <small>{{ $college->name }}</small>
+                                    <strong x-text="college.code"></strong>
+                                    <small x-text="college.name"></small>
                                 </span>
                             </label>
-                        @empty
-                            <p class="rounded-lg border border-dashed border-(--color-border) bg-(--color-surface-muted) p-3 text-xs text-(--color-text-tertiary)">No Colleges match the search.</p>
-                        @endforelse
+                        </template>
+                        <p x-show="filteredColleges().length === 0" x-cloak class="rounded-lg border border-dashed border-(--color-border) bg-(--color-surface-muted) p-3 text-xs text-(--color-text-tertiary)">No Colleges match the search.</p>
                     </div>
-                </div>
-            @endif
+            </div>
 
-            @if($audienceMode === 'organization')
-                <div class="participant-audience-panel">
+            <div class="participant-audience-panel" x-show="audienceMode === 'organization'" x-cloak>
                     <label for="scope-org-search-{{ $event->id }}" class="text-xs font-semibold text-(--color-text-secondary)">Find Organizations</label>
                     <input id="scope-org-search-{{ $event->id }}"
                            type="search"
                            class="form-input text-sm mt-1"
                            placeholder="Search org acronym, name, or College"
-                           wire:model.live.debounce.250ms="organizationQuery">
+                           x-model.debounce.150ms="organizationQuery">
                     @error('selectedOrganizationIds') <p class="form-error mt-2" role="alert">{{ $message }}</p> @enderror
                     <div class="participant-audience-list mt-3">
-                        @forelse($organizationOptions as $organization)
+                        <template x-for="organization in filteredOrganizations()" :key="organization.id">
                             <label class="participant-audience-option">
                                 <input type="checkbox"
-                                       value="{{ $organization->id }}"
-                                       wire:model.live="selectedOrganizationIds">
+                                       x-bind:value="organization.id"
+                                       x-model="selectedOrganizationIds">
                                 <span>
-                                    <strong>{{ $organization->acronym ?: $organization->name }}</strong>
-                                    <small>{{ $organization->name }}{{ $organization->college?->code ? ' · ' . $organization->college->code : '' }}</small>
+                                    <strong x-text="organization.acronym || organization.name"></strong>
+                                    <small x-text="organization.name + (organization.college_code ? ' - ' + organization.college_code : '')"></small>
                                 </span>
                             </label>
-                        @empty
-                            <p class="rounded-lg border border-dashed border-(--color-border) bg-(--color-surface-muted) p-3 text-xs text-(--color-text-tertiary)">No organizations match the search.</p>
-                        @endforelse
+                        </template>
+                        <p x-show="filteredOrganizations().length === 0" x-cloak class="rounded-lg border border-dashed border-(--color-border) bg-(--color-surface-muted) p-3 text-xs text-(--color-text-tertiary)">No organizations match the search.</p>
                     </div>
-                </div>
-            @endif
+            </div>
 
             <div class="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] lg:items-end">
                 <div>
                     <label for="scope-capture-{{ $event->id }}" class="text-xs font-semibold text-(--color-text-secondary)">Capture mode</label>
-                    <select id="scope-capture-{{ $event->id }}" wire:model="captureMode" class="form-input form-select text-sm mt-1" required>
+                    <select id="scope-capture-{{ $event->id }}" x-model="captureMode" class="form-input form-select text-sm mt-1" required>
                         <option value="self_scanning">Self scanning</option>
                         <option value="parent_scanning">Parent scanning</option>
                         <option value="delegated_scanning">Delegated scanning</option>
@@ -266,11 +300,11 @@
                 </div>
                 <div class="participant-audience-flags">
                     <label class="inline-flex items-center gap-2">
-                        <input type="checkbox" wire:model="ppaRequired">
+                        <input type="checkbox" x-model="ppaRequired">
                         PPA required
                     </label>
                     <label class="inline-flex items-center gap-2">
-                        <input type="checkbox" wire:model="analyticsRollupEnabled">
+                        <input type="checkbox" x-model="analyticsRollupEnabled">
                         Roll-up
                     </label>
                 </div>
@@ -278,7 +312,7 @@
                         class="btn btn-sm btn-primary"
                         wire:loading.attr="disabled"
                         wire:target="addParticipantScopes">
-                    <span wire:loading.remove wire:target="addParticipantScopes">
+                    <span wire:loading.remove wire:target="addParticipantScopes" x-text="submitLabel()">
                         {{ $selectionCount > 1 ? 'Add ' . $selectionCount . ' scopes' : 'Add Scope' }}
                     </span>
                     <span wire:loading wire:target="addParticipantScopes">Adding...</span>
