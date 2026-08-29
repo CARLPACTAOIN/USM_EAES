@@ -106,7 +106,7 @@
 |---------|--------|------------------|
 | 6.1 Aggregated analytics dashboards | Done | Two-level analytics implemented: (1) full per-event analytics workspace at `/dashboard/events/{event}/analytics` backed by shared page/API metric logic, with overview, attendance drilldown, Program and Year Level demographics, evaluations, sentiment, participant scopes, scanner/sync, and export context; quick modal previews use `/dashboard/events/{event}/analytics/data`; (2) Organization Performance Analytics page supporting program/year-level filtering under each organization (cascade filters: SY, Sem, College, Org, Program, Year Level, Event Type), detailed late/absent/left-early indicators, and a Program Comparison Leaderboard — all scoped by Spatie RBAC. |
 | 6.2 PDF/Excel export engine | Done | Dashboard export routes generate scoped PDF/XLSX attendance and evaluation reports with event metadata, participant scope, PPA hardcopy status, student Program/Year Level columns, validity, ratings, comments, sentiment fields, timestamp, and generated-by user |
-| 6.3 Gawad Parangal metrics | Done | Computes active membership, average attendance rate, eval score averages, and program comparison indicators |
+| 6.3 Gawad Parangal metrics | Done | Web organization analytics and the unchanged Gawad API contract now share `OrganizationAnalyticsService`: completed organizer-owned non-HR eligibility, organizer-scope attendance denominators with legacy fallback, unique active-member counts, pooled numeric evaluation scores, and existing SY/semester/event-type/program/year-level filters are covered by focused PHPUnit consistency and tenant-boundary tests; manual non-system fields remain deferred |
 
 ---
 
