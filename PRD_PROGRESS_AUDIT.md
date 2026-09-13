@@ -2,7 +2,7 @@
 
 **Branch / snapshot:** `main` (local)  
 **PRD source:** `PRD_V1.md` (v2.0 content, filename `PRD_V1.md`)  
-**Last reviewed:** 2026-08-08
+**Last reviewed:** 2026-09-13
 **Backend path:** `Web/` (Laravel 12 backend with UUID schemas)
 
 > This file tracks implementation status only. It does not override `PRD_V1.md`.
@@ -41,10 +41,10 @@
 | Item | Status | Evidence / Notes |
 |------|--------|------------------|
 | Scope: evaluation-focused (no digital semestral accomplishment report) | N/A | Confirmed in PRD §1.2 |
-| PPA digitization | Done | Web dashboard and APIs capture proposal metadata, official PPA softcopy upload, hardcopy/signature status, submit/review/approve/reject, participant-scope PPAs, and account-based scoped scanner assignments |
+| PPA digitization | Done | Web dashboard and APIs capture proposal metadata, official PPA softcopy upload, hardcopy/signature status, externally confirmed venue evidence, submit/review/approve/reject, immutable permit versions, venue amendments, participant-scope PPAs, and account-based scoped scanner assignments |
 | QR attendance + evaluation gate | Done | Sync controllers, EILO background job, pending QR dashboard, and student evaluation gate verified |
 | Offline scanner + sync | Done | Flutter scanner has Google mobile login, assigned-event listing/activation/resume, platform-backed device identity, participation-scope display, mode switching, SQLite repository, camera/manual capture UI, scope-stamped offline scans, API sync client, restart-safe scanner-session snapshots, offline restore after app close, controller tests, scanner-session phase indicators, and assignment-activation token coverage |
-| Event lifecycle + scanner sessions | Done | `events.lifecycle_phase`, `events.event_domain`, `event_participation_scopes`, `event_scanner_assignments`, `scanner_sessions`, assignment/scope-aware hydrate/sync guards, revocation, device binding, idempotent same-device activation resume, cross-device transfer blocking, scan-window validation, scheduled lifecycle updates, and Event Proposals lazy lifecycle refresh implemented |
+| Event lifecycle + scanner sessions | Done | `events.lifecycle_phase`, `events.event_domain`, `event_participation_scopes`, `event_scanner_assignments`, `scanner_sessions`, assignment/scope-aware hydrate/sync guards, revocation, device binding, venue-amendment session revocation, idempotent same-device activation resume, cross-device transfer blocking, scan-window validation, scheduled lifecycle updates, and Event Proposals lazy lifecycle refresh implemented |
 | Swappable Gemini/Ollama NLP Assistant | Done | Container-bound AiServiceInterface supporting Gemini API and OpenAI-compatible Ollama Cloud (with connect & request timeouts, robust error logging, and dynamic UI branding) |
 
 ---
@@ -86,8 +86,8 @@
 
 | Feature | Status | Evidence / Notes |
 |---------|--------|------------------|
-| 2.1 Digital PPA submission | Done | Livewire, web fallback, and API proposal writes share `EventProposalDraftService` for location details, budgets, ordered event days, evaluation snapshots, official proposal softcopy, resolution number, hardcopy/signature status, and organizer-scope synchronization before submission/approval |
-| 2.2 OSA review pipeline | Done | OSA review, approval, request-revision, and rejection status routes completed; returned proposals carry OSA revision remarks, remain scanner-locked, and can be edited/resubmitted by the organizer |
+| 2.1 Digital PPA submission and venue confirmation | Done | Livewire, web fallback, and API proposal writes share `EventProposalDraftService` for draft-safe venue/PPA capture; student-affairs submission uses one server-side guard requiring an active catalog venue or off-campus address, confirming office/date, private evidence, official PPA softcopy, and existing hardcopy requirements. OSA-only venue catalog management, active listing, scoped evidence downloads, structured API fields, audit records, and notifications are implemented; HR and participant-scope PPAs retain their documented exemptions. |
+| 2.2 OSA review and permit versioning | Done | Shared service covers web, Livewire, and API submit/review/approve/revision/reject transitions and repeats the venue gate at approval. Approval creates immutable sequential `event_permit_versions`; eligible owning organizers can start a pre-event amendment that supersedes the active permit, preserves historical files and scanner assignments, revokes active scanner sessions, locks scanning, and requires replacement venue evidence and PPA before OSA can create the next version. |
 | 2.3 Participant PPAs and distributed attendance ownership | Done | `event_participation_scopes` model/migration, organizer attendance scopes, Organized/Participating Events dashboard tabs, in-app invitation notifications/acknowledgements/reminders, participant PPA submit/review/approve/request-revision/reject routes, scope-aware scanner assignment/revocation, runtime hydrate/sync gating, and roll-up analytics implemented |
 | 2.4 HR event domain | Done | `events.event_domain`, HR Admin role/permissions, employee roster models, non-student Google onboarding separation, HR no-PPA event creation, and HR roster hydration path implemented; HR Admin provisioning is not handled through OSA Admin Access |
 | 4.2 Organizer-owned late cutoff | Done | Revised from OSA-owned dual thresholds to one official late-cutoff policy: organizer event cutoff is managed from separate Attendance Rules UI, applies first, locks after event start, and falls back to participant scope cutoffs only when unset; legacy status columns are preserved as compatibility mirrors |
@@ -480,3 +480,8 @@
 - **2026-08-08 (Redis queue resilience and load readiness):**
   - Added a transactional `queue_outbox_entries` handoff for persisted scanner winners, immediate safe dispatch plus scheduled recovery dispatch, `attendance`/`default`/`ai` worker separation, bounded AI job retry/overlap policy, queue health checks, production Redis connectivity checks, and Supervisor worker definitions.
   - Added a local Redis 7 Compose service and a guarded k6 scanner-sync harness for an isolated 20-scanner, 200-record batch workload. The Flutter scanner now honors `Retry-After` and retries transient rate-limit, Redis-coordination, and network sync failures while preserving local scans.
+- **2026-09-13 (venue confirmation and permit amendments):**
+  - Revised PRD Epic 2 around an external-reservation confirmation gate: OSA maintains venue master data and reviews evidence but does not determine availability; reservation calendars, conflict detection, payment, custodian/security accounts, digital signatures, and additional office routing remain out of scope.
+  - Added the UUID venue catalog, private confirmation evidence, shared submission/approval guard, immutable permit versions, scoped evidence/history downloads, structured API responses, and OSA-only `manage-venues` permission with audit and database notifications.
+  - Added the pre-event venue-amendment cycle with reason capture, permit supersession, scanner lock/session revocation, old-file preservation, replacement PPA and confirmation requirements, and sequential approval versions across Livewire, web fallback, and API workflows.
+  - Added valid confirmed-venue factories/demo data and PHPUnit coverage for permissions, drafts, validation, tenant boundaries, rollback cleanup, initial versioning, amendment security, HR exemption, and API parity.

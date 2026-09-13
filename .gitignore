@@ -2,11 +2,6 @@
 Thumbs.db
 .sixth/
 graphify-out/
-dev-orchestrator/.runs/
-dev-orchestrator/.venv/
-dev-orchestrator/.pytest_cache/
-dev-orchestrator/src/*.egg-info/
-dev-orchestrator/**/__pycache__/
 
 # Local Cursor UI/UX skill junctions; source files are tracked under .agents/skills/.
 /.cursor/skills/ui-ux-pro-max/data/

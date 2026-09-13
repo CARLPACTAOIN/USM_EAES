@@ -6,8 +6,9 @@ use App\Models\Event;
 use App\Models\EventParticipationScope;
 use App\Services\AdminScopeService;
 use App\Services\EventNotificationService;
+use App\Services\EventPermitService;
 use App\Services\ParticipationScopeService;
-use App\Support\EventEvaluationForm;
+use DomainException;
 use Livewire\Attributes\Locked;
 use Livewire\Attributes\On;
 use Livewire\Component;
@@ -28,6 +29,8 @@ class EventProposalWorkflow extends Component
     public ?string $errorNotice = null;
 
     public string $reviewRemarks = '';
+
+    public string $amendmentReason = '';
 
     public function mount(string $eventId, bool $isParticipatingWorkspace = false, ?string $primaryParticipantScopeId = null): void
     {
@@ -75,41 +78,20 @@ class EventProposalWorkflow extends Component
         $this->dispatchWorkflowUpdated();
     }
 
-    public function submitProposal(ParticipationScopeService $participationScopes, EventNotificationService $notifications): void
+    public function submitProposal(EventPermitService $permits, EventNotificationService $notifications): void
     {
         $this->resetFeedback();
 
-        abort_unless(auth()->user()?->can('create-proposals'), 403);
-
         $event = $this->event();
         $this->authorizeEventAccess($event);
-        $this->authorizeOrganizerMutation($event);
 
-        if (! in_array($event->status, [Event::STATUS_DRAFT, Event::STATUS_REVISION_REQUESTED], true)) {
-            $this->errorNotice = 'Only draft or revision-requested proposals can be submitted.';
-
-            return;
-        }
-
-        if (! $event->proposal_document_path) {
-            $this->errorNotice = 'Attach the official PPA proposal softcopy before submitting for review.';
+        try {
+            $event = $permits->submit($event, auth()->user());
+        } catch (DomainException $exception) {
+            $this->errorNotice = $exception->getMessage();
 
             return;
         }
-
-        if (! $event->hardcopy_submitted) {
-            $this->errorNotice = 'Confirm hardcopy submission to OSA before submitting for review.';
-
-            return;
-        }
-
-        $event->update(['status' => Event::STATUS_SUBMITTED]);
-        $participationScopes->ensureOrganizerScope($event)->update([
-            'ppa_status' => EventParticipationScope::PPA_SUBMITTED,
-            'submitted_by' => auth()->id(),
-            'submitted_at' => now(),
-            'review_remarks' => null,
-        ]);
 
         $notifications->notifyPendingInvitationsForEvent(
             $event->fresh(['organization', 'participationScopes.organization', 'participationScopes.delegatedOrganization'])
@@ -119,123 +101,67 @@ class EventProposalWorkflow extends Component
         $this->dispatchWorkflowUpdated();
     }
 
-    public function startReview(ParticipationScopeService $participationScopes): void
+    public function startReview(EventPermitService $permits): void
     {
         $this->resetFeedback();
-        $this->authorizeOsa();
-
-        $event = $this->event();
-
-        if ($event->status !== Event::STATUS_SUBMITTED) {
-            $this->errorNotice = 'Only submitted proposals can be reviewed.';
+        try {
+            $permits->startReview($this->event(), auth()->user());
+        } catch (DomainException $exception) {
+            $this->errorNotice = $exception->getMessage();
 
             return;
         }
-
-        $event->update(['status' => Event::STATUS_UNDER_REVIEW]);
-        $participationScopes->ensureOrganizerScope($event)->update([
-            'ppa_status' => EventParticipationScope::PPA_UNDER_REVIEW,
-            'reviewed_by' => auth()->id(),
-            'reviewed_at' => now(),
-        ]);
 
         $this->notice = 'Proposal is now under review.';
         $this->dispatchWorkflowUpdated();
     }
 
-    public function approveProposal(ParticipationScopeService $participationScopes): void
+    public function approveProposal(EventPermitService $permits): void
     {
         $this->resetFeedback();
-        $this->authorizeOsa();
-
-        $event = $this->event();
-
-        if (! in_array($event->status, [Event::STATUS_SUBMITTED, Event::STATUS_UNDER_REVIEW], true)) {
-            $this->errorNotice = 'Proposal must be submitted or under review to approve.';
+        try {
+            $permits->approve($this->event(), auth()->user());
+        } catch (DomainException $exception) {
+            $this->errorNotice = $exception->getMessage();
 
             return;
         }
-
-        if (! $event->proposal_document_path || ! $event->hardcopy_submitted) {
-            $this->errorNotice = 'Proposal softcopy and hardcopy submission must be recorded before approval.';
-
-            return;
-        }
-
-        if (! EventEvaluationForm::hasLockedForm($event)) {
-            $this->errorNotice = 'A locked evaluation form with at least one question is required before approval.';
-
-            return;
-        }
-
-        $event->update(['status' => Event::STATUS_APPROVED]);
-        $participationScopes->ensureOrganizerScope($event->fresh())->update([
-            'ppa_status' => EventParticipationScope::PPA_APPROVED,
-            'reviewed_by' => auth()->id(),
-            'reviewed_at' => now(),
-            'approved_at' => now(),
-            'review_remarks' => null,
-        ]);
 
         $this->notice = 'Event proposal approved. Scanning is now unlocked.';
         $this->dispatchWorkflowUpdated();
     }
 
-    public function rejectProposal(ParticipationScopeService $participationScopes): void
+    public function rejectProposal(EventPermitService $permits): void
     {
         $this->resetFeedback();
-        $this->authorizeOsa();
-
-        $event = $this->event();
-
-        if (! in_array($event->status, [Event::STATUS_SUBMITTED, Event::STATUS_UNDER_REVIEW], true)) {
-            $this->errorNotice = 'Proposal must be submitted or under review to reject.';
+        try {
+            $permits->reject($this->event(), auth()->user());
+        } catch (DomainException $exception) {
+            $this->errorNotice = $exception->getMessage();
 
             return;
         }
-
-        $event->update(['status' => Event::STATUS_REJECTED]);
-        $participationScopes->ensureOrganizerScope($event)->update([
-            'ppa_status' => EventParticipationScope::PPA_REJECTED,
-            'reviewed_by' => auth()->id(),
-            'reviewed_at' => now(),
-        ]);
 
         $this->notice = 'Event proposal rejected.';
         $this->dispatchWorkflowUpdated();
     }
 
-    public function requestRevision(ParticipationScopeService $participationScopes, EventNotificationService $notifications): void
+    public function requestRevision(EventPermitService $permits): void
     {
         $this->resetFeedback();
-        $this->authorizeOsa();
-
         $this->validate([
             'reviewRemarks' => ['required', 'string', 'max:1000'],
         ], [], [
             'reviewRemarks' => 'revision note',
         ]);
 
-        $event = $this->event();
-
-        if (! in_array($event->status, [Event::STATUS_SUBMITTED, Event::STATUS_UNDER_REVIEW], true)) {
-            $this->errorNotice = 'Proposal must be submitted or under review to request revision.';
+        try {
+            $permits->requestRevision($this->event(), auth()->user(), $this->reviewRemarks);
+        } catch (DomainException $exception) {
+            $this->errorNotice = $exception->getMessage();
 
             return;
         }
-
-        $event->update(['status' => Event::STATUS_REVISION_REQUESTED]);
-        $organizerScope = $participationScopes->ensureOrganizerScope($event);
-        $organizerScope->update([
-            'ppa_status' => EventParticipationScope::PPA_REVISION_REQUESTED,
-            'reviewed_by' => auth()->id(),
-            'reviewed_at' => now(),
-            'review_remarks' => trim($this->reviewRemarks),
-        ]);
-
-        $notifications->notifyProposalRevisionRequested(
-            $organizerScope->fresh(['event.organization', 'organization', 'delegatedOrganization'])
-        );
 
         $this->reviewRemarks = '';
         $this->notice = 'Event proposal returned for revision.';
@@ -264,6 +190,26 @@ class EventProposalWorkflow extends Component
         $this->dispatchWorkflowUpdated();
     }
 
+    public function startVenueAmendment(EventPermitService $permits): void
+    {
+        $this->resetFeedback();
+        $this->validate([
+            'amendmentReason' => ['required', 'string', 'max:1000'],
+        ], [], ['amendmentReason' => 'amendment reason']);
+
+        try {
+            $permits->beginVenueAmendment($this->event(), auth()->user(), $this->amendmentReason);
+        } catch (DomainException $exception) {
+            $this->errorNotice = $exception->getMessage();
+
+            return;
+        }
+
+        $this->amendmentReason = '';
+        $this->notice = 'Venue amendment started. Scanning is locked until OSA approves the replacement permit.';
+        $this->dispatchWorkflowUpdated();
+    }
+
     public function render()
     {
         return view('livewire.dashboard.event-proposal-workflow', [
@@ -282,7 +228,7 @@ class EventProposalWorkflow extends Component
 
     private function eventForDisplay(): Event
     {
-        return Event::with(['participationScopes'])->findOrFail($this->eventId);
+        return Event::with(['participationScopes', 'venue', 'permitVersions.approver'])->findOrFail($this->eventId);
     }
 
     private function authorizeOsa(): void

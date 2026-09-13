@@ -6,6 +6,7 @@ use App\Models\Event;
 use App\Models\EventDay;
 use App\Models\Organization;
 use App\Models\User;
+use App\Models\Venue;
 use App\Services\AdminScopeService;
 use App\Services\EventProposalDraftService;
 use App\Support\AdminScope;
@@ -33,6 +34,9 @@ class EventProposalCreate extends Component
     #[Locked]
     public ?string $currentProposalDocumentName = null;
 
+    #[Locked]
+    public ?string $currentVenueConfirmationDocumentName = null;
+
     public ?string $organizerId = null;
 
     public string $title = '';
@@ -48,6 +52,16 @@ class EventProposalCreate extends Component
     public string $locationType = 'on-campus';
 
     public string $locationDetails = '';
+
+    public string $venueId = '';
+
+    public string $venueConfirmationOffice = '';
+
+    public string $venueConfirmationDate = '';
+
+    public string $venueConfirmationReferenceNumber = '';
+
+    public $venueConfirmationDocument = null;
 
     public string $implementingOffice = '';
 
@@ -91,6 +105,7 @@ class EventProposalCreate extends Component
             $this->authorizeEditableEvent($event);
             $this->hydrateFromEvent($event);
             $this->currentProposalDocumentName = $event->proposal_document_original_name;
+            $this->currentVenueConfirmationDocumentName = $event->venue_confirmation_document_original_name;
 
             return;
         }
@@ -244,14 +259,9 @@ class EventProposalCreate extends Component
         }
 
         $isHrEvent = Organization::whereKey($validated['organization_id'])->value('type') === 'hr_unit';
-        if (! $isHrEvent && ! $this->proposalDocument) {
-            $this->addError('proposalDocument', 'Attach the official PPA proposal softcopy before saving this event.');
-
-            return;
-        }
 
         try {
-            $proposalDrafts->create($user, $validated, $this->proposalDocument);
+            $proposalDrafts->create($user, $validated, $this->proposalDocument, $this->venueConfirmationDocument);
         } catch (DomainException $exception) {
             $this->errorNotice = $exception->getMessage();
 
@@ -287,14 +297,9 @@ class EventProposalCreate extends Component
         }
 
         $isHrEvent = $organization->type === 'hr_unit';
-        if (! $isHrEvent && ! $event->proposal_document_path && ! $this->proposalDocument) {
-            $this->addError('proposalDocument', 'Attach the official PPA proposal softcopy before saving this event.');
-
-            return;
-        }
 
         try {
-            $event = $proposalDrafts->update($event, auth()->user(), $validated, $this->proposalDocument);
+            $event = $proposalDrafts->update($event, auth()->user(), $validated, $this->proposalDocument, $this->venueConfirmationDocument);
         } catch (DomainException $exception) {
             $this->errorNotice = $exception->getMessage();
 
@@ -318,6 +323,9 @@ class EventProposalCreate extends Component
             'isOsaCreator' => ! $this->editing && (bool) auth()->user()?->hasRole('Super Admin (OSA)'),
             'editing' => $this->editing,
             'currentProposalDocumentName' => $this->currentProposalDocumentName,
+            'currentVenueConfirmationDocumentName' => $this->currentVenueConfirmationDocumentName,
+            'activeVenues' => Venue::active()->with('college')->orderBy('name')->get(),
+            'readinessItems' => $this->readinessItems(),
         ]);
     }
 
@@ -332,6 +340,11 @@ class EventProposalCreate extends Component
             'endDate' => ['required', 'date', 'after_or_equal:startDate'],
             'locationType' => ['required', 'string', 'in:on-campus,off-campus'],
             'locationDetails' => ['nullable', 'string'],
+            'venueId' => ['nullable', 'uuid', 'exists:venues,id'],
+            'venueConfirmationOffice' => ['nullable', 'string', 'max:255'],
+            'venueConfirmationDate' => ['nullable', 'date', 'before_or_equal:today'],
+            'venueConfirmationReferenceNumber' => ['nullable', 'string', 'max:255'],
+            'venueConfirmationDocument' => ['nullable', 'file', 'mimes:pdf,doc,docx,jpg,jpeg,png', 'max:10240'],
             'implementingOffice' => ['nullable', 'string', 'max:255'],
             'collaboratingOffice' => ['nullable', 'string', 'max:255'],
             'targetParticipants' => ['nullable', 'string', 'max:1000'],
@@ -375,6 +388,10 @@ class EventProposalCreate extends Component
             'end_date' => $this->endDate,
             'location_type' => $this->locationType,
             'location_details' => $this->blankToNull($this->locationDetails),
+            'venue_id' => $this->blankToNull($this->venueId),
+            'venue_confirmation_office' => $this->blankToNull($this->venueConfirmationOffice),
+            'venue_confirmation_date' => $this->blankToNull($this->venueConfirmationDate),
+            'venue_confirmation_reference_number' => $this->blankToNull($this->venueConfirmationReferenceNumber),
             'target_demographics' => [
                 'implementing_office' => $this->blankToNull($this->implementingOffice),
                 'collaborating_office' => $this->blankToNull($this->collaboratingOffice),
@@ -454,6 +471,10 @@ class EventProposalCreate extends Component
         $this->endDate = $event->end_date?->toDateString() ?? '';
         $this->locationType = (string) ($event->location_type ?: 'on-campus');
         $this->locationDetails = (string) ($event->location_details ?? '');
+        $this->venueId = (string) ($event->venue_id ?? '');
+        $this->venueConfirmationOffice = (string) ($event->venue_confirmation_office ?? '');
+        $this->venueConfirmationDate = $event->venue_confirmation_date?->toDateString() ?? '';
+        $this->venueConfirmationReferenceNumber = (string) ($event->venue_confirmation_reference_number ?? '');
         $this->implementingOffice = (string) ($target['implementing_office'] ?? '');
         $this->collaboratingOffice = (string) ($target['collaborating_office'] ?? '');
         $this->targetParticipants = (string) ($target['target_participants'] ?? '');
@@ -534,6 +555,11 @@ class EventProposalCreate extends Component
             'endDate' => 'end date',
             'locationType' => 'location type',
             'locationDetails' => 'location details',
+            'venueId' => 'on-campus venue',
+            'venueConfirmationOffice' => 'confirming office',
+            'venueConfirmationDate' => 'confirmation date',
+            'venueConfirmationReferenceNumber' => 'confirmation reference number',
+            'venueConfirmationDocument' => 'venue confirmation evidence',
             'implementingOffice' => 'implementing office',
             'collaboratingOffice' => 'collaborating office',
             'targetParticipants' => 'target participants',
@@ -584,6 +610,10 @@ class EventProposalCreate extends Component
         $this->endDate = (string) data_get($old, 'end_date', '');
         $this->locationType = (string) data_get($old, 'location_type', 'on-campus');
         $this->locationDetails = (string) data_get($old, 'location_details', '');
+        $this->venueId = (string) data_get($old, 'venue_id', '');
+        $this->venueConfirmationOffice = (string) data_get($old, 'venue_confirmation_office', '');
+        $this->venueConfirmationDate = (string) data_get($old, 'venue_confirmation_date', '');
+        $this->venueConfirmationReferenceNumber = (string) data_get($old, 'venue_confirmation_reference_number', '');
         $this->implementingOffice = (string) data_get($old, 'implementing_office', '');
         $this->collaboratingOffice = (string) data_get($old, 'collaborating_office', '');
         $this->targetParticipants = (string) data_get($old, 'target_participants', '');
@@ -722,5 +752,20 @@ class EventProposalCreate extends Component
         } catch (Throwable) {
             return false;
         }
+    }
+
+    /** @return array<string, bool> */
+    private function readinessItems(): array
+    {
+        return [
+            'Venue selected or described' => $this->locationType === 'on-campus'
+                ? filled($this->venueId)
+                : filled($this->locationDetails),
+            'Confirming office recorded' => filled($this->venueConfirmationOffice),
+            'Confirmation date recorded' => filled($this->venueConfirmationDate),
+            'Confirmation evidence attached' => filled($this->venueConfirmationDocument) || filled($this->currentVenueConfirmationDocumentName),
+            'Official PPA softcopy attached' => filled($this->proposalDocument) || filled($this->currentProposalDocumentName),
+            'Hardcopy submission confirmed' => $this->hardcopySubmitted,
+        ];
     }
 }

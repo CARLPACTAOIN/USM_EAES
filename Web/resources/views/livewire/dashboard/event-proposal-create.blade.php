@@ -211,24 +211,96 @@
 
                 <div>
                     <label for="livewire-location-type" class="form-label">Location Type <span class="text-(--color-destructive)">*</span></label>
-                    <select id="livewire-location-type" name="location_type" class="form-input form-select @error('locationType') form-input-error @enderror" required wire:model="locationType">
+                    <select id="livewire-location-type" name="location_type" class="form-input form-select @error('locationType') form-input-error @enderror" required wire:model.live="locationType">
                         <option value="on-campus" @selected($locationType === 'on-campus')>On-Campus</option>
                         <option value="off-campus" @selected($locationType === 'off-campus')>Off-Campus</option>
                     </select>
                     @error('locationType') <p class="form-error" role="alert">{{ $message }}</p> @enderror
                 </div>
-                <div>
-                    <label for="livewire-location-details" class="form-label">Location Details</label>
-                    <input type="text" id="livewire-location-details" name="location_details" class="form-input @error('locationDetails') form-input-error @enderror"
-                           placeholder="e.g. USM Gymnasium" value="{{ $locationDetails }}" wire:model="locationDetails">
-                    @error('locationDetails') <p class="form-error" role="alert">{{ $message }}</p> @enderror
-                </div>
+                @if($locationType === 'on-campus')
+                    <div>
+                        <label for="livewire-venue-id" class="form-label">Confirmed Campus Venue</label>
+                        <select id="livewire-venue-id" name="venue_id" class="form-input form-select @error('venueId') form-input-error @enderror" wire:model="venueId">
+                            <option value="">Select after external confirmation</option>
+                            @foreach($activeVenues as $venue)
+                                <option value="{{ $venue->id }}">{{ $venue->name }} — {{ $venue->campus_location }} ({{ $venue->managing_office }})</option>
+                            @endforeach
+                        </select>
+                        <p class="form-helper">Contact the listed managing office outside EAES, then record the confirmation below.</p>
+                        @error('venueId') <p class="form-error" role="alert">{{ $message }}</p> @enderror
+                    </div>
+                @else
+                    <div>
+                        <label for="livewire-location-details" class="form-label">Off-Campus Venue Name and Address</label>
+                        <input type="text" id="livewire-location-details" name="location_details" class="form-input @error('locationDetails') form-input-error @enderror"
+                               placeholder="Venue name, street, municipality" value="{{ $locationDetails }}" wire:model="locationDetails">
+                        @error('locationDetails') <p class="form-error" role="alert">{{ $message }}</p> @enderror
+                    </div>
+                @endif
             </div>
         </fieldset>
 
         <fieldset class="proposal-modal-section">
             <legend class="proposal-section-title">
                 <span class="proposal-section-step">3</span>
+                Venue confirmation
+            </legend>
+
+            <div class="proposal-grid">
+                <div>
+                    <label for="livewire-confirmation-office" class="form-label">Confirming Office</label>
+                    <input type="text" id="livewire-confirmation-office" name="venue_confirmation_office"
+                           class="form-input @error('venueConfirmationOffice') form-input-error @enderror"
+                           placeholder="Office that confirmed the reservation" maxlength="255"
+                           value="{{ $venueConfirmationOffice }}" wire:model="venueConfirmationOffice">
+                    @error('venueConfirmationOffice') <p class="form-error" role="alert">{{ $message }}</p> @enderror
+                </div>
+                <div>
+                    <label for="livewire-confirmation-date" class="form-label">External Confirmation Date</label>
+                    <input type="date" id="livewire-confirmation-date" name="venue_confirmation_date"
+                           max="{{ today()->toDateString() }}"
+                           class="form-input @error('venueConfirmationDate') form-input-error @enderror"
+                           value="{{ $venueConfirmationDate }}" wire:model="venueConfirmationDate">
+                    @error('venueConfirmationDate') <p class="form-error" role="alert">{{ $message }}</p> @enderror
+                </div>
+                <div class="proposal-grid-full">
+                    <label for="livewire-confirmation-reference" class="form-label">Confirmation Reference Number</label>
+                    <input type="text" id="livewire-confirmation-reference" name="venue_confirmation_reference_number"
+                           class="form-input @error('venueConfirmationReferenceNumber') form-input-error @enderror"
+                           placeholder="Optional memo, email, or transaction reference" maxlength="255"
+                           value="{{ $venueConfirmationReferenceNumber }}" wire:model="venueConfirmationReferenceNumber">
+                    @error('venueConfirmationReferenceNumber') <p class="form-error" role="alert">{{ $message }}</p> @enderror
+                </div>
+                <div class="proposal-grid-full">
+                    <div class="proposal-file-box">
+                        <div>
+                            <label for="livewire-confirmation-document" class="form-label">Confirmation Evidence</label>
+                            <input type="file" id="livewire-confirmation-document" name="venue_confirmation_document"
+                                   class="form-input @error('venueConfirmationDocument') form-input-error @enderror"
+                                   accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
+                                   wire:model="venueConfirmationDocument">
+                            <p class="form-helper">PDF, DOC, DOCX, JPG, or PNG up to 10 MB. @if($currentVenueConfirmationDocumentName) Current: {{ $currentVenueConfirmationDocumentName }}. @endif</p>
+                            <p wire:loading wire:target="venueConfirmationDocument" class="form-helper">Uploading evidence...</p>
+                            @error('venueConfirmationDocument') <p class="form-error" role="alert">{{ $message }}</p> @enderror
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="proposal-question-preview" aria-live="polite" aria-label="Submission readiness">
+                @foreach($readinessItems as $label => $complete)
+                    <div class="proposal-question-preview-item">
+                        <span class="proposal-question-preview-index">{{ $complete ? '✓' : '•' }}</span>
+                        <span>{{ $label }}</span>
+                    </div>
+                @endforeach
+            </div>
+            <p class="form-helper">You may save an incomplete draft. Every item above is required before submission to OSA.</p>
+        </fieldset>
+
+        <fieldset class="proposal-modal-section">
+            <legend class="proposal-section-title">
+                <span class="proposal-section-step">4</span>
                 Offices, participants, and budget
             </legend>
 
@@ -270,7 +342,7 @@
 
         <fieldset class="proposal-modal-section">
             <legend class="proposal-section-title">
-                <span class="proposal-section-step">4</span>
+                <span class="proposal-section-step">5</span>
                 Official PPA packet
             </legend>
 
@@ -309,7 +381,7 @@
 
         <fieldset class="proposal-modal-section">
             <legend class="proposal-section-title">
-                <span class="proposal-section-step">5</span>
+                <span class="proposal-section-step">6</span>
                 OSA hardcopy status
             </legend>
 
@@ -340,7 +412,7 @@
 
         <fieldset class="proposal-modal-section">
             <legend class="proposal-section-title">
-                <span class="proposal-section-step">6</span>
+                <span class="proposal-section-step">7</span>
                 Evaluation form
             </legend>
             @php($evaluationEditorOpen = $errors->has('evaluationQuestions') || $errors->has('evaluationQuestions.*.label') || $errors->has('evaluationQuestions.*.description'))

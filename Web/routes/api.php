@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\EventProposalController;
 use App\Http\Controllers\Api\NlpQueryController;
 use App\Http\Controllers\Api\PendingStudentLinkController;
 use App\Http\Controllers\Api\ScannerAssignmentController;
+use App\Http\Controllers\Api\VenueController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -31,6 +32,7 @@ Route::prefix('v1')->group(function () {
 
         // Event Proposals (PPA)
         Route::get('/events', [EventProposalController::class, 'index']);
+        Route::get('/venues', [VenueController::class, 'index']);
         Route::post('/events', [EventProposalController::class, 'store'])->middleware(['tenant.scope:create-proposals', 'throttle:api-write']);
         Route::post('/events/{event}/submit', [EventProposalController::class, 'submit'])->middleware(['tenant.scope:create-proposals', 'throttle:api-write']);
         Route::post('/events/{event}/review', [EventProposalController::class, 'startReview'])->middleware(['tenant.scope:approve-proposals', 'throttle:api-write']);
@@ -39,6 +41,10 @@ Route::prefix('v1')->group(function () {
         Route::post('/events/{event}/reject', [EventProposalController::class, 'reject'])->middleware(['tenant.scope:approve-proposals', 'throttle:api-write']);
         Route::patch('/events/{event}', [EventProposalController::class, 'update'])->middleware(['tenant.scope:create-proposals', 'throttle:api-write']);
         Route::post('/events/{event}/link', [EventProposalController::class, 'linkSubEvent'])->middleware(['tenant.scope:create-proposals', 'throttle:api-write']);
+        Route::post('/events/{event}/venue-amendment', [EventProposalController::class, 'startVenueAmendment'])->middleware(['tenant.scope:create-proposals', 'throttle:api-write']);
+        Route::get('/events/{event}/venue-evidence', [VenueController::class, 'evidence']);
+        Route::get('/events/{event}/permit-history', [VenueController::class, 'history']);
+        Route::get('/events/{event}/permit-history/{permitVersion}/evidence', [VenueController::class, 'versionEvidence']);
 
         // Attendance Hydration and Synchronization
         Route::get('/events/{event}/hydrate', [AttendanceSyncController::class, 'hydrate'])->middleware('tenant.scope:scan-qr-codes');

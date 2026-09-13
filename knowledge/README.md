@@ -21,13 +21,9 @@ This vault is a curated, human-facing architecture map. It does not replace Grap
 
 ## Regenerate
 
-From the repository root:
+This vault was generated from Graphify output and repository documentation. The previous local regeneration script has been removed with the dev orchestrator package.
 
-```powershell
-python dev-orchestrator/sync_knowledge.py
-```
-
-The script is deterministic and preserves manually maintained content outside generated markers:
+Generated content is kept between these markers:
 
 ```text
 <!-- BEGIN GENERATED:eaes-knowledge -->

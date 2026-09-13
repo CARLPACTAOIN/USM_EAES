@@ -19,6 +19,7 @@ use App\Models\RawScan;
 use App\Models\ScannerSession;
 use App\Models\University;
 use App\Models\User;
+use App\Models\Venue;
 use App\Services\AdminAssignmentService;
 use App\Services\Contracts\AiServiceInterface;
 use App\Services\EventAnalyticsCache;
@@ -330,6 +331,12 @@ class UsmEaesTest extends TestCase
         ])->assertStatus(200);
 
         $token = $loginResponse->json('token');
+        $venue = Venue::create([
+            'name' => 'University Auditorium',
+            'campus_location' => 'Main Campus',
+            'managing_office' => 'Physical Plant and Facilities Office',
+            'is_active' => true,
+        ]);
 
         $createResponse = $this->withHeaders(['Authorization' => 'Bearer '.$token])
             ->post('/api/v1/events', [
@@ -338,7 +345,11 @@ class UsmEaesTest extends TestCase
                 'start_date' => Carbon::today()->toDateString(),
                 'end_date' => Carbon::today()->toDateString(),
                 'location_type' => 'on-campus',
-                'location_details' => 'University Auditorium',
+                'venue_id' => $venue->id,
+                'venue_confirmation_office' => 'Physical Plant and Facilities Office',
+                'venue_confirmation_date' => Carbon::today()->toDateString(),
+                'venue_confirmation_reference' => 'PPFO-2026-001',
+                'venue_confirmation_document' => UploadedFile::fake()->create('venue-confirmation.pdf', 128, 'application/pdf'),
                 'target_demographics' => ['all_students' => true],
                 'budget_allocations' => ['program_materials' => 10000],
                 'resolution_number' => 'USG-2026-001',
@@ -364,6 +375,8 @@ class UsmEaesTest extends TestCase
             'title' => 'University General Assembly',
             'proposal_category' => 'activity',
             'proposal_document_original_name' => 'usg-assembly.docx',
+            'venue_id' => $venue->id,
+            'venue_confirmation_document_original_name' => 'venue-confirmation.pdf',
             'resolution_number' => 'USG-2026-001',
             'hardcopy_submitted' => true,
             'head_organization_signed' => true,
@@ -427,7 +440,7 @@ class UsmEaesTest extends TestCase
             ->assertStatus(403);
     }
 
-    public function test_student_affairs_api_enforces_document_parent_and_tenant_rules(): void
+    public function test_student_affairs_api_allows_incomplete_drafts_and_enforces_parent_and_tenant_rules(): void
     {
         Storage::fake('local');
 
@@ -453,10 +466,17 @@ class UsmEaesTest extends TestCase
             ->assertStatus(403)
             ->assertJsonPath('message', 'Access denied. Restricted to your assigned admin boundary.');
 
-        $this->withHeaders($headers)
+        $incompleteDraft = $this->withHeaders($headers)
             ->postJson('/api/v1/events', $this->apiProposalPayload('Missing Document Proposal'))
-            ->assertStatus(422)
-            ->assertJsonPath('message', 'Attach the official PPA proposal softcopy before saving this event.');
+            ->assertCreated()
+            ->assertJsonPath('event.proposal_document_original_name', null)
+            ->assertJsonPath('event.venue_confirmation.evidence_available', false);
+
+        $this->assertDatabaseHas('events', [
+            'id' => $incompleteDraft->json('event.id'),
+            'status' => Event::STATUS_DRAFT,
+            'proposal_document_path' => null,
+        ]);
 
         $invalidParentOrganization = Organization::create([
             'college_id' => $college->id,
@@ -494,8 +514,9 @@ class UsmEaesTest extends TestCase
 
         $this->withHeaders($headers)
             ->patchJson("/api/v1/events/{$legacyEvent->id}", $this->apiProposalPayload('Legacy Proposal Updated'))
-            ->assertStatus(422)
-            ->assertJsonPath('message', 'Attach the official PPA proposal softcopy before saving this event.');
+            ->assertOk()
+            ->assertJsonPath('event.title', 'Legacy Proposal Updated')
+            ->assertJsonPath('event.proposal_document_original_name', null);
 
         $otherOrganization = Organization::create([
             'college_id' => $college->id,

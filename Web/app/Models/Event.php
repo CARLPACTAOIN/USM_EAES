@@ -5,6 +5,9 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Event extends Model
 {
@@ -35,7 +38,15 @@ class Event extends Model
         'start_date',
         'end_date',
         'location_type',
+        'venue_id',
         'location_details',
+        'venue_confirmation_office',
+        'venue_confirmation_date',
+        'venue_confirmation_reference_number',
+        'venue_confirmation_document_path',
+        'venue_confirmation_document_original_name',
+        'permit_version',
+        'pending_venue_amendment_reason',
         'target_demographics',
         'budget_allocations',
         'proposal_document_path',
@@ -56,6 +67,8 @@ class Event extends Model
     protected $casts = [
         'start_date' => 'date',
         'end_date' => 'date',
+        'venue_confirmation_date' => 'date',
+        'permit_version' => 'integer',
         'target_demographics' => 'array',
         'budget_allocations' => 'array',
         'hardcopy_submitted' => 'boolean',
@@ -72,6 +85,28 @@ class Event extends Model
     public function organization()
     {
         return $this->belongsTo(Organization::class);
+    }
+
+    public function venue(): BelongsTo
+    {
+        return $this->belongsTo(Venue::class);
+    }
+
+    public function permitVersions(): HasMany
+    {
+        return $this->hasMany(EventPermitVersion::class)->orderByDesc('version_number');
+    }
+
+    public function currentPermitVersion(): HasOne
+    {
+        return $this->hasOne(EventPermitVersion::class)
+            ->whereNull('superseded_at')
+            ->latestOfMany('version_number');
+    }
+
+    public function requiresVenueConfirmation(): bool
+    {
+        return $this->event_domain !== 'hr';
     }
 
     public function parentEvent()

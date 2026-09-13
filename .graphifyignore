@@ -7,8 +7,6 @@ knowledge/
 .vscode/
 .agents/
 
-dev-orchestrator/
-
 Web/vendor/
 Web/node_modules/
 Web/storage/

@@ -173,11 +173,12 @@ DB::transaction(function () use ($eventId, $studentIds) {
 
 ### **Epic 2: Event Proposal & Permit System (PPA)**
 
-* **Feature 2.1 \- Digital PPA Submission:** Society, USG, LSG, non-academic organization, academic unit, and administrative office admins construct digital proposals featuring all fields from the official paper forms, including budget allocations, location classifications (on-campus vs. off-campus), and target demographics.  
-* **Feature 2.2 \- OSA Proposal Review Pipeline:** A central dashboard allowing OSA Directors to approve, reject, or request revision on PPAs. Revision requests return the proposal to the organizer with OSA remarks for correction and resubmission, while rejection is treated as a final denial unless reopened through an approved administrative exception. The scanner interface for any event remains locked until the proposal status transitions to Approved.
-* **Feature 2.3 \- Multi-Organization Event Linking and Participant PPAs:** Allows USG/LSG/academic-unit/office organizers to list a parent event and invite sub-organizational PPAs as participant scopes under a master permit. Each `event_participation_scope` records organizer vs participant role, participant type, PPA status, capture mode, and roll-up analytics eligibility. The organizing organization is always represented by the organizer attendance scope and is automatically included in its own event audience; it must not submit a duplicate participant PPA for the same event. The Events dashboard separates **Organized Events** from **Participating Events** so invited organizations can find submitted parent events, submit or resubmit only their own participant PPA, and manage scanners only for their own approved scope. Organizer drafts remain private until the parent proposal is submitted. Participant scanners cannot be assigned, activated, hydrated, synced, or counted as official analytics participants until their participant PPA is approved or marked not required.
+* **Feature 2.1 \- Digital PPA Submission and Venue Confirmation:** Society, USG, LSG, non-academic organization, academic unit, and administrative office admins construct digital proposals featuring all fields from the official paper forms, including budget allocations, location classifications (on-campus vs. off-campus), and target demographics. Venue reservation remains an external process. Before submitting an organizer PPA for OSA review, the organizer records the externally confirmed venue, confirming office, non-future confirmation date, optional reference number, and private evidence file (PDF, DOC, DOCX, JPG, JPEG, or PNG up to 10 MB). On-campus proposals select an active OSA-maintained venue catalog entry; off-campus proposals provide a venue name/address and must not reference the campus catalog. Incomplete confirmation and PPA packets may be saved as drafts but cannot be submitted. OSA maintains venue master data and reviews the supplied evidence; OSA does not calculate availability or confirm a reservation on behalf of the managing office. HR events and participant-scope PPAs are exempt because participant organizations inherit the parent event's confirmed venue.
+* **Feature 2.2 \- OSA Proposal Review and Permit Versioning:** A central dashboard allows OSA Directors to approve, reject, or request revision on PPAs. Approval repeats the venue-confirmation gate and creates an immutable, sequential permit version containing venue, evidence, and official PPA snapshots. Revision requests return the proposal to the organizer with OSA remarks for correction and resubmission, while rejection is a final denial unless reopened through an approved administrative exception. Before the first event day, an owning organizer may start a venue amendment on an approved scheduled event by supplying a reason. The active permit is superseded, the proposal returns to `revision_requested`, scanner access locks, and active scanner sessions are revoked while scanner assignments remain. The organizer must supply a replacement venue, new confirmation evidence, and updated official PPA before resubmission. OSA approval creates the next permit version and unlocks scanning; rejection never silently reactivates the superseded permit. Historical permit packets and evidence remain immutable.
+* **Feature 2.3 \- Multi-Organization Event Linking and Participant PPAs:** Allows USG/LSG/academic-unit/office organizers to list a parent event and invite sub-organizational PPAs as participant scopes under a master permit. Each `event_participation_scope` records organizer vs participant role, participant type, PPA status, capture mode, and roll-up analytics eligibility. The organizing organization is always represented by the organizer attendance scope and is automatically included in its own event audience; it must not submit a duplicate participant PPA for the same event. The Events dashboard separates **Organized Events** from **Participating Events** so invited organizations can find submitted parent events, submit or resubmit only their own participant PPA, and manage scanners only for their own approved scope. Organizer drafts remain private until the parent proposal is submitted. Participant organizations inherit the parent event's confirmed venue and do not submit separate venue confirmation. Participant scanners cannot be assigned, activated, hydrated, synced, or counted as official analytics participants until their participant PPA is approved or marked not required.
 * **Feature 2.4 \- Event Domains:** `events.event_domain` separates student-affairs, HR, academic-records, and academic-unit contexts. HR events use faculty/staff attendance rosters, do not require OSA PPA approval, and are managed by HR Admins through HR-domain permissions.
 * **Organizer Rule \- Recognition and Graduation:** Recognition and Graduation events are no longer modeled as a separate records-office admin role or organization. Until a dedicated staff-office module exists, OSA assigns these events to an active approved organizer through the normal proposal workflow, and university-wide audience calculations remain based on event audience rules rather than student membership in the organizer.
+* **Venue Workflow Boundary:** EAES does not provide reservation calendars, schedule-conflict detection, payments, venue-custodian accounts or approvals, Security Office accounts or digital signatures, or OP/CHK/Dean/Records/college routing. Security handoff remains external through the approved/downloaded permit.
 
 ### **Epic 3: Mobile Companion App (Scanner Mode)**
 
@@ -395,6 +396,14 @@ JSON Response Schema:
 * is\_primary\_admin (Boolean)  
 * approved\_by, approved\_at, revoked\_by, revoked\_at, revocation\_reason
 
+#### **venues**
+
+* id (UUID, Primary Key)
+* name, campus\_location
+* college\_id (UUID, Nullable owning college)
+* managing\_office, inquiry\_instructions (Nullable)
+* is\_active, retired\_at, timestamps
+
 #### **events**
 
 * id (UUID, Primary Key)  
@@ -405,6 +414,11 @@ JSON Response Schema:
 * event\_domain (Enum/String: student\_affairs, hr, academic\_records, academic\_unit)  
 * start\_date (Date)  
 * end\_date (Date)  
+* venue\_id (UUID, Nullable Foreign Key to venues; required for submitted on-campus organizer PPAs)
+* location\_type, location\_details (on-campus catalog snapshot or off-campus venue name/address)
+* venue\_confirmation\_office, venue\_confirmation\_date, venue\_confirmation\_reference\_number
+* venue\_confirmation\_document\_path, venue\_confirmation\_document\_original\_name
+* permit\_version (Integer, Default 0), pending\_venue\_amendment\_reason (Nullable)
 * society\_late\_threshold\_min (Integer, Default 15, legacy fallback)
 * general\_competition\_threshold\_min (Integer, Default 30, legacy compatibility)
 * event\_late\_cutoff\_min (Integer, Nullable, organizer-owned event policy)
@@ -419,6 +433,16 @@ JSON Response Schema:
 * date (Date)  
 * start\_time (Time)  
 * end\_time (Time)
+
+#### **event\_permit\_versions**
+
+* id (UUID, Primary Key), event\_id, version\_number (sequential and unique per event)
+* venue\_id (Nullable), venue\_name\_snapshot, venue\_location\_snapshot
+* location\_type, location\_details
+* confirmation\_office, confirmation\_date, confirmation\_reference\_number
+* confirmation\_document\_path, confirmation\_document\_original\_name
+* ppa\_document\_path, ppa\_document\_original\_name, amendment\_reason
+* approved\_by, approved\_at, superseded\_at, timestamps
 
 #### **event\_participation\_scopes**
 

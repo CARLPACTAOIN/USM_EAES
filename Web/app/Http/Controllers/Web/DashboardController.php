@@ -17,12 +17,12 @@ use App\Models\User;
 use App\Services\AdminAssignmentService;
 use App\Services\AdminScopeService;
 use App\Services\EventNotificationService;
+use App\Services\EventPermitService;
 use App\Services\EventProposalDraftService;
 use App\Services\ParticipationScopeService;
 use App\Services\ScannerAssignmentService;
 use App\Services\ScannerSessionService;
 use App\Support\AdminScope;
-use App\Support\EventEvaluationForm;
 use App\Support\EventTenantScope;
 use Carbon\Carbon;
 use DomainException;
@@ -42,7 +42,8 @@ class DashboardController extends Controller
         private readonly AdminScopeService $adminScopes,
         private readonly ParticipationScopeService $participationScopes,
         private readonly EventNotificationService $eventNotifications,
-        private readonly EventProposalDraftService $proposalDrafts
+        private readonly EventProposalDraftService $proposalDrafts,
+        private readonly EventPermitService $eventPermits,
     ) {}
 
     /**
@@ -157,6 +158,11 @@ class DashboardController extends Controller
             'end_date' => 'required|date|after_or_equal:start_date',
             'location_type' => 'required|in:on-campus,off-campus',
             'location_details' => 'nullable|string',
+            'venue_id' => 'nullable|uuid|exists:venues,id',
+            'venue_confirmation_office' => 'nullable|string|max:255',
+            'venue_confirmation_date' => 'nullable|date|before_or_equal:today',
+            'venue_confirmation_reference_number' => 'nullable|string|max:255',
+            'venue_confirmation_document' => 'nullable|file|mimes:pdf,doc,docx,jpg,jpeg,png|max:10240',
             'implementing_office' => 'nullable|string|max:255',
             'collaborating_office' => 'nullable|string|max:255',
             'target_participants' => 'nullable|string|max:1000',
@@ -255,7 +261,8 @@ class DashboardController extends Controller
             $event = $this->proposalDrafts->create(
                 $user,
                 $this->proposalData($request, $organizationId),
-                $request->file('proposal_document')
+                $request->file('proposal_document'),
+                $request->file('venue_confirmation_document')
             );
 
             return redirect()->route('dashboard.events')
@@ -298,6 +305,11 @@ class DashboardController extends Controller
             'end_date' => 'required|date|after_or_equal:start_date',
             'location_type' => 'required|in:on-campus,off-campus',
             'location_details' => 'nullable|string',
+            'venue_id' => 'nullable|uuid|exists:venues,id',
+            'venue_confirmation_office' => 'nullable|string|max:255',
+            'venue_confirmation_date' => 'nullable|date|before_or_equal:today',
+            'venue_confirmation_reference_number' => 'nullable|string|max:255',
+            'venue_confirmation_document' => 'nullable|file|mimes:pdf,doc,docx,jpg,jpeg,png|max:10240',
             'implementing_office' => 'nullable|string|max:255',
             'collaborating_office' => 'nullable|string|max:255',
             'target_participants' => 'nullable|string|max:1000',
@@ -364,7 +376,8 @@ class DashboardController extends Controller
                 $event,
                 $user,
                 $this->proposalData($request, $event->organization_id),
-                $request->file('proposal_document')
+                $request->file('proposal_document'),
+                $request->file('venue_confirmation_document')
             );
 
             return redirect()->route('dashboard.events', ['status' => $updatedEvent->status])
@@ -400,6 +413,10 @@ class DashboardController extends Controller
             'end_date' => $request->input('end_date'),
             'location_type' => $request->string('location_type')->toString(),
             'location_details' => $request->input('location_details'),
+            'venue_id' => $request->input('venue_id'),
+            'venue_confirmation_office' => $request->input('venue_confirmation_office'),
+            'venue_confirmation_date' => $request->input('venue_confirmation_date'),
+            'venue_confirmation_reference_number' => $request->input('venue_confirmation_reference_number'),
             'target_demographics' => [
                 'implementing_office' => $request->input('implementing_office'),
                 'collaborating_office' => $request->input('collaborating_office'),
@@ -423,32 +440,15 @@ class DashboardController extends Controller
      */
     public function submitEvent(Request $request, $eventId)
     {
-        abort_unless($request->user()->can('create-proposals'), 403);
-
         $event = Event::findOrFail($eventId);
         $this->authorizeEventAccess($event, $request->user());
-        abort_unless($this->adminScopes->forUser($request->user())?->organizationId === $event->organization_id, 403, 'Only the event organizer can submit this proposal.');
 
-        if (! in_array($event->status, [Event::STATUS_DRAFT, Event::STATUS_REVISION_REQUESTED], true)) {
-            return redirect()->back()->with('error', 'Only draft or revision-requested proposals can be submitted.');
+        try {
+            $event = $this->eventPermits->submit($event, $request->user());
+            $this->eventNotifications->notifyPendingInvitationsForEvent($event->fresh(['organization', 'participationScopes.organization', 'participationScopes.delegatedOrganization']));
+        } catch (DomainException $exception) {
+            return redirect()->back()->with('error', $exception->getMessage());
         }
-
-        if (! $event->proposal_document_path) {
-            return redirect()->back()->with('error', 'Attach the official PPA proposal softcopy before submitting for review.');
-        }
-
-        if (! $event->hardcopy_submitted) {
-            return redirect()->back()->with('error', 'Confirm hardcopy submission to OSA before submitting for review.');
-        }
-
-        $event->update(['status' => Event::STATUS_SUBMITTED]);
-        $this->participationScopes->ensureOrganizerScope($event)->update([
-            'ppa_status' => EventParticipationScope::PPA_SUBMITTED,
-            'submitted_by' => $request->user()->id,
-            'submitted_at' => now(),
-            'review_remarks' => null,
-        ]);
-        $this->eventNotifications->notifyPendingInvitationsForEvent($event->fresh(['organization', 'participationScopes.organization', 'participationScopes.delegatedOrganization']));
 
         return redirect()->back()->with('success', 'Proposal submitted for review.');
     }
@@ -488,20 +488,11 @@ class DashboardController extends Controller
      */
     public function reviewEvent(Request $request, $eventId)
     {
-        abort_unless($request->user()->hasRole('Super Admin (OSA)'), 403);
-
-        $event = Event::findOrFail($eventId);
-
-        if ($event->status !== Event::STATUS_SUBMITTED) {
-            return redirect()->back()->with('error', 'Only submitted proposals can be reviewed.');
+        try {
+            $this->eventPermits->startReview(Event::findOrFail($eventId), $request->user());
+        } catch (DomainException $exception) {
+            return redirect()->back()->with('error', $exception->getMessage());
         }
-
-        $event->update(['status' => Event::STATUS_UNDER_REVIEW]);
-        $this->participationScopes->ensureOrganizerScope($event)->update([
-            'ppa_status' => EventParticipationScope::PPA_UNDER_REVIEW,
-            'reviewed_by' => $request->user()->id,
-            'reviewed_at' => now(),
-        ]);
 
         return redirect()->back()->with('success', 'Proposal is now under review.');
     }
@@ -511,59 +502,28 @@ class DashboardController extends Controller
      */
     public function approveEvent(Request $request, $eventId)
     {
-        abort_unless($request->user()->hasRole('Super Admin (OSA)'), 403);
-
-        $event = Event::findOrFail($eventId);
-
-        if (! in_array($event->status, [Event::STATUS_SUBMITTED, Event::STATUS_UNDER_REVIEW], true)) {
-            return redirect()->back()->with('error', 'Proposal must be submitted or under review to approve.');
+        try {
+            $this->eventPermits->approve(Event::findOrFail($eventId), $request->user());
+        } catch (DomainException $exception) {
+            return redirect()->back()->with('error', $exception->getMessage());
         }
-
-        if (! $event->proposal_document_path || ! $event->hardcopy_submitted) {
-            return redirect()->back()->with('error', 'Proposal softcopy and hardcopy submission must be recorded before approval.');
-        }
-
-        if (! EventEvaluationForm::hasLockedForm($event)) {
-            return redirect()->back()->with('error', 'A locked evaluation form with at least one question is required before approval.');
-        }
-
-        $event->update(['status' => Event::STATUS_APPROVED]);
-        $this->participationScopes->ensureOrganizerScope($event->fresh())->update([
-            'ppa_status' => EventParticipationScope::PPA_APPROVED,
-            'reviewed_by' => $request->user()->id,
-            'reviewed_at' => now(),
-            'approved_at' => now(),
-            'review_remarks' => null,
-        ]);
 
         return redirect()->back()->with('success', 'Event proposal approved. Scanning is now unlocked.');
     }
 
     public function requestEventRevision(Request $request, $eventId)
     {
-        abort_unless($request->user()->hasRole('Super Admin (OSA)'), 403);
-
         $validated = $request->validate([
             'review_remarks' => 'required|string|max:1000',
         ], [], [
             'review_remarks' => 'revision note',
         ]);
 
-        $event = Event::findOrFail($eventId);
-
-        if (! in_array($event->status, [Event::STATUS_SUBMITTED, Event::STATUS_UNDER_REVIEW], true)) {
-            return redirect()->back()->with('error', 'Proposal must be submitted or under review to request revision.');
+        try {
+            $this->eventPermits->requestRevision(Event::findOrFail($eventId), $request->user(), $validated['review_remarks']);
+        } catch (DomainException $exception) {
+            return redirect()->back()->with('error', $exception->getMessage());
         }
-
-        $event->update(['status' => Event::STATUS_REVISION_REQUESTED]);
-        $organizerScope = $this->participationScopes->ensureOrganizerScope($event);
-        $organizerScope->update([
-            'ppa_status' => EventParticipationScope::PPA_REVISION_REQUESTED,
-            'reviewed_by' => $request->user()->id,
-            'reviewed_at' => now(),
-            'review_remarks' => trim($validated['review_remarks']),
-        ]);
-        $this->eventNotifications->notifyProposalRevisionRequested($organizerScope->fresh(['event.organization', 'organization', 'delegatedOrganization']));
 
         return redirect()->back()->with('success', 'Event proposal returned for revision.');
     }
@@ -573,22 +533,27 @@ class DashboardController extends Controller
      */
     public function rejectEvent(Request $request, $eventId)
     {
-        abort_unless($request->user()->hasRole('Super Admin (OSA)'), 403);
-
-        $event = Event::findOrFail($eventId);
-
-        if (! in_array($event->status, [Event::STATUS_SUBMITTED, Event::STATUS_UNDER_REVIEW], true)) {
-            return redirect()->back()->with('error', 'Proposal must be submitted or under review to reject.');
+        try {
+            $this->eventPermits->reject(Event::findOrFail($eventId), $request->user());
+        } catch (DomainException $exception) {
+            return redirect()->back()->with('error', $exception->getMessage());
         }
 
-        $event->update(['status' => Event::STATUS_REJECTED]);
-        $this->participationScopes->ensureOrganizerScope($event)->update([
-            'ppa_status' => EventParticipationScope::PPA_REJECTED,
-            'reviewed_by' => $request->user()->id,
-            'reviewed_at' => now(),
-        ]);
-
         return redirect()->back()->with('success', 'Event proposal rejected.');
+    }
+
+    public function startVenueAmendment(Request $request, Event $event): RedirectResponse
+    {
+        $validated = $request->validate(['reason' => ['required', 'string', 'max:1000']]);
+        $this->authorizeEventAccess($event, $request->user());
+
+        try {
+            $this->eventPermits->beginVenueAmendment($event, $request->user(), $validated['reason']);
+        } catch (DomainException $exception) {
+            return redirect()->back()->with('error', $exception->getMessage());
+        }
+
+        return redirect()->back()->with('success', 'Venue amendment started. Scanning is locked until OSA approval.');
     }
 
     /**

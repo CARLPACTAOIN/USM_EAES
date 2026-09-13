@@ -41,6 +41,14 @@
         </span>
     @else
         <div class="ppa-status-group">
+            <span class="ppa-status-item {{ $event->venue_confirmation_document_path ? 'ppa-status-item--ok' : 'ppa-status-item--warn' }}">
+                @if($event->venue_confirmation_document_path)
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                @else
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01"/></svg>
+                @endif
+                Venue
+            </span>
             @if($event->proposal_document_path)
                 <a href="{{ route('dashboard.events.proposal-document', $event->id) }}" class="ppa-status-item ppa-status-item--ok hover:underline">
                     <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
@@ -84,6 +92,7 @@
         </div>
 
         <div class="ppa-status-group" style="margin-top: 0.125rem;">
+            @if($event->permit_version > 0)<span class="ppa-scope-badge">Permit v{{ $event->permit_version }}</span>@endif
             <span class="ppa-scope-badge">{{ $approvedScopeCount }} scope{{ $approvedScopeCount !== 1 ? 's' : '' }}</span>
             <span class="ppa-scope-badge">{{ $participantScopeCount }} participant{{ $participantScopeCount !== 1 ? 's' : '' }}</span>
         </div>

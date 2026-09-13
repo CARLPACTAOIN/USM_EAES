@@ -1,4 +1,28 @@
+<div>
+    @if($event->pending_venue_amendment_reason)
+        @php($previousPermit = $event->permitVersions->first())
+        <div class="card p-4 mb-4">
+            <p class="text-xs font-semibold uppercase text-(--color-text-tertiary)">Venue amendment comparison</p>
+            <div class="grid gap-3 mt-2 sm:grid-cols-2">
+                <div><p class="form-label">Previous approved venue</p><p>{{ $previousPermit?->venue_name_snapshot ?? 'Unavailable' }} @if($previousPermit?->venue_location_snapshot) — {{ $previousPermit->venue_location_snapshot }} @endif</p></div>
+                <div><p class="form-label">Proposed venue</p><p>{{ $event->venue?->displayName() ?? $event->location_details ?? 'Not yet supplied' }}</p></div>
+            </div>
+            <p class="form-helper">Reason: {{ $event->pending_venue_amendment_reason }}</p>
+        </div>
+    @endif
 <div class="event-primary-cta" aria-live="polite">
+    @if(!$isParticipatingWorkspace && $event->requiresVenueConfirmation())
+        <span class="event-workflow-feedback {{ $event->venue_confirmation_document_path ? 'event-workflow-feedback--success' : 'event-workflow-feedback--error' }}">
+            {{ $event->venue_confirmation_document_path ? 'Venue confirmed' : 'Venue confirmation incomplete' }}
+            @if($event->permit_version > 0) · Permit v{{ $event->permit_version }} @endif
+        </span>
+        @if($event->venue_confirmation_document_path)
+            <a class="btn btn-sm btn-secondary" href="{{ route('dashboard.events.venue-evidence', $event) }}">Evidence</a>
+        @endif
+        @if($event->permit_version > 0)
+            <a class="btn btn-sm btn-secondary" href="{{ route('dashboard.events.permit-history', $event) }}">Permit history</a>
+        @endif
+    @endif
     @if($notice)
         <span class="event-workflow-feedback event-workflow-feedback--success"
               role="status"
@@ -116,4 +140,18 @@
             Analytics
         </a>
     @endif
+
+    @if(!$isParticipatingWorkspace && !$user?->hasRole('Super Admin (OSA)') && $event->status === 'approved' && ($event->lifecycle_phase ?? 'scheduled') === 'scheduled')
+        <form wire:submit="startVenueAmendment" class="event-revision-inline">
+            <label for="venue-amendment-reason-{{ $event->id }}" class="sr-only">Venue amendment reason</label>
+            <input id="venue-amendment-reason-{{ $event->id }}" type="text" class="form-input text-xs @error('amendmentReason') form-input-error @enderror"
+                   placeholder="Why must the venue change?" maxlength="1000" wire:model="amendmentReason">
+            @error('amendmentReason') <span class="form-error" role="alert">{{ $message }}</span> @enderror
+            <button type="submit" class="btn btn-sm btn-secondary" wire:loading.attr="disabled" wire:target="startVenueAmendment">
+                <span wire:loading.remove wire:target="startVenueAmendment">Start venue amendment</span>
+                <span wire:loading wire:target="startVenueAmendment">Starting…</span>
+            </button>
+        </form>
+    @endif
+</div>
 </div>

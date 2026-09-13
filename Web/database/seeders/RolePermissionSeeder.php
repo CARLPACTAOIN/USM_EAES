@@ -21,6 +21,7 @@ class RolePermissionSeeder extends Seeder
         $permissions = [
             // Super Admin / OSA specific
             'manage-organizations',
+            'manage-venues',
             'approve-proposals',
             'view-all-analytics',
             'force-validate-any',
@@ -58,11 +59,12 @@ class RolePermissionSeeder extends Seeder
         }
 
         // 2. Create roles and assign seeded permissions
-        
+
         // Super Admin (OSA)
         $superAdmin = Role::firstOrCreate(['name' => 'Super Admin (OSA)', 'guard_name' => 'web']);
         $superAdmin->syncPermissions([
             'manage-organizations',
+            'manage-venues',
             'approve-proposals',
             'view-all-analytics',
             'force-validate-any',
@@ -77,6 +79,7 @@ class RolePermissionSeeder extends Seeder
         $superAdminApi = Role::firstOrCreate(['name' => 'Super Admin (OSA)', 'guard_name' => 'api']);
         $superAdminApi->syncPermissions([
             'manage-organizations',
+            'manage-venues',
             'approve-proposals',
             'view-all-analytics',
             'force-validate-any',

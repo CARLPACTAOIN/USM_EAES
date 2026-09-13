@@ -33,6 +33,7 @@ use App\Models\RawScan;
 use App\Models\ScannerSession;
 use App\Models\University;
 use App\Models\User;
+use App\Models\Venue;
 use App\Notifications\EventWorkflowNotification;
 use App\Services\AdminAssignmentService;
 use App\Services\Contracts\AiServiceInterface;
@@ -292,6 +293,33 @@ class WebPortalTest extends TestCase
                 'description' => 'Did the facilitator support the session effectively?',
             ],
         ];
+    }
+
+    private function confirmVenueForEvent(Event $event, string $name = 'USM Auditorium'): Venue
+    {
+        $venue = Venue::create([
+            'name' => $name,
+            'campus_location' => 'Main Campus',
+            'managing_office' => 'Campus Facilities Office',
+            'is_active' => true,
+        ]);
+        $proposalPath = $event->proposal_document_path ?: 'proposal-documents/'.uniqid().'.pdf';
+        $evidencePath = 'venue-confirmations/'.uniqid().'.pdf';
+        Storage::put($proposalPath, 'proposal');
+        Storage::put($evidencePath, 'confirmation');
+        $event->update([
+            'location_type' => 'on-campus',
+            'venue_id' => $venue->id,
+            'location_details' => $venue->displayName(),
+            'venue_confirmation_office' => $venue->managing_office,
+            'venue_confirmation_date' => today(),
+            'venue_confirmation_document_path' => $evidencePath,
+            'venue_confirmation_document_original_name' => 'confirmation.pdf',
+            'proposal_document_path' => $proposalPath,
+            'proposal_document_original_name' => $event->proposal_document_original_name ?: 'proposal.pdf',
+        ]);
+
+        return $venue;
     }
 
     // ─── Auth Tests ────────────────────────────────────────
@@ -950,6 +978,7 @@ class WebPortalTest extends TestCase
             'adviser_signed' => true,
         ]);
         EventEvaluationForm::createForEvent($event, $societyAdmin, $this->customEvaluationQuestions(), 'Evaluation - '.$event->title);
+        $this->confirmVenueForEvent($event, 'Status Test Venue');
 
         // Submit
         $this->actingAs($societyAdmin)
@@ -993,6 +1022,7 @@ class WebPortalTest extends TestCase
             'adviser_signed' => true,
         ]);
         EventEvaluationForm::createForEvent($event, $societyAdmin, $this->customEvaluationQuestions(), 'Evaluation - '.$event->title);
+        $this->confirmVenueForEvent($event, 'Livewire Submit Venue');
 
         Livewire::actingAs($societyAdmin)
             ->test(EventProposalWorkflow::class, ['eventId' => $event->id])
@@ -1066,6 +1096,7 @@ class WebPortalTest extends TestCase
             'adviser_signed' => true,
         ]);
         EventEvaluationForm::createForEvent($event, $societyAdmin, $this->customEvaluationQuestions(), 'Evaluation - '.$event->title);
+        $this->confirmVenueForEvent($event, 'Livewire Review Venue');
 
         Livewire::actingAs($osaAdmin)
             ->test(EventProposalWorkflow::class, ['eventId' => $event->id])
@@ -1118,6 +1149,7 @@ class WebPortalTest extends TestCase
             'end_time' => '12:00',
         ]);
         EventEvaluationForm::createForEvent($event, $societyAdmin, $this->customEvaluationQuestions(), 'Evaluation - '.$event->title);
+        $revisionVenue = $this->confirmVenueForEvent($event);
 
         Livewire::actingAs($osaAdmin)
             ->test(EventProposalWorkflow::class, ['eventId' => $event->id])
@@ -1145,7 +1177,9 @@ class WebPortalTest extends TestCase
             ->set('startDate', today()->addDays(8)->toDateString())
             ->set('endDate', today()->addDays(8)->toDateString())
             ->set('locationType', 'on-campus')
-            ->set('locationDetails', 'USM Auditorium')
+            ->set('venueId', $revisionVenue->id)
+            ->set('venueConfirmationOffice', $revisionVenue->managing_office)
+            ->set('venueConfirmationDate', today()->toDateString())
             ->set('targetParticipants', 'All society members')
             ->set('sourceOfFund', 'Organization fund')
             ->set('budgetCost', '1500')
@@ -1172,7 +1206,7 @@ class WebPortalTest extends TestCase
         $this->assertSame(Event::STATUS_REVISION_REQUESTED, $event->status);
         $this->assertSame('Revised Candidate Proposal', $event->title);
         $this->assertSame('revised-proposal.docx', $event->proposal_document_original_name);
-        $this->assertSame('USM Auditorium', $event->location_details);
+        $this->assertSame($revisionVenue->displayName(), $event->location_details);
         $this->assertSame('1500', (string) ($event->budget_allocations['budget_cost'] ?? ''));
         $this->assertDatabaseHas('event_days', [
             'event_id' => $event->id,
@@ -1655,6 +1689,7 @@ class WebPortalTest extends TestCase
             'proposal_document_original_name' => 'society-draft.docx',
             'hardcopy_submitted' => true,
         ]);
+        $this->confirmVenueForEvent($draft, 'Society Draft Venue');
 
         $this->actingAs($societyAdmin)
             ->get(route('dashboard.events'))
@@ -1770,7 +1805,7 @@ class WebPortalTest extends TestCase
             ->assertSee('8:00 AM - 12:00 PM');
     }
 
-    public function test_event_creation_requires_proposal_document_and_tracks_hardcopy(): void
+    public function test_event_creation_allows_incomplete_draft_and_tracks_uploaded_packet(): void
     {
         Storage::fake('local');
 
@@ -1802,7 +1837,12 @@ class WebPortalTest extends TestCase
 
         $this->actingAs($societyAdmin)
             ->post(route('dashboard.events.create'), $basePayload)
-            ->assertSessionHasErrors('proposal_document');
+            ->assertRedirect(route('dashboard.events'))
+            ->assertSessionHas('success');
+
+        $incompleteDraft = Event::where('title', 'Documented PPA Event')->firstOrFail();
+        $this->assertNull($incompleteDraft->proposal_document_path);
+        $incompleteDraft->delete();
 
         $this->actingAs($societyAdmin)
             ->post(route('dashboard.events.create'), array_merge($basePayload, [
@@ -1858,6 +1898,7 @@ class WebPortalTest extends TestCase
                 'hardcopy_submitted' => '1',
                 'head_organization_signed' => '1',
                 'adviser_signed' => '1',
+                'venue_confirmation_document' => UploadedFile::fake()->create('invalid-confirmation.exe', 128, 'application/octet-stream'),
                 'same_time_for_all_days' => '1',
                 'event_days' => [
                     [
@@ -1874,7 +1915,7 @@ class WebPortalTest extends TestCase
                 'evaluation_questions' => $this->customEvaluationQuestions(),
             ])
             ->assertRedirect(route('dashboard.events'))
-            ->assertSessionHasErrors('proposal_document');
+            ->assertSessionHasErrors('venue_confirmation_document');
 
         $this->actingAs($societyAdmin)
             ->get(route('dashboard.events'))
@@ -2052,7 +2093,7 @@ class WebPortalTest extends TestCase
             ->assertSee('Save Draft Proposal');
     }
 
-    public function test_livewire_event_proposal_create_validates_softcopy_questions_and_day_range(): void
+    public function test_livewire_event_proposal_create_allows_missing_softcopy_but_validates_questions_and_day_range(): void
     {
         Storage::fake('local');
 
@@ -2071,12 +2112,11 @@ class WebPortalTest extends TestCase
                 'start_time' => '08:00',
                 'end_time' => '12:00',
             ]])
-            ->set('evaluationQuestions', $this->customEvaluationQuestions())
+            ->set('evaluationQuestions', [])
             ->call('createProposal')
-            ->assertHasErrors(['proposalDocument']);
+            ->assertHasErrors(['evaluationQuestions']);
 
         $component
-            ->set('proposalDocument', UploadedFile::fake()->create('livewire-invalid-ppa.docx', 128, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'))
             ->set('evaluationQuestions', [])
             ->call('createProposal')
             ->assertHasErrors(['evaluationQuestions']);
@@ -2286,7 +2326,6 @@ class WebPortalTest extends TestCase
             'start_date' => today()->addDays(5),
             'end_date' => today()->addDays(5),
         ]);
-
         $this->actingAs($organizerAdmin)
             ->get(route('dashboard.events'))
             ->assertOk()
@@ -3021,6 +3060,7 @@ class WebPortalTest extends TestCase
             'start_date' => today()->addDays(5),
             'end_date' => today()->addDays(5),
         ]);
+        $this->confirmVenueForEvent($event, 'Deferred Invitation Venue');
 
         $this->actingAs($organizerAdmin)
             ->post(route('dashboard.events.participant-scopes.store', $event->id), [

@@ -147,6 +147,8 @@ class DashboardEventWorkspaceService
     {
         return Event::with([
             'organization',
+            'venue',
+            'permitVersions.approver',
             'eventDays',
             'evaluationFormVersion',
             'parentEvent.organization',

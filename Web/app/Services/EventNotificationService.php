@@ -125,6 +125,31 @@ class EventNotificationService
         );
     }
 
+    public function notifyPermitWorkflow(Event $event, string $kind): int
+    {
+        $scope = $this->participationScopesForNotification($event);
+        $organizers = $this->organizerRecipients($scope);
+        $recipients = in_array($kind, ['venue-amendment-submitted', 'venue-amendment-initiated'], true)
+            ? $organizers->merge($this->osaRecipients())
+            : $organizers;
+        $label = str($kind)->replace('-', ' ')->title()->toString();
+
+        return $this->notifyUsers(
+            $recipients->unique('id')->values(),
+            $kind.':'.$event->id.':'.$event->updated_at?->timestamp,
+            $kind,
+            $scope,
+            [
+                'title' => $label,
+                'body' => $label.' for '.$event->title.'.',
+                'action_label' => 'Open Event Proposals',
+                'action_url' => route('dashboard.events'),
+                'severity' => str_contains($kind, 'approved') ? 'success' : (str_contains($kind, 'rejected') ? 'warning' : 'info'),
+                'needs_action' => str_contains($kind, 'submitted') || str_contains($kind, 'revision-requested'),
+            ]
+        );
+    }
+
     public function notifyParticipantScopeReviewed(EventParticipationScope $scope, string $status): int
     {
         $scope->loadMissing(['event.organization', 'organization', 'delegatedOrganization']);
@@ -390,5 +415,10 @@ class EventNotificationService
             'status' => $scope->ppa_status,
             'url' => $url,
         ];
+    }
+
+    private function participationScopesForNotification(Event $event): EventParticipationScope
+    {
+        return app(ParticipationScopeService::class)->ensureOrganizerScope($event->fresh(['organization']));
     }
 }

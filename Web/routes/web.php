@@ -12,6 +12,7 @@ use App\Http\Controllers\Web\EventExportController;
 use App\Http\Controllers\Web\NotificationController;
 use App\Http\Controllers\Web\OrganizationProfileController;
 use App\Http\Controllers\Web\PortalController;
+use App\Http\Controllers\Web\VenueController;
 use App\Models\AdminAssignment;
 use App\Models\College;
 use App\Models\Organization;
@@ -69,6 +70,7 @@ Route::middleware(['auth'])->group(function () {
             Route::post('/events/{event}/approve', [DashboardController::class, 'approveEvent'])->name('dashboard.events.approve');
             Route::post('/events/{event}/revision', [DashboardController::class, 'requestEventRevision'])->name('dashboard.events.revision');
             Route::post('/events/{event}/reject', [DashboardController::class, 'rejectEvent'])->name('dashboard.events.reject');
+            Route::post('/events/{event}/venue-amendment', [DashboardController::class, 'startVenueAmendment'])->name('dashboard.events.venue-amendment');
             Route::post('/events/{event}/link', [DashboardController::class, 'linkEvent'])->name('dashboard.events.link');
             Route::post('/events/{event}/hardcopy', [DashboardController::class, 'markHardcopy'])->name('dashboard.events.hardcopy');
             Route::post('/events/{event}/attendance-policy', [DashboardController::class, 'updateEventAttendancePolicy'])->name('dashboard.events.attendance-policy');
@@ -81,6 +83,10 @@ Route::middleware(['auth'])->group(function () {
             Route::post('/events/{event}/participant-scopes/{participationScope}/reject', [DashboardController::class, 'rejectParticipantScope'])->name('dashboard.events.participant-scopes.reject');
             Route::post('/events/{event}/participant-scopes/{participationScope}/acknowledge', [DashboardController::class, 'acknowledgeParticipantScope'])->name('dashboard.events.participant-scopes.acknowledge');
             Route::get('/events/{event}/proposal-document', [DashboardController::class, 'downloadProposal'])->name('dashboard.events.proposal-document');
+            Route::get('/events/{event}/venue-evidence', [VenueController::class, 'downloadEvidence'])->name('dashboard.events.venue-evidence');
+            Route::get('/events/{event}/permit-history', [VenueController::class, 'permitHistory'])->name('dashboard.events.permit-history');
+            Route::get('/events/{event}/permit-history/{permitVersion}/evidence', [VenueController::class, 'downloadVersionEvidence'])->name('dashboard.events.permit-history.evidence');
+            Route::get('/events/{event}/permit-history/{permitVersion}/ppa', [VenueController::class, 'downloadVersionPpa'])->name('dashboard.events.permit-history.ppa');
             Route::get('/events/{event}/scanner-candidates', [DashboardController::class, 'scannerCandidates'])->name('dashboard.events.scanner-candidates');
             Route::post('/events/{event}/scanner-assignments', [DashboardController::class, 'assignEventScanner'])->name('dashboard.events.scanner-assignments.store');
             Route::post('/events/{event}/scanner-assignments/{assignment}/revoke', [DashboardController::class, 'revokeEventScannerAssignment'])->name('dashboard.events.scanner-assignments.revoke');
@@ -103,6 +109,7 @@ Route::middleware(['auth'])->group(function () {
 
             // Admin User Provisioning (Super Admin only)
             Route::get('/admin-users', [AdminAccessController::class, 'index'])->name('dashboard.admin-users');
+            Route::get('/venues', [VenueController::class, 'index'])->name('dashboard.venues');
             Route::get('/admin-access', [AdminAccessController::class, 'index'])->name('dashboard.admin-access');
             Route::get('/admin-users/search', [AdminAccessController::class, 'searchUsers'])->name('dashboard.admin-users.search');
             Route::post('/admin-users', [AdminAccessController::class, 'store'])->name('dashboard.admin-users.create');

@@ -2,10 +2,14 @@
 
 namespace App\Services;
 
+use App\Models\AuditLog;
 use App\Models\Event;
 use App\Models\EventDay;
+use App\Models\EventPermitVersion;
 use App\Models\Organization;
 use App\Models\User;
+use App\Models\Venue;
+use App\Notifications\EventWorkflowNotification;
 use App\Support\EventEvaluationForm;
 use DomainException;
 use Illuminate\Http\UploadedFile;
@@ -37,7 +41,7 @@ class EventProposalDraftService
     /**
      * @param  array<string, mixed>  $data
      */
-    public function create(User $actor, array $data, ?UploadedFile $proposalDocument): Event
+    public function create(User $actor, array $data, ?UploadedFile $proposalDocument, ?UploadedFile $confirmationDocument = null): Event
     {
         $organization = Organization::find($data['organization_id']);
 
@@ -48,14 +52,12 @@ class EventProposalDraftService
         $this->validateParentEvent($data['parent_event_id']);
 
         $isHrEvent = $organization->type === 'hr_unit';
-        if (! $isHrEvent && ! $proposalDocument) {
-            throw new DomainException('Attach the official PPA proposal softcopy before saving this event.');
-        }
-
+        $venueData = $this->venueData($data, $isHrEvent);
         $documentPath = $proposalDocument?->store('proposal-documents');
+        $confirmationPath = $confirmationDocument?->store('venue-confirmations');
 
         try {
-            return DB::transaction(function () use ($actor, $data, $documentPath, $isHrEvent, $proposalDocument): Event {
+            return DB::transaction(function () use ($actor, $confirmationDocument, $confirmationPath, $data, $documentPath, $isHrEvent, $proposalDocument, $venueData): Event {
                 $hardcopySubmitted = $isHrEvent ? false : $data['hardcopy_submitted'];
 
                 $event = Event::create([
@@ -68,7 +70,12 @@ class EventProposalDraftService
                     'start_date' => $data['start_date'],
                     'end_date' => $data['end_date'],
                     'location_type' => $data['location_type'],
-                    'location_details' => $data['location_details'],
+                    ...$venueData,
+                    'venue_confirmation_office' => $isHrEvent ? null : ($data['venue_confirmation_office'] ?? null),
+                    'venue_confirmation_date' => $isHrEvent ? null : ($data['venue_confirmation_date'] ?? null),
+                    'venue_confirmation_reference_number' => $isHrEvent ? null : ($data['venue_confirmation_reference_number'] ?? null),
+                    'venue_confirmation_document_path' => $isHrEvent ? null : $confirmationPath,
+                    'venue_confirmation_document_original_name' => $isHrEvent ? null : $confirmationDocument?->getClientOriginalName(),
                     'target_demographics' => $data['target_demographics'],
                     'budget_allocations' => $data['budget_allocations'],
                     'proposal_document_path' => $documentPath,
@@ -91,11 +98,19 @@ class EventProposalDraftService
 
                 $this->participationScopes->ensureOrganizerScope($event->fresh(['organization']));
 
-                return $event->fresh(['eventDays', 'evaluationFormVersion', 'organization']);
+                if ($confirmationPath) {
+                    $this->auditEvidence($event, $actor, 'venue-confirmation-evidence-uploaded');
+                }
+
+                return $event->fresh(['eventDays', 'evaluationFormVersion', 'organization', 'venue']);
             });
         } catch (Throwable $exception) {
             if ($documentPath) {
                 Storage::delete($documentPath);
+            }
+
+            if ($confirmationPath) {
+                Storage::delete($confirmationPath);
             }
 
             throw $exception;
@@ -105,7 +120,7 @@ class EventProposalDraftService
     /**
      * @param  array<string, mixed>  $data
      */
-    public function update(Event $event, User $actor, array $data, ?UploadedFile $proposalDocument): Event
+    public function update(Event $event, User $actor, array $data, ?UploadedFile $proposalDocument, ?UploadedFile $confirmationDocument = null): Event
     {
         $event->loadMissing('organization');
 
@@ -116,20 +131,23 @@ class EventProposalDraftService
         $this->validateParentEvent($data['parent_event_id'], $event->id);
 
         $isHrEvent = $event->organization->type === 'hr_unit';
-        if (! $isHrEvent && ! $event->proposal_document_path && ! $proposalDocument) {
-            throw new DomainException('Attach the official PPA proposal softcopy before saving this event.');
-        }
-
+        $venueData = $this->venueData($data, $isHrEvent);
         $newDocumentPath = $proposalDocument?->store('proposal-documents');
+        $newConfirmationPath = $confirmationDocument?->store('venue-confirmations');
         $oldDocumentPath = $event->proposal_document_path;
+        $oldConfirmationPath = $event->venue_confirmation_document_path;
 
         try {
-            $updatedEvent = DB::transaction(function () use ($actor, $data, $event, $isHrEvent, $newDocumentPath, $proposalDocument): Event {
+            $updatedEvent = DB::transaction(function () use ($actor, $confirmationDocument, $data, $event, $isHrEvent, $newConfirmationPath, $newDocumentPath, $oldConfirmationPath, $proposalDocument, $venueData): Event {
                 $hardcopySubmitted = $isHrEvent ? false : $data['hardcopy_submitted'];
                 $documentPath = $newDocumentPath ?: $event->proposal_document_path;
                 $documentOriginalName = $proposalDocument
                     ? $proposalDocument->getClientOriginalName()
                     : $event->proposal_document_original_name;
+                $confirmationPath = $newConfirmationPath ?: $event->venue_confirmation_document_path;
+                $confirmationOriginalName = $confirmationDocument
+                    ? $confirmationDocument->getClientOriginalName()
+                    : $event->venue_confirmation_document_original_name;
 
                 $event->update([
                     'parent_event_id' => $data['parent_event_id'],
@@ -138,7 +156,12 @@ class EventProposalDraftService
                     'start_date' => $data['start_date'],
                     'end_date' => $data['end_date'],
                     'location_type' => $data['location_type'],
-                    'location_details' => $data['location_details'],
+                    ...$venueData,
+                    'venue_confirmation_office' => $isHrEvent ? null : ($data['venue_confirmation_office'] ?? null),
+                    'venue_confirmation_date' => $isHrEvent ? null : ($data['venue_confirmation_date'] ?? null),
+                    'venue_confirmation_reference_number' => $isHrEvent ? null : ($data['venue_confirmation_reference_number'] ?? null),
+                    'venue_confirmation_document_path' => $isHrEvent ? null : $confirmationPath,
+                    'venue_confirmation_document_original_name' => $isHrEvent ? null : $confirmationOriginalName,
                     'target_demographics' => $data['target_demographics'],
                     'budget_allocations' => $data['budget_allocations'],
                     'proposal_document_path' => $documentPath,
@@ -170,18 +193,30 @@ class EventProposalDraftService
                     'adviser_signed' => $isHrEvent ? false : $data['adviser_signed'],
                 ]);
 
-                return $event->fresh(['eventDays', 'evaluationFormVersion', 'organization']);
+                if ($newConfirmationPath) {
+                    $this->auditEvidence($event, $actor, $oldConfirmationPath ? 'venue-confirmation-evidence-replaced' : 'venue-confirmation-evidence-uploaded');
+                }
+
+                return $event->fresh(['eventDays', 'evaluationFormVersion', 'organization', 'venue']);
             });
         } catch (Throwable $exception) {
             if ($newDocumentPath) {
                 Storage::delete($newDocumentPath);
             }
 
+            if ($newConfirmationPath) {
+                Storage::delete($newConfirmationPath);
+            }
+
             throw $exception;
         }
 
-        if ($newDocumentPath && $oldDocumentPath && $oldDocumentPath !== $newDocumentPath) {
+        if ($newDocumentPath && $oldDocumentPath && $oldDocumentPath !== $newDocumentPath && ! $this->isVersionedFile($oldDocumentPath, 'ppa_document_path')) {
             Storage::delete($oldDocumentPath);
+        }
+
+        if ($newConfirmationPath && $oldConfirmationPath && $oldConfirmationPath !== $newConfirmationPath && ! $this->isVersionedFile($oldConfirmationPath, 'confirmation_document_path')) {
+            Storage::delete($oldConfirmationPath);
         }
 
         return $updatedEvent;
@@ -224,5 +259,62 @@ class EventProposalDraftService
                 'end_time' => $dayData['end_time'],
             ]);
         }
+    }
+
+    /** @param array<string, mixed> $data
+     * @return array{venue_id: ?string, location_details: ?string}
+     */
+    private function venueData(array $data, bool $isHrEvent): array
+    {
+        if ($isHrEvent) {
+            return ['venue_id' => null, 'location_details' => $data['location_details']];
+        }
+
+        if ($data['location_type'] === 'off-campus') {
+            if (filled($data['venue_id'] ?? null)) {
+                throw new DomainException('Off-campus proposals must not reference a campus venue.');
+            }
+
+            return ['venue_id' => null, 'location_details' => $data['location_details']];
+        }
+
+        if (blank($data['venue_id'] ?? null)) {
+            return ['venue_id' => null, 'location_details' => null];
+        }
+
+        $venue = Venue::active()->find($data['venue_id']);
+        if (! $venue) {
+            throw new DomainException('Select an active on-campus venue from the catalog.');
+        }
+
+        return ['venue_id' => $venue->id, 'location_details' => $venue->displayName()];
+    }
+
+    private function isVersionedFile(string $path, string $column): bool
+    {
+        return EventPermitVersion::where($column, $path)->exists();
+    }
+
+    private function auditEvidence(Event $event, User $actor, string $action): void
+    {
+        AuditLog::create([
+            'target_id' => $event->id,
+            'admin_id' => $actor->id,
+            'action' => $action,
+            'details' => ['event_id' => $event->id],
+        ]);
+
+        $actor->notify(new EventWorkflowNotification([
+            'notification_key' => $action.':'.$event->id.':'.now()->timestamp,
+            'kind' => $action,
+            'event_id' => $event->id,
+            'event_title' => $event->title,
+            'title' => $action === 'venue-confirmation-evidence-replaced' ? 'Venue evidence replaced' : 'Venue evidence uploaded',
+            'body' => 'Confirmation evidence was saved for '.$event->title.'.',
+            'action_label' => 'Open Event Proposals',
+            'action_url' => route('dashboard.events'),
+            'severity' => 'info',
+            'needs_action' => false,
+        ]));
     }
 }

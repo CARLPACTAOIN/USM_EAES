@@ -2,24 +2,27 @@
 
 namespace Database\Seeders;
 
+use App\Models\AdminAssignment;
 use App\Models\AttendanceRecord;
 use App\Models\College;
 use App\Models\Evaluation;
 use App\Models\Event;
 use App\Models\EventDay;
+use App\Models\EventPermitVersion;
 use App\Models\Organization;
 use App\Models\Program;
+use App\Models\RawScan;
 use App\Models\University;
 use App\Models\User;
-use App\Models\RawScan;
+use App\Models\Venue;
 use App\Services\AdminAssignmentService;
-use App\Support\EventEvaluationForm;
 use App\Support\EvaluationQuestions;
+use App\Support\EventEvaluationForm;
 use Carbon\Carbon;
+use Faker\Factory as Faker;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
-use Faker\Factory as Faker;
-use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Storage;
 
 class DemoDataSeeder extends Seeder
 {
@@ -30,7 +33,7 @@ class DemoDataSeeder extends Seeder
 
         $faker = Faker::create('en_PH');
         $assignmentService = app(AdminAssignmentService::class);
-        $academicYear = now()->year . '-' . (now()->year + 1);
+        $academicYear = now()->year.'-'.(now()->year + 1);
 
         // 1. Core University
         $university = University::firstOrCreate(
@@ -41,290 +44,290 @@ class DemoDataSeeder extends Seeder
         // Raw organizations and colleges list provided by the user
         $orgsData = [
             [
-                "college_code" => "CA",
-                "college_name" => "College of Agriculture",
-                "org_name" => "Agronomy Society",
-                "org_abbreviation" => "AGS",
-                "programs" => ["BS Agriculture"]
+                'college_code' => 'CA',
+                'college_name' => 'College of Agriculture',
+                'org_name' => 'Agronomy Society',
+                'org_abbreviation' => 'AGS',
+                'programs' => ['BS Agriculture'],
             ],
             [
-                "college_code" => "CA",
-                "college_name" => "College of Agriculture",
-                "org_name" => "USM Fisheries Society",
-                "org_abbreviation" => "FISO",
-                "programs" => ["BS Fisheries"]
+                'college_code' => 'CA',
+                'college_name' => 'College of Agriculture',
+                'org_name' => 'USM Fisheries Society',
+                'org_abbreviation' => 'FISO',
+                'programs' => ['BS Fisheries'],
             ],
             [
-                "college_code" => "CA",
-                "college_name" => "College of Agriculture",
-                "org_name" => "USM Plant Pathology Society",
-                "org_abbreviation" => "USM-PPS",
-                "programs" => ["BS Agriculture"]
+                'college_code' => 'CA',
+                'college_name' => 'College of Agriculture',
+                'org_name' => 'USM Plant Pathology Society',
+                'org_abbreviation' => 'USM-PPS',
+                'programs' => ['BS Agriculture'],
             ],
             [
-                "college_code" => "CA",
-                "college_name" => "College of Agriculture",
-                "org_name" => "USM Horticulture Society",
-                "org_abbreviation" => "USM-HS",
-                "programs" => ["BS Agriculture"]
+                'college_code' => 'CA',
+                'college_name' => 'College of Agriculture',
+                'org_name' => 'USM Horticulture Society',
+                'org_abbreviation' => 'USM-HS',
+                'programs' => ['BS Agriculture'],
             ],
             [
-                "college_code" => "CA",
-                "college_name" => "College of Agriculture",
-                "org_name" => "Animal Science Society",
-                "org_abbreviation" => "ASS",
-                "programs" => ["BS Agriculture"]
+                'college_code' => 'CA',
+                'college_name' => 'College of Agriculture',
+                'org_name' => 'Animal Science Society',
+                'org_abbreviation' => 'ASS',
+                'programs' => ['BS Agriculture'],
             ],
             [
-                "college_code" => "CASS",
-                "college_name" => "College of Arts and Social Sciences",
-                "org_name" => "Association of Psychology Students",
-                "org_abbreviation" => "APS",
-                "programs" => ["AB Psychology"]
+                'college_code' => 'CASS',
+                'college_name' => 'College of Arts and Social Sciences',
+                'org_name' => 'Association of Psychology Students',
+                'org_abbreviation' => 'APS',
+                'programs' => ['AB Psychology'],
             ],
             [
-                "college_code" => "CASS",
-                "college_name" => "College of Arts and Social Sciences",
-                "org_name" => "AB English Society",
-                "org_abbreviation" => "AEBS",
-                "programs" => ["AB English Language"]
+                'college_code' => 'CASS',
+                'college_name' => 'College of Arts and Social Sciences',
+                'org_name' => 'AB English Society',
+                'org_abbreviation' => 'AEBS',
+                'programs' => ['AB English Language'],
             ],
             [
-                "college_code" => "CASS",
-                "college_name" => "College of Arts and Social Sciences",
-                "org_name" => "Criminology Society",
-                "org_abbreviation" => "CRS",
-                "programs" => ["BS Criminology"]
+                'college_code' => 'CASS',
+                'college_name' => 'College of Arts and Social Sciences',
+                'org_name' => 'Criminology Society',
+                'org_abbreviation' => 'CRS',
+                'programs' => ['BS Criminology'],
             ],
             [
-                "college_code" => "CASS",
-                "college_name" => "College of Arts and Social Sciences",
-                "org_name" => "Society of Social Scientists",
-                "org_abbreviation" => "SSS",
-                "programs" => ["AB Political Science", "AB Philosophy / Pre-Law"]
+                'college_code' => 'CASS',
+                'college_name' => 'College of Arts and Social Sciences',
+                'org_name' => 'Society of Social Scientists',
+                'org_abbreviation' => 'SSS',
+                'programs' => ['AB Political Science', 'AB Philosophy / Pre-Law'],
             ],
             [
-                "college_code" => "CED",
-                "college_name" => "College of Education",
-                "org_name" => "Future Secondary Mentors Society",
-                "org_abbreviation" => "FSMS",
-                "programs" => [
-                    "Bachelor of Secondary Education major in English",
-                    "Bachelor of Secondary Education major in Filipino",
-                    "Bachelor of Secondary Education major in Social Studies",
-                    "Bachelor of Secondary Education major in Science",
-                    "Bachelor of Secondary Education major in Mathematics"
-                ]
+                'college_code' => 'CED',
+                'college_name' => 'College of Education',
+                'org_name' => 'Future Secondary Mentors Society',
+                'org_abbreviation' => 'FSMS',
+                'programs' => [
+                    'Bachelor of Secondary Education major in English',
+                    'Bachelor of Secondary Education major in Filipino',
+                    'Bachelor of Secondary Education major in Social Studies',
+                    'Bachelor of Secondary Education major in Science',
+                    'Bachelor of Secondary Education major in Mathematics',
+                ],
             ],
             [
-                "college_code" => "CED",
-                "college_name" => "College of Education",
-                "org_name" => "Future Elementary Educators Society",
-                "org_abbreviation" => "FEES",
-                "programs" => ["Bachelor of Elementary Education"]
+                'college_code' => 'CED',
+                'college_name' => 'College of Education',
+                'org_name' => 'Future Elementary Educators Society',
+                'org_abbreviation' => 'FEES',
+                'programs' => ['Bachelor of Elementary Education'],
             ],
             [
-                "college_code" => "CEIT",
-                "college_name" => "College of Engineering and Information Technology",
-                "org_name" => "Philippine Institute of Civil Engineers - USM Student Chapter",
-                "org_abbreviation" => "PICE-USM SC",
-                "programs" => ["BS Civil Engineering"]
+                'college_code' => 'CEIT',
+                'college_name' => 'College of Engineering and Information Technology',
+                'org_name' => 'Philippine Institute of Civil Engineers - USM Student Chapter',
+                'org_abbreviation' => 'PICE-USM SC',
+                'programs' => ['BS Civil Engineering'],
             ],
             [
-                "college_code" => "CEIT",
-                "college_name" => "College of Engineering and Information Technology",
-                "org_name" => "Philippine Society of Agricultural and Biosystems Engineers Pre-Professional Group",
-                "org_abbreviation" => "PSABE-PPG",
-                "programs" => ["BS Agricultural and Biosystems Engineering"]
+                'college_code' => 'CEIT',
+                'college_name' => 'College of Engineering and Information Technology',
+                'org_name' => 'Philippine Society of Agricultural and Biosystems Engineers Pre-Professional Group',
+                'org_abbreviation' => 'PSABE-PPG',
+                'programs' => ['BS Agricultural and Biosystems Engineering'],
             ],
             [
-                "college_code" => "CEIT",
-                "college_name" => "College of Engineering and Information Technology",
-                "org_name" => "Institute of Computer Engineers of the Philippines",
-                "org_abbreviation" => "ICPEP",
-                "programs" => ["BS Computer Engineering"]
+                'college_code' => 'CEIT',
+                'college_name' => 'College of Engineering and Information Technology',
+                'org_name' => 'Institute of Computer Engineers of the Philippines',
+                'org_abbreviation' => 'ICPEP',
+                'programs' => ['BS Computer Engineering'],
             ],
             [
-                "college_code" => "CEIT",
-                "college_name" => "College of Engineering and Information Technology",
-                "org_name" => "Junior Institute of Electronics Engineers of the Philippines",
-                "org_abbreviation" => "JIECEP",
-                "programs" => ["BS Electronics Engineering"]
+                'college_code' => 'CEIT',
+                'college_name' => 'College of Engineering and Information Technology',
+                'org_name' => 'Junior Institute of Electronics Engineers of the Philippines',
+                'org_abbreviation' => 'JIECEP',
+                'programs' => ['BS Electronics Engineering'],
             ],
             [
-                "college_code" => "CEIT",
-                "college_name" => "College of Engineering and Information Technology",
-                "org_name" => "Philippine Society of Information Technology Students",
-                "org_abbreviation" => "PSITS",
-                "programs" => ["BS Information Systems", "BS Computer Science"]
+                'college_code' => 'CEIT',
+                'college_name' => 'College of Engineering and Information Technology',
+                'org_name' => 'Philippine Society of Information Technology Students',
+                'org_abbreviation' => 'PSITS',
+                'programs' => ['BS Information Systems', 'BS Computer Science'],
             ],
             [
-                "college_code" => "CEIT",
-                "college_name" => "College of Engineering and Information Technology",
-                "org_name" => "National Builders Association",
-                "org_abbreviation" => "NABA",
-                "programs" => ["BS Civil Engineering"]
+                'college_code' => 'CEIT',
+                'college_name' => 'College of Engineering and Information Technology',
+                'org_name' => 'National Builders Association',
+                'org_abbreviation' => 'NABA',
+                'programs' => ['BS Civil Engineering'],
             ],
             [
-                "college_code" => "CHEFS",
-                "college_name" => "College of Human Ecology and Food Sciences",
-                "org_name" => "Food Technology Students Society",
-                "org_abbreviation" => "FTSS",
-                "programs" => ["BS Food Technology"]
+                'college_code' => 'CHEFS',
+                'college_name' => 'College of Human Ecology and Food Sciences',
+                'org_name' => 'Food Technology Students Society',
+                'org_abbreviation' => 'FTSS',
+                'programs' => ['BS Food Technology'],
             ],
             [
-                "college_code" => "CHEFS",
-                "college_name" => "College of Human Ecology and Food Sciences",
-                "org_name" => "Nutrition and Dietetics Student Society",
-                "org_abbreviation" => "NDSS",
-                "programs" => ["BS Nutrition and Dietetics"]
+                'college_code' => 'CHEFS',
+                'college_name' => 'College of Human Ecology and Food Sciences',
+                'org_name' => 'Nutrition and Dietetics Student Society',
+                'org_abbreviation' => 'NDSS',
+                'programs' => ['BS Nutrition and Dietetics'],
             ],
             [
-                "college_code" => "CHEFS",
-                "college_name" => "College of Human Ecology and Food Sciences",
-                "org_name" => "Society of Hotel and Restaurant Progress",
-                "org_abbreviation" => "SHARP",
-                "programs" => ["BS Hospitality Management"]
+                'college_code' => 'CHEFS',
+                'college_name' => 'College of Human Ecology and Food Sciences',
+                'org_name' => 'Society of Hotel and Restaurant Progress',
+                'org_abbreviation' => 'SHARP',
+                'programs' => ['BS Hospitality Management'],
             ],
             [
-                "college_code" => "CHEFS",
-                "college_name" => "College of Human Ecology and Food Sciences",
-                "org_name" => "Union of Filipino Tourism and Travel Society",
-                "org_abbreviation" => "UFTTS",
-                "programs" => ["BS Tourism Management"]
+                'college_code' => 'CHEFS',
+                'college_name' => 'College of Human Ecology and Food Sciences',
+                'org_name' => 'Union of Filipino Tourism and Travel Society',
+                'org_abbreviation' => 'UFTTS',
+                'programs' => ['BS Tourism Management'],
             ],
             [
-                "college_code" => "CHS",
-                "college_name" => "College of Health Sciences",
-                "org_name" => "Nursing Student Association",
-                "org_abbreviation" => "NSA",
-                "programs" => ["BS Nursing"]
+                'college_code' => 'CHS',
+                'college_name' => 'College of Health Sciences',
+                'org_name' => 'Nursing Student Association',
+                'org_abbreviation' => 'NSA',
+                'programs' => ['BS Nursing'],
             ],
             [
-                "college_code" => "CBDEM",
-                "college_name" => "College of Business, Development Economics and Management",
-                "org_name" => "Junior Philippine Institute of Accountants",
-                "org_abbreviation" => "JPIA",
-                "programs" => ["BS Accountancy", "BS Management Accounting"]
+                'college_code' => 'CBDEM',
+                'college_name' => 'College of Business, Development Economics and Management',
+                'org_name' => 'Junior Philippine Institute of Accountants',
+                'org_abbreviation' => 'JPIA',
+                'programs' => ['BS Accountancy', 'BS Management Accounting'],
             ],
             [
-                "college_code" => "CBDEM",
-                "college_name" => "College of Business, Development Economics and Management",
-                "org_name" => "Junior Marketing Executives Society",
-                "org_abbreviation" => "JMES",
-                "programs" => ["BS Business Administration"]
+                'college_code' => 'CBDEM',
+                'college_name' => 'College of Business, Development Economics and Management',
+                'org_name' => 'Junior Marketing Executives Society',
+                'org_abbreviation' => 'JMES',
+                'programs' => ['BS Business Administration'],
             ],
             [
-                "college_code" => "CBDEM",
-                "college_name" => "College of Business, Development Economics and Management",
-                "org_name" => "Agribusiness Society",
-                "org_abbreviation" => "ABS",
-                "programs" => ["BS Agribusiness"]
+                'college_code' => 'CBDEM',
+                'college_name' => 'College of Business, Development Economics and Management',
+                'org_name' => 'Agribusiness Society',
+                'org_abbreviation' => 'ABS',
+                'programs' => ['BS Agribusiness'],
             ],
             [
-                "college_code" => "CBDEM",
-                "college_name" => "College of Business, Development Economics and Management",
-                "org_name" => "Agricultural Economics Society",
-                "org_abbreviation" => "AECOS",
-                "programs" => ["BS Agricultural Economics"]
+                'college_code' => 'CBDEM',
+                'college_name' => 'College of Business, Development Economics and Management',
+                'org_name' => 'Agricultural Economics Society',
+                'org_abbreviation' => 'AECOS',
+                'programs' => ['BS Agricultural Economics'],
             ],
             [
-                "college_code" => "CBDEM",
-                "college_name" => "College of Business, Development Economics and Management",
-                "org_name" => "Development Management Society",
-                "org_abbreviation" => "DMS",
-                "programs" => ["BS Development Management"]
+                'college_code' => 'CBDEM',
+                'college_name' => 'College of Business, Development Economics and Management',
+                'org_name' => 'Development Management Society',
+                'org_abbreviation' => 'DMS',
+                'programs' => ['BS Development Management'],
             ],
             [
-                "college_code" => "IMEAS",
-                "college_name" => "Institute of Middle East and Asian Studies",
-                "org_name" => "La Liga Diplomatica",
-                "org_abbreviation" => "LLD",
-                "programs" => ["BS International Relations"]
+                'college_code' => 'IMEAS',
+                'college_name' => 'Institute of Middle East and Asian Studies',
+                'org_name' => 'La Liga Diplomatica',
+                'org_abbreviation' => 'LLD',
+                'programs' => ['BS International Relations'],
             ],
             [
-                "college_code" => "CSM",
-                "college_name" => "College of Science and Mathematics",
-                "org_name" => "USM Biology Club",
-                "org_abbreviation" => "USMBC",
-                "programs" => ["BS Biology"]
+                'college_code' => 'CSM',
+                'college_name' => 'College of Science and Mathematics',
+                'org_name' => 'USM Biology Club',
+                'org_abbreviation' => 'USMBC',
+                'programs' => ['BS Biology'],
             ],
             [
-                "college_code" => "CSM",
-                "college_name" => "College of Science and Mathematics",
-                "org_name" => "USM Chemistry Society",
-                "org_abbreviation" => "CHEMSOC",
-                "programs" => ["BS Chemistry"]
+                'college_code' => 'CSM',
+                'college_name' => 'College of Science and Mathematics',
+                'org_name' => 'USM Chemistry Society',
+                'org_abbreviation' => 'CHEMSOC',
+                'programs' => ['BS Chemistry'],
             ],
             [
-                "college_code" => "CSM",
-                "college_name" => "College of Science and Mathematics",
-                "org_name" => "Development Communication Society",
-                "org_abbreviation" => "DCS",
-                "programs" => ["BS Development Communication"]
+                'college_code' => 'CSM',
+                'college_name' => 'College of Science and Mathematics',
+                'org_name' => 'Development Communication Society',
+                'org_abbreviation' => 'DCS',
+                'programs' => ['BS Development Communication'],
             ],
             [
-                "college_code" => "CVM",
-                "college_name" => "College of Veterinary Medicine",
-                "org_name" => "Association of Veterinary Medicine Students",
-                "org_abbreviation" => "AVMS",
-                "programs" => ["Doctor of Veterinary Medicine", "BS Veterinary Technology"]
+                'college_code' => 'CVM',
+                'college_name' => 'College of Veterinary Medicine',
+                'org_name' => 'Association of Veterinary Medicine Students',
+                'org_abbreviation' => 'AVMS',
+                'programs' => ['Doctor of Veterinary Medicine', 'BS Veterinary Technology'],
             ],
             [
-                "college_code" => "CVM",
-                "college_name" => "College of Veterinary Medicine",
-                "org_name" => "Society for the Advancement of Veterinary Education and Research",
-                "org_abbreviation" => "SAVER",
-                "programs" => ["Doctor of Veterinary Medicine", "BS Veterinary Technology"]
+                'college_code' => 'CVM',
+                'college_name' => 'College of Veterinary Medicine',
+                'org_name' => 'Society for the Advancement of Veterinary Education and Research',
+                'org_abbreviation' => 'SAVER',
+                'programs' => ['Doctor of Veterinary Medicine', 'BS Veterinary Technology'],
             ],
             [
-                "college_code" => "IPEAR",
-                "college_name" => "Institute of Physical Education and Recreation",
-                "org_name" => "Men Sana En Corpone Sano Society",
-                "org_abbreviation" => "MESECOS",
-                "programs" => ["Bachelor of Physical Education", "BS Exercise and Sports Sciences"]
-            ]
+                'college_code' => 'IPEAR',
+                'college_name' => 'Institute of Physical Education and Recreation',
+                'org_name' => 'Men Sana En Corpone Sano Society',
+                'org_abbreviation' => 'MESECOS',
+                'programs' => ['Bachelor of Physical Education', 'BS Exercise and Sports Sciences'],
+            ],
         ];
 
         $programCodeMap = [
-            "BS Agriculture" => "BSA",
-            "BS Fisheries" => "BSFISH",
-            "BS Civil Engineering" => "BSCE",
-            "BS Agricultural and Biosystems Engineering" => "BSABE",
-            "BS Computer Engineering" => "BSCOE",
-            "BS Electronics Engineering" => "BSECE",
-            "BS Information Systems" => "BSIS",
-            "BS Computer Science" => "BSCS",
-            "BS Food Technology" => "BSFT",
-            "BS Nutrition and Dietetics" => "BSND",
-            "BS Hospitality Management" => "BSHM",
-            "BS Tourism Management" => "BSTM",
-            "BS Nursing" => "BSN",
-            "BS Accountancy" => "BSACCT",
-            "BS Management Accounting" => "BSMAC",
-            "BS Business Administration" => "BSBA",
-            "BS Agribusiness" => "BSAB",
-            "BS Agricultural Economics" => "BSAGEC",
-            "BS Development Management" => "BSDM",
-            "BS International Relations" => "BSIR",
-            "BS Biology" => "BSBIO",
-            "BS Chemistry" => "BSCHEM",
-            "BS Development Communication" => "BSDC",
-            "Doctor of Veterinary Medicine" => "DVM",
-            "BS Veterinary Technology" => "BSVT",
-            "Bachelor of Physical Education" => "BPE",
-            "BS Exercise and Sports Sciences" => "BSESS",
-            "AB Psychology" => "ABPSY",
-            "AB English Language" => "ABEL",
-            "BS Criminology" => "BSCRIM",
-            "AB Political Science" => "ABPOL",
-            "AB Philosophy / Pre-Law" => "ABPHIL",
-            "Bachelor of Secondary Education major in English" => "BSE-EN",
-            "Bachelor of Secondary Education major in Filipino" => "BSE-FI",
-            "Bachelor of Secondary Education major in Social Studies" => "BSE-SS",
-            "Bachelor of Secondary Education major in Science" => "BSE-SC",
-            "Bachelor of Secondary Education major in Mathematics" => "BSE-MA",
-            "Bachelor of Elementary Education" => "BEED",
+            'BS Agriculture' => 'BSA',
+            'BS Fisheries' => 'BSFISH',
+            'BS Civil Engineering' => 'BSCE',
+            'BS Agricultural and Biosystems Engineering' => 'BSABE',
+            'BS Computer Engineering' => 'BSCOE',
+            'BS Electronics Engineering' => 'BSECE',
+            'BS Information Systems' => 'BSIS',
+            'BS Computer Science' => 'BSCS',
+            'BS Food Technology' => 'BSFT',
+            'BS Nutrition and Dietetics' => 'BSND',
+            'BS Hospitality Management' => 'BSHM',
+            'BS Tourism Management' => 'BSTM',
+            'BS Nursing' => 'BSN',
+            'BS Accountancy' => 'BSACCT',
+            'BS Management Accounting' => 'BSMAC',
+            'BS Business Administration' => 'BSBA',
+            'BS Agribusiness' => 'BSAB',
+            'BS Agricultural Economics' => 'BSAGEC',
+            'BS Development Management' => 'BSDM',
+            'BS International Relations' => 'BSIR',
+            'BS Biology' => 'BSBIO',
+            'BS Chemistry' => 'BSCHEM',
+            'BS Development Communication' => 'BSDC',
+            'Doctor of Veterinary Medicine' => 'DVM',
+            'BS Veterinary Technology' => 'BSVT',
+            'Bachelor of Physical Education' => 'BPE',
+            'BS Exercise and Sports Sciences' => 'BSESS',
+            'AB Psychology' => 'ABPSY',
+            'AB English Language' => 'ABEL',
+            'BS Criminology' => 'BSCRIM',
+            'AB Political Science' => 'ABPOL',
+            'AB Philosophy / Pre-Law' => 'ABPHIL',
+            'Bachelor of Secondary Education major in English' => 'BSE-EN',
+            'Bachelor of Secondary Education major in Filipino' => 'BSE-FI',
+            'Bachelor of Secondary Education major in Social Studies' => 'BSE-SS',
+            'Bachelor of Secondary Education major in Science' => 'BSE-SC',
+            'Bachelor of Secondary Education major in Mathematics' => 'BSE-MA',
+            'Bachelor of Elementary Education' => 'BEED',
         ];
 
         $collegesMap = [];
@@ -333,18 +336,26 @@ class DemoDataSeeder extends Seeder
 
         $osaAdmin = $this->upsertUser('osa.demo@usm.edu.ph', 'Demo OSA Admin', null, null, null);
         $this->ensureAdminAssignment($assignmentService, $osaAdmin, 'Super Admin (OSA)', null, null, $academicYear, $osaAdmin);
+        $demoVenue = Venue::firstOrCreate(
+            ['name' => 'University Gymnasium', 'campus_location' => 'Main Campus'],
+            [
+                'managing_office' => 'Physical Plant and Facilities Office',
+                'inquiry_instructions' => 'Confirm availability directly with PPFO before recording the reservation in EAES.',
+                'is_active' => true,
+            ]
+        );
 
         // 2. Loop through and create Colleges, Programs, and Organizations
         foreach ($orgsData as $data) {
             $collegeCode = $data['college_code'];
             $collegeName = $data['college_name'];
 
-            if (!isset($collegesMap[$collegeCode])) {
+            if (! isset($collegesMap[$collegeCode])) {
                 $college = College::firstOrCreate(
                     ['code' => $collegeCode],
                     [
                         'university_id' => $university->id,
-                        'name' => $collegeName
+                        'name' => $collegeName,
                     ]
                 );
                 $collegesMap[$collegeCode] = $college;
@@ -356,13 +367,13 @@ class DemoDataSeeder extends Seeder
             $localProgramIds = [];
             foreach ($data['programs'] as $pName) {
                 $pCode = $programCodeMap[$pName] ?? substr(strtoupper(preg_replace('/[^A-Z]/', '', $pName)), 0, 6);
-                
-                if (!isset($programsMap[$pCode])) {
+
+                if (! isset($programsMap[$pCode])) {
                     $program = Program::firstOrCreate(
                         ['code' => $pCode],
                         [
                             'college_id' => $college->id,
-                            'name' => $pName
+                            'name' => $pName,
                         ]
                     );
                     $programsMap[$pCode] = $program;
@@ -381,7 +392,7 @@ class DemoDataSeeder extends Seeder
                 [
                     'college_id' => $college->id,
                     'name' => $orgName,
-                    'type' => 'society'
+                    'type' => 'society',
                 ]
             );
             $orgsMap[$orgAcronym] = $org;
@@ -390,10 +401,10 @@ class DemoDataSeeder extends Seeder
             $org->programs()->syncWithoutDetaching($localProgramIds);
 
             // Create Society Admin
-            $adminEmail = strtolower($orgAcronym) . '.admin@usm.edu.ph';
+            $adminEmail = strtolower($orgAcronym).'.admin@usm.edu.ph';
             $adminUser = $this->upsertUser(
                 $adminEmail,
-                'Admin of ' . $orgAcronym,
+                'Admin of '.$orgAcronym,
                 $org,
                 $college,
                 count($localProgramIds) > 0 ? Program::find($localProgramIds[0]) : null
@@ -423,16 +434,16 @@ class DemoDataSeeder extends Seeder
         for ($i = 1; $i <= $studentCount; $i++) {
             $program = $allPrograms->random();
             $college = College::find($program->college_id);
-            
+
             // Find organization matching this program (if any)
             $org = $program->organizations()->first() ?? $orgsMap['PSITS'];
 
-            $idNum = '23-' . sprintf('%05d', 72000 + $i);
+            $idNum = '23-'.sprintf('%05d', 72000 + $i);
             $gender = $faker->randomElement(['male', 'female']);
             $firstName = ($gender === 'male') ? $faker->firstNameMale : $faker->firstNameFemale;
             $lastName = $faker->lastName;
-            $studentName = $firstName . ' ' . $lastName;
-            $email = strtolower($firstName . '.' . $lastName . $i) . '@usm.edu.ph';
+            $studentName = $firstName.' '.$lastName;
+            $email = strtolower($firstName.'.'.$lastName.$i).'@usm.edu.ph';
 
             $mockStudent = $this->upsertUser(
                 $email,
@@ -455,41 +466,43 @@ class DemoDataSeeder extends Seeder
             'PSITS' => 'CEIT',
             'APS' => 'CASS',
             'FSMS' => 'CED',
-            'JPIA' => 'CBDEM'
+            'JPIA' => 'CBDEM',
         ];
 
         $sentimentComments = [
             'positive' => [
-                "The speakers were very clear and engaging. Great event!",
-                "Maganda ang topic at marami akong natutunan sa event na ito.",
-                "Overall a great experience. Looking forward to the next summit!",
-                "Super organized ng event na ito, kudos to the officers!",
-                "Very educational and well-prepared. Worth my time."
+                'The speakers were very clear and engaging. Great event!',
+                'Maganda ang topic at marami akong natutunan sa event na ito.',
+                'Overall a great experience. Looking forward to the next summit!',
+                'Super organized ng event na ito, kudos to the officers!',
+                'Very educational and well-prepared. Worth my time.',
             ],
             'neutral' => [
-                "Okay naman ang event pero sana mas malaki ang venue next time.",
-                "It was fine, but some topics were quite repetitive.",
-                "Average event. The speaker was good but the sound system had issues.",
-                "Okay lang naman, medyo late lang nagsimula.",
-                "The event was informative but the aircon was not cool enough."
+                'Okay naman ang event pero sana mas malaki ang venue next time.',
+                'It was fine, but some topics were quite repetitive.',
+                'Average event. The speaker was good but the sound system had issues.',
+                'Okay lang naman, medyo late lang nagsimula.',
+                'The event was informative but the aircon was not cool enough.',
             ],
             'negative' => [
-                "Masyadong mainit sa venue at hindi narinig nang maayos ang speaker.",
-                "The schedule was not followed. We waited for 2 hours before starting.",
-                "Disorganized flow. The registration took too long and the lines were bad.",
-                "Walang kwenta yung event, sayang sa binayad at oras.",
-                "Very disappointing. The speakers were boring and unprepared."
-            ]
+                'Masyadong mainit sa venue at hindi narinig nang maayos ang speaker.',
+                'The schedule was not followed. We waited for 2 hours before starting.',
+                'Disorganized flow. The registration took too long and the lines were bad.',
+                'Walang kwenta yung event, sayang sa binayad at oras.',
+                'Very disappointing. The speakers were boring and unprepared.',
+            ],
         ];
 
         foreach ($featuredOrgs as $orgAcronym => $collegeCode) {
             $org = $orgsMap[$orgAcronym] ?? null;
             $college = $collegesMap[$collegeCode] ?? null;
-            if (!$org || !$college) continue;
+            if (! $org || ! $college) {
+                continue;
+            }
 
             // Define programs under this org
             $orgPrograms = $org->programs->pluck('id')->toArray();
-            
+
             // Filter seeded students belonging to this organization/programs
             $orgStudents = collect($seededStudents)->filter(function ($student) use ($orgPrograms) {
                 return in_array($student->program_id, $orgPrograms);
@@ -502,17 +515,17 @@ class DemoDataSeeder extends Seeder
 
             // --- A. Completed Event ---
             $completedEvent = Event::firstOrCreate(
-                ['title' => $orgAcronym . ' Annual Assembly 2026', 'organization_id' => $org->id],
+                ['title' => $orgAcronym.' Annual Assembly 2026', 'organization_id' => $org->id],
                 [
                     'proposal_category' => 'activity',
                     'status' => 'completed',
                     'start_date' => Carbon::today()->subDays(4),
                     'end_date' => Carbon::today()->subDays(4),
                     'location_type' => 'on-campus',
-                    'location_details' => $collegeCode . ' Multi-Purpose Hall',
+                    'location_details' => $collegeCode.' Multi-Purpose Hall',
                     'target_demographics' => [
                         'implementing_office' => $orgAcronym,
-                        'target_participants' => $orgAcronym . ' constituents',
+                        'target_participants' => $orgAcronym.' constituents',
                     ],
                     'budget_allocations' => [
                         'source_of_fund' => 'Trust fund',
@@ -525,6 +538,7 @@ class DemoDataSeeder extends Seeder
                     'evaluation_open' => true,
                 ]
             );
+            $this->seedConfirmedPermit($completedEvent, $demoVenue, $osaAdmin, now()->subDays(6));
             $completedEvent->loadMissing('evaluationFormVersion');
             $completedForm = $completedEvent->evaluationFormVersion
                 ?: EventEvaluationForm::createForEvent(
@@ -543,7 +557,7 @@ class DemoDataSeeder extends Seeder
                             'description' => 'Did the activity follow the expected schedule?',
                         ],
                     ],
-                    'Evaluation - ' . $completedEvent->title
+                    'Evaluation - '.$completedEvent->title
                 );
 
             $eventDay = EventDay::firstOrCreate(
@@ -588,7 +602,7 @@ class DemoDataSeeder extends Seeder
 
                 // Raw Scans
                 RawScan::firstOrCreate(
-                    ['dedup_key' => $eventDay->id . '-' . $student->id . '-time_in'],
+                    ['dedup_key' => $eventDay->id.'-'.$student->id.'-time_in'],
                     [
                         'event_id' => $completedEvent->id,
                         'event_day_id' => $eventDay->id,
@@ -601,7 +615,7 @@ class DemoDataSeeder extends Seeder
                 );
 
                 RawScan::firstOrCreate(
-                    ['dedup_key' => $eventDay->id . '-' . $student->id . '-time_out'],
+                    ['dedup_key' => $eventDay->id.'-'.$student->id.'-time_out'],
                     [
                         'event_id' => $completedEvent->id,
                         'event_day_id' => $eventDay->id,
@@ -616,7 +630,7 @@ class DemoDataSeeder extends Seeder
                 // Evaluation
                 $sentiment = $faker->randomElement(['positive', 'positive', 'neutral', 'negative']); // weight positive
                 $comment = $faker->randomElement($sentimentComments[$sentiment]);
-                $score = ($sentiment === 'positive') ? $faker->randomFloat(2, 0.7, 0.99) : 
+                $score = ($sentiment === 'positive') ? $faker->randomFloat(2, 0.7, 0.99) :
                          (($sentiment === 'neutral') ? $faker->randomFloat(2, 0.4, 0.69) : $faker->randomFloat(2, 0.1, 0.39));
 
                 Evaluation::firstOrCreate(
@@ -644,7 +658,7 @@ class DemoDataSeeder extends Seeder
 
             // --- B. Upcoming/Approved Event ---
             $approvedEvent = Event::firstOrCreate(
-                ['title' => $orgAcronym . ' Development Seminar 2026', 'organization_id' => $org->id],
+                ['title' => $orgAcronym.' Development Seminar 2026', 'organization_id' => $org->id],
                 [
                     'proposal_category' => 'activity',
                     'status' => 'approved',
@@ -667,13 +681,14 @@ class DemoDataSeeder extends Seeder
                     'evaluation_open' => false,
                 ]
             );
+            $this->seedConfirmedPermit($approvedEvent, $demoVenue, $osaAdmin, now()->subDays(2));
             $approvedEvent->loadMissing('evaluationFormVersion');
-            if (!$approvedEvent->evaluationFormVersion) {
+            if (! $approvedEvent->evaluationFormVersion) {
                 EventEvaluationForm::createForEvent(
                     $approvedEvent,
                     null,
                     EvaluationQuestions::defaultSchema(),
-                    'Evaluation - ' . $approvedEvent->title
+                    'Evaluation - '.$approvedEvent->title
                 );
             }
 
@@ -686,6 +701,49 @@ class DemoDataSeeder extends Seeder
                 ]
             );
         }
+    }
+
+    private function seedConfirmedPermit(Event $event, Venue $venue, User $approver, Carbon $approvedAt): void
+    {
+        $proposalPath = "demo/permits/{$event->id}/ppa.docx";
+        $confirmationPath = "demo/permits/{$event->id}/venue-confirmation.pdf";
+
+        Storage::disk('local')->put($proposalPath, 'Demo PPA document');
+        Storage::disk('local')->put($confirmationPath, 'Demo venue confirmation evidence');
+
+        $event->update([
+            'venue_id' => $venue->id,
+            'location_type' => 'on-campus',
+            'location_details' => $venue->displayName(),
+            'venue_confirmation_office' => $venue->managing_office,
+            'venue_confirmation_date' => $approvedAt->toDateString(),
+            'venue_confirmation_reference_number' => 'DEMO-'.$event->id,
+            'venue_confirmation_document_path' => $confirmationPath,
+            'venue_confirmation_document_original_name' => 'venue-confirmation.pdf',
+            'proposal_document_path' => $proposalPath,
+            'proposal_document_original_name' => 'ppa.docx',
+            'permit_version' => 1,
+        ]);
+
+        EventPermitVersion::updateOrCreate(
+            ['event_id' => $event->id, 'version_number' => 1],
+            [
+                'venue_id' => $venue->id,
+                'venue_name_snapshot' => $venue->name,
+                'venue_location_snapshot' => $venue->campus_location,
+                'location_type' => 'on-campus',
+                'location_details' => $venue->displayName(),
+                'confirmation_office' => $venue->managing_office,
+                'confirmation_date' => $approvedAt->toDateString(),
+                'confirmation_reference_number' => 'DEMO-'.$event->id,
+                'confirmation_document_path' => $confirmationPath,
+                'confirmation_document_original_name' => 'venue-confirmation.pdf',
+                'ppa_document_path' => $proposalPath,
+                'ppa_document_original_name' => 'ppa.docx',
+                'approved_by' => $approver->id,
+                'approved_at' => $approvedAt,
+            ]
+        );
     }
 
     private function upsertUser(
@@ -701,7 +759,7 @@ class DemoDataSeeder extends Seeder
             array_merge([
                 'name' => $name,
                 'password' => Hash::make('password123'),
-                'google_sub' => 'demo-' . str_replace(['@', '.'], '-', $email),
+                'google_sub' => 'demo-'.str_replace(['@', '.'], '-', $email),
                 'organization_id' => $organization?->id,
                 'college_id' => $college?->id,
                 'program_id' => $program?->id,
@@ -722,10 +780,11 @@ class DemoDataSeeder extends Seeder
     ): void {
         if ($user->adminAssignments()
             ->where('role_name', $roleName)
-            ->where('status', \App\Models\AdminAssignment::STATUS_ACTIVE)
+            ->where('status', AdminAssignment::STATUS_ACTIVE)
             ->where('academic_year', $academicYear)
             ->exists()) {
             $service->syncUserProjection($user);
+
             return;
         }
 
