@@ -1819,7 +1819,7 @@ dialog.modal-content::backdrop {
     background: rgba(2, 6, 23, 0.56);
 }
 
-/* ─── Eventia Login — Guest Shell ────────────────────────── */
+/* ─── Eventia Landing & Login — Guest Shell ───────────────── */
 
 .guest-shell {
     position: relative;
@@ -1841,7 +1841,7 @@ dialog.modal-content::backdrop {
     position: absolute;
     inset: 0;
     z-index: 0;
-    background: linear-gradient(135deg, rgba(6, 39, 22, 0.65) 0%, rgba(11, 58, 37, 0.55) 48%, rgba(16, 36, 27, 0.7) 100%);
+    background: linear-gradient(135deg, rgba(4, 25, 14, 0.72) 0%, rgba(8, 42, 26, 0.58) 50%, rgba(10, 26, 18, 0.75) 100%);
     pointer-events: none;
 }
 
@@ -1853,190 +1853,349 @@ dialog.modal-content::backdrop {
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 1.5rem;
+    padding: 2rem;
+    box-sizing: border-box;
 }
 
-/* ─── Eventia Login — Layout ─────────────────────────────── */
+/* ─── Eventia Landing — Layout Grid ──────────────────────── */
 
-.eventia-login {
+.eventia-landing-wrap {
     width: 100%;
-    max-width: 26rem;
+    max-width: 68rem;
+    margin: 0 auto;
+}
+
+.eventia-landing-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(20rem, 25rem);
+    align-items: center;
+    gap: 3.5rem;
+    width: 100%;
+}
+
+/* ─── Eventia Left Panel (Brand & Product) ───────────────── */
+
+.eventia-brand-panel {
+    display: flex;
+    flex-direction: column;
+    animation: eventia-fade-up 600ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.eventia-brand-header {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 0.75rem;
+}
+
+.eventia-logo-wrap {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 4.5rem;
+    height: 4.5rem;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(244, 217, 120, 0.22);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    flex-shrink: 0;
+}
+
+.eventia-brand-logo {
+    width: 3.5rem;
+    height: 3.5rem;
+    object-fit: contain;
+    filter: drop-shadow(0 6px 18px rgba(212, 175, 55, 0.25));
+    animation: eventia-logo-float 4.5s ease-in-out infinite;
+}
+
+.eventia-inst-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.35rem 0.85rem;
+    border-radius: 9999px;
+    background: rgba(14, 93, 54, 0.4);
+    border: 1px solid rgba(244, 217, 120, 0.3);
+    color: #f4d978;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+}
+
+.eventia-inst-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 9999px;
+    background: #22c55e;
+    box-shadow: 0 0 8px #22c55e;
+    flex-shrink: 0;
+}
+
+/* Brand Hero */
+.eventia-brand-hero {
+    margin-top: 0.25rem;
+}
+
+.eventia-brand-title {
+    font-size: clamp(2.4rem, 3.8vw, 3.4rem);
+    font-weight: 800;
+    line-height: 1.05;
+    letter-spacing: -0.025em;
+    background: linear-gradient(135deg, #ffffff 40%, #f4d978 80%, #d4af37 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    filter: drop-shadow(0 2px 14px rgba(0, 0, 0, 0.45));
+}
+
+.eventia-brand-tagline {
+    margin-top: 0.65rem;
+    font-size: 1.025rem;
+    font-weight: 600;
+    line-height: 1.4;
+    color: #f1f5f9;
+    letter-spacing: -0.01em;
+}
+
+.eventia-brand-desc {
+    margin-top: 0.45rem;
+    font-size: 0.825rem;
+    line-height: 1.6;
+    color: #94a3b8;
+    max-width: 30rem;
+}
+
+/* Feature Highlights */
+.eventia-features {
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+    margin-top: 1.25rem;
+}
+
+.eventia-feature-card {
+    display: flex;
+    align-items: center;
+    gap: 0.85rem;
+    padding: 0.65rem 0.85rem;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    transition: transform 200ms ease, background-color 200ms ease, border-color 200ms ease;
+}
+
+.eventia-feature-card:hover {
+    background: rgba(255, 255, 255, 0.07);
+    border-color: rgba(244, 217, 120, 0.28);
+    transform: translateX(4px);
+}
+
+.eventia-feature-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.15rem;
+    height: 2.15rem;
+    border-radius: 8px;
+    background: rgba(14, 93, 54, 0.45);
+    color: #f4d978;
+    border: 1px solid rgba(212, 175, 55, 0.22);
+    flex-shrink: 0;
+}
+
+.eventia-feature-content {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+}
+
+.eventia-feature-title {
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: #f8fafc;
+}
+
+.eventia-feature-desc {
+    font-size: 0.72rem;
+    color: #94a3b8;
+    line-height: 1.35;
+}
+
+/* ─── Eventia Right Panel (Frosted Glass Auth Card) ──────── */
+
+.eventia-auth-panel {
+    width: 100%;
     animation: eventia-card-in 680ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-.eventia-login-card {
+.eventia-glass-card {
     position: relative;
     overflow: hidden;
-    border-radius: 16px;
-    background: rgba(255, 255, 255, 0.95);
+    border-radius: 18px;
+    background: rgba(6, 28, 17, 0.76);
     border: 1px solid rgba(244, 217, 120, 0.22);
     box-shadow:
-        0 0 0 1px rgba(255, 255, 255, 0.18) inset,
-        0 0 60px rgba(244, 217, 120, 0.1),
-        0 24px 64px rgba(3, 24, 14, 0.45);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
+        0 0 0 1px rgba(255, 255, 255, 0.08) inset,
+        0 24px 60px rgba(0, 0, 0, 0.55),
+        0 0 50px rgba(14, 93, 54, 0.32);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
     transition: border-color 220ms ease, box-shadow 220ms ease, transform 220ms ease;
 }
 
-.eventia-login-card:hover {
-    border-color: rgba(212, 175, 55, 0.36);
+.eventia-glass-card:hover {
+    border-color: rgba(212, 175, 55, 0.42);
     box-shadow:
-        0 0 0 1px rgba(255, 255, 255, 0.22) inset,
-        0 0 72px rgba(244, 217, 120, 0.14),
-        0 28px 68px rgba(3, 24, 14, 0.42);
+        0 0 0 1px rgba(255, 255, 255, 0.12) inset,
+        0 28px 68px rgba(0, 0, 0, 0.6),
+        0 0 60px rgba(212, 175, 55, 0.18);
     transform: translateY(-2px);
 }
 
 /* Gold accent bar */
-.eventia-login-bar {
+.eventia-card-bar {
     height: 4px;
     background: linear-gradient(90deg, #d4af37 0%, #f4d978 48%, #0e5d36 100%);
 }
 
 /* Card body */
-.eventia-login-body {
-    padding: 2rem 2rem 1.5rem;
+.eventia-card-body {
+    padding: 2rem 2rem 1.6rem;
     text-align: center;
 }
 
-/* ─── Logo ───────────────────────────────────────────────── */
-
-.eventia-login-brand {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    margin-bottom: 0.75rem;
-}
-
-.eventia-login-logo {
-    width: 4.5rem;
-    height: 4.5rem;
-    object-fit: contain;
-    filter: drop-shadow(0 8px 20px rgba(14, 93, 54, 0.15));
-    animation: eventia-logo-float 4s ease-in-out 1s infinite;
-}
-
-/* ─── Typography ─────────────────────────────────────────── */
-
-.eventia-login-title {
-    color: #102018;
-    font-size: 1.5rem;
-    line-height: 1.2;
-    font-weight: 800;
+.eventia-card-title {
+    color: #ffffff;
+    font-size: 1.35rem;
+    font-weight: 700;
+    line-height: 1.25;
     letter-spacing: -0.01em;
 }
 
-.eventia-login-subtitle {
-    margin-top: 0.2rem;
-    color: #0e5d36;
-    font-size: 0.875rem;
-    font-weight: 600;
-    letter-spacing: 0.02em;
-}
-
-.eventia-login-hint {
+.eventia-card-subtitle {
     margin-top: 0.35rem;
-    color: #667568;
-    font-size: 0.75rem;
+    color: #94a3b8;
+    font-size: 0.8rem;
+    line-height: 1.4;
 }
 
-/* ─── Error Flash ────────────────────────────────────────── */
-
-.eventia-login-error {
+/* Error Alert */
+.eventia-card-error {
     display: flex;
     align-items: flex-start;
     gap: 0.5rem;
     margin-top: 1rem;
     padding: 0.75rem;
     border-radius: 10px;
-    background: #fee2e2;
-    color: #dc2626;
+    background: rgba(239, 68, 68, 0.15);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    color: #fca5a5;
     font-size: 0.82rem;
     line-height: 1.4;
     text-align: left;
 }
 
-/* ─── Google OAuth Button ────────────────────────────────── */
-
+/* Google OAuth Button */
 .eventia-google-btn {
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 0.75rem;
     width: 100%;
-    min-height: 3rem;
+    min-height: 3.1rem;
     margin-top: 1.5rem;
     padding: 0.75rem 1.25rem;
-    border: 1px solid #d7e2db;
-    border-radius: 10px;
-    color: #1f2b24;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 12px;
+    color: #0f172a;
     background: #ffffff;
     font-size: 0.875rem;
     font-weight: 600;
     text-decoration: none;
-    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
     cursor: pointer;
-    transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease, background-color 180ms ease;
+    transition: all 180ms ease;
     outline: none;
 }
 
 .eventia-google-btn:hover {
-    background: #f7faf8;
-    border-color: rgba(14, 93, 54, 0.28);
-    box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+    background: #f8fafc;
+    border-color: rgba(244, 217, 120, 0.6);
+    box-shadow: 0 8px 24px rgba(212, 175, 55, 0.25), 0 2px 6px rgba(0, 0, 0, 0.2);
     transform: translateY(-1px);
 }
 
 .eventia-google-btn:focus-visible {
-    border-color: #0e5d36;
-    box-shadow: 0 0 0 4px rgba(212, 175, 55, 0.22), 0 0 0 2px rgba(14, 93, 54, 0.32);
+    border-color: #f4d978;
+    box-shadow: 0 0 0 4px rgba(212, 175, 55, 0.3);
 }
 
 .eventia-google-btn:active {
     transform: scale(0.99);
 }
 
-/* ─── Domain Note ────────────────────────────────────────── */
-
-.eventia-domain-note {
-    margin-top: 1rem;
-    padding: 0.65rem 0.875rem;
-    border: 1px solid rgba(14, 93, 54, 0.14);
-    border-radius: 10px;
-    color: #0a4b2b;
-    background: #eef8f1;
+/* Domain Pill */
+.eventia-domain-pill {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.45rem;
+    margin-top: 1.15rem;
+    padding: 0.6rem 0.85rem;
+    border-radius: 9px;
+    background: rgba(14, 93, 54, 0.32);
+    border: 1px solid rgba(34, 197, 94, 0.22);
+    color: #86efac;
     font-size: 0.75rem;
     text-align: center;
 }
 
-/* ─── Security Note ──────────────────────────────────────── */
+.eventia-domain-pill strong {
+    color: #ffffff;
+}
 
-.eventia-security-note {
-    margin-top: 0.75rem;
-    color: #7b8b82;
+/* Security Notice */
+.eventia-card-security {
+    margin-top: 0.85rem;
+    color: #64748b;
     font-size: 0.7rem;
     line-height: 1.5;
     text-align: center;
 }
 
-/* ─── Footer ─────────────────────────────────────────────── */
-
-.eventia-login-footer {
+/* Footer */
+.eventia-card-footer {
     padding: 0.75rem 2rem;
-    border-top: 1px solid rgba(14, 93, 54, 0.08);
-    color: #94a3b8;
-    font-size: 0.68rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    color: #64748b;
+    font-size: 0.7rem;
     text-align: center;
-    background: rgba(248, 251, 249, 0.6);
+    background: rgba(0, 0, 0, 0.22);
 }
 
 /* ─── Animations ─────────────────────────────────────────── */
 
+@keyframes eventia-fade-up {
+    from {
+        opacity: 0;
+        transform: translateY(16px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
 @keyframes eventia-card-in {
     from {
         opacity: 0;
-        transform: translateY(18px) scale(0.98);
+        transform: translateY(20px) scale(0.98);
     }
     to {
         opacity: 1;
@@ -2047,76 +2206,91 @@ dialog.modal-content::backdrop {
 @keyframes eventia-logo-float {
     0%, 100% {
         transform: translateY(0);
-        filter: drop-shadow(0 8px 20px rgba(14, 93, 54, 0.15));
+        filter: drop-shadow(0 6px 18px rgba(212, 175, 55, 0.25));
     }
     50% {
         transform: translateY(-3px);
-        filter: drop-shadow(0 12px 24px rgba(212, 175, 55, 0.2));
+        filter: drop-shadow(0 10px 22px rgba(212, 175, 55, 0.35));
     }
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .eventia-login,
-    .eventia-login-logo {
+    .eventia-brand-panel,
+    .eventia-auth-panel,
+    .eventia-brand-logo {
         animation: none;
     }
 
-    .eventia-login-card,
-    .eventia-google-btn {
+    .eventia-glass-card,
+    .eventia-google-btn,
+    .eventia-feature-card {
         transition: none;
     }
 
-    .eventia-login-card:hover,
-    .eventia-google-btn:hover {
+    .eventia-glass-card:hover,
+    .eventia-google-btn:hover,
+    .eventia-feature-card:hover {
         transform: none;
     }
 }
 
-/* ─── Mobile ─────────────────────────────────────────────── */
+/* ─── Mobile & Tablet Responsiveness ─────────────────────── */
 
-@media (max-width: 767px) {
+@media (max-width: 960px) {
+    .guest-shell {
+        height: auto;
+        min-height: 100dvh;
+        overflow-y: auto;
+    }
+
     .guest-card-wrap {
-        padding: 1rem;
+        padding: 2rem 1.25rem;
         align-items: center;
+        height: auto;
+        min-height: 100dvh;
     }
 
-    .eventia-login {
-        max-width: 100%;
+    .eventia-landing-grid {
+        grid-template-columns: 1fr;
+        gap: 2rem;
+        text-align: center;
     }
 
-    .eventia-login-card {
-        border-radius: 14px;
+    .eventia-brand-header {
+        justify-content: center;
     }
 
-    .eventia-login-body {
-        padding: 1.5rem 1.5rem 1.25rem;
+    .eventia-brand-desc {
+        margin-left: auto;
+        margin-right: auto;
     }
 
-    .eventia-login-logo {
-        width: 3.75rem;
-        height: 3.75rem;
+    .eventia-features {
+        display: none;
     }
 
-    .eventia-login-title {
-        font-size: 1.35rem;
+    .eventia-glass-card {
+        max-width: 25rem;
+        margin: 0 auto;
+    }
+}
+
+@media (max-width: 480px) {
+    .guest-card-wrap {
+        padding: 1.5rem 1rem;
+    }
+
+    .eventia-card-body {
+        padding: 1.5rem 1.25rem 1.25rem;
+    }
+
+    .eventia-brand-title {
+        font-size: 2.25rem;
     }
 
     .eventia-google-btn {
         min-height: 3.25rem;
-    }
-
-    .eventia-login-footer {
-        padding: 0.65rem 1.5rem;
-    }
-}
-
-@media (max-width: 374px) {
-    .eventia-login-title {
-        font-size: 1.2rem;
-    }
-
-    .eventia-login-body {
-        padding: 1.25rem 1rem 1rem;
+        font-size: 0.825rem;
     }
 }
 
