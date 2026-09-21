@@ -4,8 +4,9 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="{{ csrf_token() }}">
-    <title>{{ $title ?? 'EAES — USM Event Attendance & Evaluation System' }}</title>
-    <meta name="description" content="University of Southern Mindanao Event Attendance and Evaluation System">
+    <title>{{ $title ?? 'Eventia — USM Event Attendance & Evaluation System' }}</title>
+    <meta name="description" content="Eventia — University of Southern Mindanao Event Attendance and Evaluation System">
+    <link rel="icon" type="image/png" href="{{ asset('images/eventia-logo.png') }}">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Fira+Code:wght@400;500;600&display=swap" rel="stylesheet">
@@ -120,7 +121,10 @@
         <button @click="toggle()" class="btn-icon text-white" aria-label="Toggle navigation">
             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
         </button>
-        <span class="font-display text-sm">EAES</span>
+        <div class="flex items-center gap-2">
+            <img src="{{ asset('images/eventia-logo.png') }}" alt="Eventia emblem" class="w-7 h-7 object-contain" />
+            <span class="font-display text-sm font-bold tracking-tight">Eventia</span>
+        </div>
         <div class="w-8 h-8 rounded-full bg-(--color-sidebar-active) flex items-center justify-center text-xs font-semibold">
             {{ substr(auth()->user()->name ?? 'U', 0, 1) }}
         </div>
@@ -134,10 +138,10 @@
         <div class="p-5 border-b border-white/10">
             <div class="eaes-brand">
                 <span class="eaes-brand-mark" aria-hidden="true">
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+                    <img src="{{ asset('images/eventia-logo.png') }}" alt="Eventia emblem" class="w-7 h-7 object-contain" />
                 </span>
                 <div>
-                    <h1 class="eaes-brand-title">EAES</h1>
+                    <h1 class="eaes-brand-title">Eventia</h1>
                     <p class="eaes-brand-subtitle">Event Attendance & Evaluation</p>
                 </div>
             </div>

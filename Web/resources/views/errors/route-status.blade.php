@@ -23,8 +23,9 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{{ $status }} - {{ $title }} - EAES</title>
-    <meta name="description" content="EAES route status page">
+    <title>{{ $status }} - {{ $title }} - Eventia</title>
+    <meta name="description" content="Eventia route status page">
+    <link rel="icon" type="image/png" href="{{ asset('images/eventia-logo.png') }}">
     <link rel="stylesheet" href="{{ asset('css/site-refresh.css') }}">
 </head>
 <body class="route-error-body">
@@ -40,7 +41,7 @@
             </div>
             <div>
                 <dt>System</dt>
-                <dd>EAES Portal</dd>
+                <dd>Eventia Portal</dd>
             </div>
         </dl>
 
