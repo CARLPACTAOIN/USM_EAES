@@ -22,7 +22,13 @@
 
                 {{-- Display Title & Tagline --}}
                 <div class="eventia-brand-hero">
-                    <h1 id="brand-title" class="eventia-brand-title font-display">Eventia</h1>
+                    <div class="eventia-title-lockup">
+                        <h1 id="brand-title" class="eventia-brand-title font-display">
+                            <span class="eventia-title-gradient">Eventia</span>
+                            <span class="eventia-title-sparkle" aria-hidden="true">✦</span>
+                        </h1>
+                        <div class="eventia-title-glow-line" aria-hidden="true"></div>
+                    </div>
                     <p class="eventia-brand-tagline">
                         Seamless Attendance. Instant Verification. Effortless Evaluation.
                     </p>

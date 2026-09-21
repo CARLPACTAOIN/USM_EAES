@@ -1947,18 +1947,76 @@ dialog.modal-content::backdrop {
 
 /* Brand Hero */
 .eventia-brand-hero {
-    margin-top: 0.25rem;
+    margin-top: 0.35rem;
+}
+
+.eventia-title-lockup {
+    position: relative;
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-start;
 }
 
 .eventia-brand-title {
-    font-size: clamp(2.4rem, 3.8vw, 3.4rem);
-    font-weight: 800;
-    line-height: 1.05;
-    letter-spacing: -0.025em;
-    background: linear-gradient(135deg, #ffffff 40%, #f4d978 80%, #d4af37 100%);
+    position: relative;
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.35rem;
+    font-family: 'Outfit', var(--font-sans, system-ui), sans-serif;
+    font-size: clamp(2.85rem, 4.6vw, 4.25rem);
+    font-weight: 900;
+    line-height: 0.98;
+    letter-spacing: -0.04em;
+    margin: 0;
+}
+
+.eventia-title-gradient {
+    background: linear-gradient(135deg, #ffffff 0%, #fffbeb 30%, #fde047 65%, #f59e0b 85%, #d97706 100%);
+    background-size: 200% auto;
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
-    filter: drop-shadow(0 2px 14px rgba(0, 0, 0, 0.45));
+    filter: drop-shadow(0 4px 24px rgba(245, 158, 11, 0.38)) drop-shadow(0 2px 4px rgba(0, 0, 0, 0.6));
+    animation: eventia-title-sheen 8s ease-in-out infinite alternate;
+}
+
+.eventia-title-sparkle {
+    font-size: 0.38em;
+    color: #fde047;
+    text-shadow: 0 0 12px rgba(253, 224, 71, 0.8), 0 0 24px rgba(245, 158, 11, 0.6);
+    transform: translateY(-0.75em);
+    animation: eventia-sparkle-pulse 3s ease-in-out infinite;
+    user-select: none;
+}
+
+.eventia-title-glow-line {
+    width: 5.5rem;
+    height: 3px;
+    margin-top: 0.75rem;
+    margin-bottom: 0.65rem;
+    border-radius: 9999px;
+    background: linear-gradient(90deg, #f59e0b 0%, #fde047 50%, transparent 100%);
+    box-shadow: 0 0 14px rgba(245, 158, 11, 0.7);
+}
+
+@keyframes eventia-title-sheen {
+    0% {
+        background-position: 0% 50%;
+    }
+    100% {
+        background-position: 100% 50%;
+    }
+}
+
+@keyframes eventia-sparkle-pulse {
+    0%, 100% {
+        transform: translateY(-0.75em) scale(1);
+        opacity: 0.85;
+    }
+    50% {
+        transform: translateY(-0.75em) scale(1.25) rotate(15deg);
+        opacity: 1;
+        filter: drop-shadow(0 0 8px #fef08a);
+    }
 }
 
 .eventia-brand-tagline {
