@@ -190,12 +190,12 @@ DB::transaction(function () use ($eventId, $studentIds) {
 
 * **Feature 4.1 \- Earliest-In / Latest-Out Resolution:** Merges multi-device raw logs down to a single canonical record containing the minimum entry timestamp and maximum exit timestamp per student.  
 * **Feature 4.2 \- Organizer-Owned Late Cutoff:** The event organizer may set an optional event-level **Late cutoff** in minutes after the scheduled start time from a separate Attendance Rules control. OSA does not review or approve this attendance policy value. When the organizer leaves the event cutoff unset, each approved participating organization may set a `late_cutoff_min` fallback for its own `event_participation_scope`; otherwise the organizer's event cutoff applies to all scopes. Attendance rules are editable only before the event starts. Attendance reports and analytics use one official attendance status based on this event-first, scope-fallback policy.
-* **Feature 4.3 \- Multi-Day Session Management:** Dynamically tracks attendance on a daily basis for multi-day events, generating daily canonical entries while presenting an integrated summary.
+* **Feature 4.3 \- Multi-Day and Multi-Session Attendance Management:** Dynamically tracks attendance per event day and per configurable same-day session. Whole-day events may define multiple non-overlapping sessions (for example, pre-lunch and post-lunch segments) with independent Time-In/Time-Out windows, while single-session days remain the default for simpler events and legacy records. Attendance reports present session-level completion (`complete` / `partial`) and an integrated event summary; the event-level evaluation gate remains one submission per event.
 
 ### **Epic 5: Student Evaluation Portal & Gate Enforcement**
 
 * **Feature 5.1 \- Event-Specific Digital Activity Evaluation Forms:** Each event proposal carries its own organizer-drafted evaluation form using dynamic 1-5 Likert questions plus one open comment field. OSA reviews the exact form with the PPA metadata, and approval requires a locked event-level evaluation form snapshot that all attendees answer for that approved event.
-* **Feature 5.2 \- Evaluation Gate Mechanism:** Keeps a student's AttendanceRecord.valid status set to false until they submit their evaluation form. The submission window closes exactly 24 hours after the event (or final day) concludes.
+* **Feature 5.2 \- Evaluation Gate Mechanism:** Keeps a student's AttendanceRecord.valid status set to false until they submit their evaluation form. The submission window closes exactly 24 hours after the event concludes, using the final configured session end time on the final event day when sessions exist.
 * **Feature 5.3 \- Event Lifecycle Automation:** Proposal approval remains separate from event runtime state. Approved events use `events.lifecycle_phase` with `scheduled`, `active`, `ended`, `evaluation_open`, `evaluation_closed`, `processing`, and `completed` phases computed from `event_days`, the 24-hour evaluation window, unresolved scans/pending links, sentiment processing, and scanner-session closure.
 
 ### **Epic 6: Analytics & Compiled Export Module**
@@ -217,7 +217,9 @@ DB::transaction(function () use ($eventId, $studentIds) {
                     event\_id matches current ID  
                                   │  
                                   ▼  
-                     Group scans by student\_id  
+                     Group scans by student\_id,
+                  participation scope, day, and
+                configured event-day session when present
                                   │  
                                   ▼  
                      For each student grouped:  
@@ -232,16 +234,19 @@ DB::transaction(function () use ($eventId, $studentIds) {
                                   │  
                                   ▼  
                    Evaluate Punctuality Statuses:  
-                 Compare time\_in vs. start\_time   
-                  using Dual-Threshold logic  
+                 Compare time\_in vs. session
+                  start\_time using official
+                  event/scope late-cutoff logic
                                   │  
                                   ▼  
                      Check Left-Early anomalies:  
-                      Is time\_out \< end\_time \-   
+                      Is time\_out \< session
+                       end\_time \-
                        left\_early\_buffer?  
                                   │  
                                   ▼  
                   UPSERT canonical attendance\_record
+            keyed by event, scope, day, session, and student
 
 ## **6\. Embedded AI Engine Specification**
 
@@ -434,6 +439,16 @@ JSON Response Schema:
 * start\_time (Time)  
 * end\_time (Time)
 
+#### **event\_day\_sessions**
+
+* id (UUID, Primary Key)
+* event\_day\_id (UUID, Foreign Key to event\_days)
+* session\_number (Integer, ordered within the day)
+* name (String)
+* start\_time (Time)
+* end\_time (Time)
+* required\_for\_attendance (Boolean, Default true)
+
 #### **event\_permit\_versions**
 
 * id (UUID, Primary Key), event\_id, version\_number (sequential and unique per event)
@@ -501,6 +516,7 @@ JSON Response Schema:
 * event\_id (UUID, Foreign Key)  
 * event\_participation\_scope\_id (UUID, Foreign Key to event\_participation\_scopes, Nullable for legacy scans)  
 * event\_day\_id (UUID, Foreign Key, Nullable)  
+* event\_day\_session\_id (UUID, Foreign Key to event\_day\_sessions, Nullable for legacy/full-day scans)
 * scanner\_session\_id (UUID, Foreign Key, Nullable)  
 * scanner\_user\_id (UUID, Foreign Key, Nullable)  
 * captured\_by\_organization\_id (UUID, Nullable)  
@@ -520,12 +536,14 @@ JSON Response Schema:
 * event\_id (UUID, Foreign Key)  
 * event\_participation\_scope\_id (UUID, Foreign Key to event\_participation\_scopes, Nullable for legacy records)  
 * event\_day\_id (UUID, Foreign Key, Nullable)  
+* event\_day\_session\_id (UUID, Foreign Key to event\_day\_sessions, Nullable for legacy/full-day records)
 * student\_id (UUID, Foreign Key)  
 * time\_in (DateTime TZ, Nullable)  
 * time\_out (DateTime TZ, Nullable)  
 * society\_status (Enum: "present\_on\_time", "late", "late\_cutoff", "absent"; official event/scope cutoff status)
 * competition\_status (Enum: "present\_on\_time", "late", "late\_cutoff", "absent"; compatibility mirror of official status)
 * left\_early (Boolean, Default false)  
+* completion\_status (Enum/String: "complete", "partial"; per-session Time-In/Time-Out completion summary)
 * valid (Boolean, Default false) \-\> *Toggled to true via the Evaluation Gate*  
 * force\_validated (Boolean, Default false)  
 * validated\_by (UUID, Foreign Key, Nullable)

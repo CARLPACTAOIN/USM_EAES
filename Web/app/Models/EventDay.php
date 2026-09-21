@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class EventDay extends Model
 {
@@ -25,6 +26,11 @@ class EventDay extends Model
     public function event()
     {
         return $this->belongsTo(Event::class);
+    }
+
+    public function sessions(): HasMany
+    {
+        return $this->hasMany(EventDaySession::class)->orderBy('session_number');
     }
 
     public function rawScans()

@@ -19,6 +19,7 @@ use App\Services\AdminScopeService;
 use App\Services\EventNotificationService;
 use App\Services\EventPermitService;
 use App\Services\EventProposalDraftService;
+use App\Services\EventSessionScheduleService;
 use App\Services\ParticipationScopeService;
 use App\Services\ScannerAssignmentService;
 use App\Services\ScannerSessionService;
@@ -44,6 +45,7 @@ class DashboardController extends Controller
         private readonly EventNotificationService $eventNotifications,
         private readonly EventProposalDraftService $proposalDrafts,
         private readonly EventPermitService $eventPermits,
+        private readonly EventSessionScheduleService $sessionSchedules,
     ) {}
 
     /**
@@ -178,6 +180,11 @@ class DashboardController extends Controller
             'event_days.*.date' => 'required|date',
             'event_days.*.start_time' => 'required|date_format:H:i',
             'event_days.*.end_time' => 'required|date_format:H:i',
+            'event_days.*.sessions' => 'nullable|array|min:1',
+            'event_days.*.sessions.*.name' => 'nullable|string|max:80',
+            'event_days.*.sessions.*.start_time' => 'required|date_format:H:i',
+            'event_days.*.sessions.*.end_time' => 'required|date_format:H:i',
+            'event_days.*.sessions.*.required_for_attendance' => 'nullable|boolean',
             'evaluation_questions' => 'required|array|min:1|max:10',
             'evaluation_questions.*.id' => 'nullable|string|max:80',
             'evaluation_questions.*.label' => 'required|string|max:180',
@@ -200,6 +207,9 @@ class DashboardController extends Controller
             'event_days.*.date' => 'event day date',
             'event_days.*.start_time' => 'event day start time',
             'event_days.*.end_time' => 'event day end time',
+            'event_days.*.sessions.*.name' => 'session name',
+            'event_days.*.sessions.*.start_time' => 'session start time',
+            'event_days.*.sessions.*.end_time' => 'session end time',
             'evaluation_questions' => 'evaluation questions',
             'evaluation_questions.*.label' => 'evaluation question',
             'evaluation_questions.*.description' => 'evaluation question description',
@@ -240,6 +250,12 @@ class DashboardController extends Controller
                         sprintf('Day %d end time must be later than the start time.', $index + 1)
                     );
                 }
+            }
+
+            try {
+                $this->sessionSchedules->normalizeEventDays((array) $request->input('event_days', []));
+            } catch (DomainException $exception) {
+                $validator->errors()->add('event_days', $exception->getMessage());
             }
         });
 
@@ -325,6 +341,11 @@ class DashboardController extends Controller
             'event_days.*.date' => 'required|date',
             'event_days.*.start_time' => 'required|date_format:H:i',
             'event_days.*.end_time' => 'required|date_format:H:i',
+            'event_days.*.sessions' => 'nullable|array|min:1',
+            'event_days.*.sessions.*.name' => 'nullable|string|max:80',
+            'event_days.*.sessions.*.start_time' => 'required|date_format:H:i',
+            'event_days.*.sessions.*.end_time' => 'required|date_format:H:i',
+            'event_days.*.sessions.*.required_for_attendance' => 'nullable|boolean',
             'evaluation_questions' => 'required|array|min:1|max:10',
             'evaluation_questions.*.id' => 'nullable|string|max:80',
             'evaluation_questions.*.label' => 'required|string|max:180',
@@ -364,6 +385,12 @@ class DashboardController extends Controller
                 if ($startTime !== '' && $endTime !== '' && $endTime <= $startTime) {
                     $validator->errors()->add("event_days.$index.end_time", sprintf('Day %d end time must be later than the start time.', $index + 1));
                 }
+            }
+
+            try {
+                $this->sessionSchedules->normalizeEventDays((array) $request->input('event_days', []));
+            } catch (DomainException $exception) {
+                $validator->errors()->add('event_days', $exception->getMessage());
             }
         });
 

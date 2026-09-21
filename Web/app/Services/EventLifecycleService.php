@@ -2,8 +2,8 @@
 
 namespace App\Services;
 
-use App\Models\AuditLog;
 use App\Models\AdminAssignment;
+use App\Models\AuditLog;
 use App\Models\Event;
 use App\Models\PendingStudentLink;
 use App\Models\RawScan;
@@ -14,12 +14,20 @@ use Illuminate\Support\Collection;
 class EventLifecycleService
 {
     public const PHASE_SCHEDULED = 'scheduled';
+
     public const PHASE_ACTIVE = 'active';
+
     public const PHASE_ENDED = 'ended';
+
     public const PHASE_EVALUATION_OPEN = 'evaluation_open';
+
     public const PHASE_EVALUATION_CLOSED = 'evaluation_closed';
+
     public const PHASE_PROCESSING = 'processing';
+
     public const PHASE_COMPLETED = 'completed';
+
+    public function __construct(private readonly EventSessionScheduleService $sessionSchedules) {}
 
     public function update(Event $event, ?Carbon $now = null): bool
     {
@@ -69,7 +77,7 @@ class EventLifecycleService
         }
 
         [$firstStart, $finalEnd] = $this->eventBounds($event);
-        if (!$firstStart || !$finalEnd) {
+        if (! $firstStart || ! $finalEnd) {
             return self::PHASE_SCHEDULED;
         }
 
@@ -93,7 +101,7 @@ class EventLifecycleService
 
         $this->expirePastDueScannerSessions($event, $now);
 
-        if (!$this->completionRequirementsSatisfied($event)) {
+        if (! $this->completionRequirementsSatisfied($event)) {
             return self::PHASE_PROCESSING;
         }
 
@@ -102,15 +110,17 @@ class EventLifecycleService
 
     public function eventBounds(Event $event): array
     {
-        $event->loadMissing('eventDays');
+        $event->loadMissing('eventDays.sessions');
         $days = $event->eventDays->sortBy('date')->values();
 
         if ($days->isEmpty()) {
             return [null, null];
         }
 
-        $starts = $days->map(fn ($day) => $this->eventDayDateTime($day->date, $day->start_time));
-        $ends = $days->map(fn ($day) => $this->eventDayDateTime($day->date, $day->end_time));
+        $starts = $days->flatMap(fn ($day) => $this->sessionSchedules->sessionsForDay($day)
+            ->map(fn ($session) => $this->eventDayDateTime($day->date, $session->start_time)));
+        $ends = $days->flatMap(fn ($day) => $this->sessionSchedules->sessionsForDay($day)
+            ->map(fn ($session) => $this->eventDayDateTime($day->date, $session->end_time)));
 
         return [$starts->min(), $ends->max()];
     }
@@ -180,7 +190,7 @@ class EventLifecycleService
             ->where('status', ScannerSession::STATUS_ACTIVE)
             ->exists();
 
-        return !$pendingLinks && !$unresolvedScans && !$unprocessedScans && !$unprocessedSentiments && !$activeSessions;
+        return ! $pendingLinks && ! $unresolvedScans && ! $unprocessedScans && ! $unprocessedSentiments && ! $activeSessions;
     }
 
     private function isWithinAnyEventDay(Collection $days, Carbon $now): bool
@@ -196,7 +206,7 @@ class EventLifecycleService
     private function eventDayDateTime(Carbon $date, string $time): Carbon
     {
         return Carbon::parse(
-            $date->toDateString() . ' ' . $time,
+            $date->toDateString().' '.$time,
             config('services.eaes.event_timezone', 'Asia/Manila')
         );
     }
@@ -232,7 +242,7 @@ class EventLifecycleService
             ->first()?->user_id
             ?? $event->rawScans()->whereNotNull('scanner_user_id')->first()?->scanner_user_id;
 
-        if (!$adminId) {
+        if (! $adminId) {
             return;
         }
 

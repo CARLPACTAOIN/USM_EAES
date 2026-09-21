@@ -145,65 +145,142 @@
                         </div>
                     </div>
                     <template x-for="(day, index) in days" x-bind:key="index">
-                        <div class="proposal-day-row">
-                            <span class="proposal-day-index" x-text="`D${index + 1}`"></span>
-                            <div>
-                                <label x-bind:for="`livewire-day-date-${index}`" class="proposal-mini-label">Date</label>
-                                <input type="date"
-                                       x-bind:id="`livewire-day-date-${index}`"
-                                       name="event_days[0][date]"
-                                       x-bind:name="`event_days[${index}][date]`"
-                                       class="form-input text-sm"
-                                       x-bind:class="{ 'form-input-error': dayError(index, 'date') }"
-                                       required
-                                       value="{{ $eventDays[0]['date'] ?? '' }}"
-                                       x-model="day.date"
-                                       x-bind:min="startDate"
-                                       x-bind:max="endDate"
-                                       x-on:input="clearScheduleErrors()">
-                                <template x-if="dayError(index, 'date')">
-                                    <p class="form-error" role="alert" x-text="dayError(index, 'date')"></p>
+                        <div class="rounded-xl border border-(--color-border) bg-(--color-surface-muted) p-3">
+                            <div class="proposal-day-row">
+                                <span class="proposal-day-index" x-text="`D${index + 1}`"></span>
+                                <div>
+                                    <label x-bind:for="`livewire-day-date-${index}`" class="proposal-mini-label">Date</label>
+                                    <input type="date"
+                                           x-bind:id="`livewire-day-date-${index}`"
+                                           name="event_days[0][date]"
+                                           x-bind:name="`event_days[${index}][date]`"
+                                           class="form-input text-sm"
+                                           x-bind:class="{ 'form-input-error': dayError(index, 'date') }"
+                                           required
+                                           value="{{ $eventDays[0]['date'] ?? '' }}"
+                                           x-model="day.date"
+                                           x-bind:min="startDate"
+                                           x-bind:max="endDate"
+                                           x-on:input="clearScheduleErrors()">
+                                    <template x-if="dayError(index, 'date')">
+                                        <p class="form-error" role="alert" x-text="dayError(index, 'date')"></p>
+                                    </template>
+                                </div>
+                                <div>
+                                    <label x-bind:for="`livewire-day-start-${index}`" class="proposal-mini-label">Start</label>
+                                    <input type="time"
+                                           x-bind:id="`livewire-day-start-${index}`"
+                                           name="event_days[0][start_time]"
+                                           x-bind:name="`event_days[${index}][start_time]`"
+                                           class="form-input text-sm"
+                                           x-bind:class="{ 'form-input-error': dayError(index, 'start_time') }"
+                                           required
+                                           value="{{ $eventDays[0]['start_time'] ?? '' }}"
+                                           x-model="day.start_time"
+                                           x-on:input="clearScheduleErrors(); syncDayTime(index, 'start_time')">
+                                    <template x-if="dayError(index, 'start_time')">
+                                        <p class="form-error" role="alert" x-text="dayError(index, 'start_time')"></p>
+                                    </template>
+                                </div>
+                                <div>
+                                    <label x-bind:for="`livewire-day-end-${index}`" class="proposal-mini-label">End</label>
+                                    <input type="time"
+                                           x-bind:id="`livewire-day-end-${index}`"
+                                           name="event_days[0][end_time]"
+                                           x-bind:name="`event_days[${index}][end_time]`"
+                                           class="form-input text-sm"
+                                           x-bind:class="{ 'form-input-error': dayError(index, 'end_time') }"
+                                           required
+                                           value="{{ $eventDays[0]['end_time'] ?? '' }}"
+                                           x-model="day.end_time"
+                                           x-on:input="clearScheduleErrors(); syncDayTime(index, 'end_time')">
+                                    <template x-if="dayError(index, 'end_time')">
+                                        <p class="form-error" role="alert" x-text="dayError(index, 'end_time')"></p>
+                                    </template>
+                                </div>
+                                <button type="button"
+                                        x-on:click="removeDay(index)"
+                                        class="btn-icon btn-ghost text-(--color-destructive)"
+                                        x-bind:disabled="days.length <= 1"
+                                        x-bind:aria-label="`Remove day ${index + 1}`">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                                </button>
+                            </div>
+
+                            <div class="mt-3 border-t border-(--color-border) pt-3">
+                                <div class="proposal-days-header">
+                                    <div>
+                                        <h4 class="proposal-mini-label">Attendance sessions</h4>
+                                        <p class="form-helper" style="margin-top: 0.125rem;">Use gaps for lunch/breaks. Sessions cannot overlap.</p>
+                                    </div>
+                                    <div class="proposal-schedule-actions">
+                                        <button type="button" x-on:click="splitDay(index)" class="btn btn-sm btn-ghost">Split day</button>
+                                        <button type="button" x-on:click="addSession(index)" class="btn btn-sm btn-ghost">Add session</button>
+                                    </div>
+                                </div>
+                                <template x-for="(session, sessionIndex) in ensureDaySessions(day)" x-bind:key="sessionIndex">
+                                    <div class="proposal-day-row mt-2">
+                                        <span class="proposal-day-index" x-text="`S${sessionIndex + 1}`"></span>
+                                        <div>
+                                            <label x-bind:for="`livewire-session-name-${index}-${sessionIndex}`" class="proposal-mini-label">Name</label>
+                                            <input type="text"
+                                                   x-bind:id="`livewire-session-name-${index}-${sessionIndex}`"
+                                                   x-bind:name="`event_days[${index}][sessions][${sessionIndex}][name]`"
+                                                   class="form-input text-sm"
+                                                   maxlength="80"
+                                                   x-bind:class="{ 'form-input-error': sessionError(index, sessionIndex, 'name') }"
+                                                   x-model="session.name"
+                                                   x-on:input="clearScheduleErrors()">
+                                            <template x-if="sessionError(index, sessionIndex, 'name')">
+                                                <p class="form-error" role="alert" x-text="sessionError(index, sessionIndex, 'name')"></p>
+                                            </template>
+                                        </div>
+                                        <div>
+                                            <label x-bind:for="`livewire-session-start-${index}-${sessionIndex}`" class="proposal-mini-label">Time-In opens</label>
+                                            <input type="time"
+                                                   x-bind:id="`livewire-session-start-${index}-${sessionIndex}`"
+                                                   x-bind:name="`event_days[${index}][sessions][${sessionIndex}][start_time]`"
+                                                   class="form-input text-sm"
+                                                   required
+                                                   x-bind:class="{ 'form-input-error': sessionError(index, sessionIndex, 'start_time') }"
+                                                   x-model="session.start_time"
+                                                   x-on:input="clearScheduleErrors()">
+                                            <template x-if="sessionError(index, sessionIndex, 'start_time')">
+                                                <p class="form-error" role="alert" x-text="sessionError(index, sessionIndex, 'start_time')"></p>
+                                            </template>
+                                        </div>
+                                        <div>
+                                            <label x-bind:for="`livewire-session-end-${index}-${sessionIndex}`" class="proposal-mini-label">Time-Out closes</label>
+                                            <input type="time"
+                                                   x-bind:id="`livewire-session-end-${index}-${sessionIndex}`"
+                                                   x-bind:name="`event_days[${index}][sessions][${sessionIndex}][end_time]`"
+                                                   class="form-input text-sm"
+                                                   required
+                                                   x-bind:class="{ 'form-input-error': sessionError(index, sessionIndex, 'end_time') }"
+                                                   x-model="session.end_time"
+                                                   x-on:input="clearScheduleErrors()">
+                                            <template x-if="sessionError(index, sessionIndex, 'end_time')">
+                                                <p class="form-error" role="alert" x-text="sessionError(index, sessionIndex, 'end_time')"></p>
+                                            </template>
+                                        </div>
+                                        <label class="proposal-inline-toggle">
+                                            <input type="hidden" x-bind:name="`event_days[${index}][sessions][${sessionIndex}][required_for_attendance]`" value="0">
+                                            <input type="checkbox"
+                                                   x-bind:name="`event_days[${index}][sessions][${sessionIndex}][required_for_attendance]`"
+                                                   value="1"
+                                                   x-model="session.required_for_attendance">
+                                            <span>Required</span>
+                                        </label>
+                                        <button type="button"
+                                                x-on:click="removeSession(index, sessionIndex)"
+                                                class="btn-icon btn-ghost text-(--color-destructive)"
+                                                x-bind:disabled="ensureDaySessions(day).length <= 1"
+                                                x-bind:aria-label="`Remove session ${sessionIndex + 1}`">
+                                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                                        </button>
+                                    </div>
                                 </template>
                             </div>
-                            <div>
-                                <label x-bind:for="`livewire-day-start-${index}`" class="proposal-mini-label">Start</label>
-                                <input type="time"
-                                       x-bind:id="`livewire-day-start-${index}`"
-                                       name="event_days[0][start_time]"
-                                       x-bind:name="`event_days[${index}][start_time]`"
-                                       class="form-input text-sm"
-                                       x-bind:class="{ 'form-input-error': dayError(index, 'start_time') }"
-                                       required
-                                       value="{{ $eventDays[0]['start_time'] ?? '' }}"
-                                       x-model="day.start_time"
-                                       x-on:input="clearScheduleErrors(); syncDayTime(index, 'start_time')">
-                                <template x-if="dayError(index, 'start_time')">
-                                    <p class="form-error" role="alert" x-text="dayError(index, 'start_time')"></p>
-                                </template>
-                            </div>
-                            <div>
-                                <label x-bind:for="`livewire-day-end-${index}`" class="proposal-mini-label">End</label>
-                                <input type="time"
-                                       x-bind:id="`livewire-day-end-${index}`"
-                                       name="event_days[0][end_time]"
-                                       x-bind:name="`event_days[${index}][end_time]`"
-                                       class="form-input text-sm"
-                                       x-bind:class="{ 'form-input-error': dayError(index, 'end_time') }"
-                                       required
-                                       value="{{ $eventDays[0]['end_time'] ?? '' }}"
-                                       x-model="day.end_time"
-                                       x-on:input="clearScheduleErrors(); syncDayTime(index, 'end_time')">
-                                <template x-if="dayError(index, 'end_time')">
-                                    <p class="form-error" role="alert" x-text="dayError(index, 'end_time')"></p>
-                                </template>
-                            </div>
-                            <button type="button"
-                                    x-on:click="removeDay(index)"
-                                    class="btn-icon btn-ghost text-(--color-destructive)"
-                                    x-bind:disabled="days.length <= 1"
-                                    x-bind:aria-label="`Remove day ${index + 1}`">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-                            </button>
                         </div>
                     </template>
                     @error('eventDays') <p class="form-error" role="alert">{{ $message }}</p> @enderror
@@ -220,14 +297,21 @@
                 @if($locationType === 'on-campus')
                     <div>
                         <label for="livewire-venue-id" class="form-label">Confirmed Campus Venue</label>
-                        <select id="livewire-venue-id" name="venue_id" class="form-input form-select @error('venueId') form-input-error @enderror" wire:model="venueId">
-                            <option value="">Select after external confirmation</option>
+                        <select id="livewire-venue-id" name="venue_id" class="form-input form-select @error('venueId') form-input-error @enderror" wire:model.live="venueId">
+                            <option value="">Manual campus venue / not in catalog</option>
                             @foreach($activeVenues as $venue)
                                 <option value="{{ $venue->id }}">{{ $venue->name }} — {{ $venue->campus_location }} ({{ $venue->managing_office }})</option>
                             @endforeach
                         </select>
-                        <p class="form-helper">Contact the listed managing office outside EAES, then record the confirmation below.</p>
+                        <p class="form-helper">Catalog is a typing shortcut only. Contact the managing office outside EAES, then record the confirmation below.</p>
                         @error('venueId') <p class="form-error" role="alert">{{ $message }}</p> @enderror
+                    </div>
+                    <div>
+                        <label for="livewire-location-details" class="form-label">Manual Campus Venue Name</label>
+                        <input type="text" id="livewire-location-details" name="location_details" class="form-input @error('locationDetails') form-input-error @enderror"
+                               placeholder="e.g. Main Gym" value="{{ $locationDetails }}" wire:model.live.debounce.300ms="locationDetails">
+                        <p class="form-helper">Use when the venue is not in the catalog. This will not add a catalog record.</p>
+                        @error('locationDetails') <p class="form-error" role="alert">{{ $message }}</p> @enderror
                     </div>
                 @else
                     <div>
@@ -235,6 +319,46 @@
                         <input type="text" id="livewire-location-details" name="location_details" class="form-input @error('locationDetails') form-input-error @enderror"
                                placeholder="Venue name, street, municipality" value="{{ $locationDetails }}" wire:model="locationDetails">
                         @error('locationDetails') <p class="form-error" role="alert">{{ $message }}</p> @enderror
+                    </div>
+                @endif
+
+                @if($locationType === 'on-campus')
+                    <div class="proposal-grid-full">
+                        <div class="proposal-file-box">
+                            <span class="proposal-file-icon" aria-hidden="true">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" d="M8 7V3m8 4V3M5 11h14M6 21h12a2 2 0 002-2V7a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                            </span>
+                            <div>
+                                <p class="form-label">Venue availability check</p>
+                                @if(count($venueAvailabilityPreview['confirmed']) > 0)
+                                    <div class="proposal-error-summary" role="status">
+                                        <p>Confirmed system-recorded usage overlaps this venue/time.</p>
+                                        <ul>
+                                            @foreach(array_slice($venueAvailabilityPreview['confirmed'], 0, 3) as $event)
+                                                <li>{{ $event['title'] }} · {{ $event['date'] }} {{ $event['start_time'] }}-{{ $event['end_time'] }} · buffered {{ $event['buffer_start_time'] }}-{{ $event['buffer_end_time'] }}</li>
+                                            @endforeach
+                                        </ul>
+                                    </div>
+                                @elseif(count($venueAvailabilityPreview['tentative']) > 0)
+                                    <div class="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900" role="status">
+                                        <p class="font-semibold">Tentative system-recorded usage exists for this venue/time.</p>
+                                        <ul class="mt-1 list-disc pl-4 text-xs">
+                                            @foreach(array_slice($venueAvailabilityPreview['tentative'], 0, 3) as $event)
+                                                <li>{{ $event['title'] }} · {{ $event['date'] }} {{ $event['start_time'] }}-{{ $event['end_time'] }}</li>
+                                            @endforeach
+                                        </ul>
+                                    </div>
+                                @else
+                                    <p class="form-helper">No overlapping system-recorded usage found for the selected venue and schedule.</p>
+                                @endif
+                                <p class="form-helper">{{ $venueAvailabilityPreview['disclaimer'] }}</p>
+                                @if($venueAvailabilityPreview['availability_url'])
+                                    <a href="{{ $venueAvailabilityPreview['availability_url'] }}" class="text-sm font-medium text-(--color-accent) hover:underline" target="_blank" rel="noopener">
+                                        Open full availability view
+                                    </a>
+                                @endif
+                            </div>
+                        </div>
                     </div>
                 @endif
             </div>

@@ -66,7 +66,7 @@ class VenueConfirmationTest extends TestCase
 
         $this->assertSame(Event::STATUS_DRAFT, $event->status);
         $this->actingAs($organizer)->post(route('dashboard.events.submit', $event))
-            ->assertSessionHas('error', fn (string $message): bool => str_contains($message, 'active on-campus venue') && str_contains($message, 'venue confirmation evidence'));
+            ->assertSessionHas('error', fn (string $message): bool => str_contains($message, 'campus venue name') && str_contains($message, 'venue confirmation evidence'));
         $this->assertSame(Event::STATUS_DRAFT, $event->fresh()->status);
     }
 

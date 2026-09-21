@@ -27,7 +27,9 @@ class EventProposalSubmissionGuard
 
         if ($event->location_type === 'on-campus') {
             if (! $event->venue_id) {
-                $missing[] = 'active on-campus venue';
+                if (blank($event->location_details)) {
+                    $missing[] = 'campus venue name';
+                }
             } elseif (! $event->venue()->active()->exists()) {
                 $missing[] = 'active on-campus venue';
             }

@@ -22,6 +22,13 @@ class VenueController extends Controller
         return view('dashboard.venues.index');
     }
 
+    public function availability(Request $request): View
+    {
+        abort_unless($request->user()->can('create-proposals'), 403);
+
+        return view('dashboard.venues.availability');
+    }
+
     public function downloadEvidence(Request $request, Event $event): StreamedResponse
     {
         $this->authorizeEvent($request->user(), $event);

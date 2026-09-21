@@ -5,6 +5,7 @@ class EventScheduleDay {
     this.date,
     this.startTime,
     this.endTime,
+    this.sessions = const [],
   });
 
   final String? id;
@@ -12,6 +13,7 @@ class EventScheduleDay {
   final DateTime? date;
   final String? startTime;
   final String? endTime;
+  final List<EventScheduleSession> sessions;
 
   factory EventScheduleDay.fromJson(Map<String, dynamic> json) {
     return EventScheduleDay(
@@ -20,6 +22,7 @@ class EventScheduleDay {
       date: _parseDate(json['date']),
       startTime: _stringOrNull(json['start_time']),
       endTime: _stringOrNull(json['end_time']),
+      sessions: eventScheduleSessionsFromJson(json['sessions']),
     );
   }
 
@@ -30,6 +33,7 @@ class EventScheduleDay {
       'date': date?.toIso8601String(),
       'start_time': startTime,
       'end_time': endTime,
+      'sessions': sessions.map((session) => session.toJson()).toList(),
     };
   }
 
@@ -98,6 +102,70 @@ class EventScheduleDay {
     if (month < 1 || month > 12) return 'Date';
     return months[month - 1];
   }
+}
+
+class EventScheduleSession {
+  const EventScheduleSession({
+    this.id,
+    required this.name,
+    this.startTime,
+    this.endTime,
+    this.requiredForAttendance = true,
+  });
+
+  final String? id;
+  final String name;
+  final String? startTime;
+  final String? endTime;
+  final bool requiredForAttendance;
+
+  factory EventScheduleSession.fromJson(Map<String, dynamic> json) {
+    return EventScheduleSession(
+      id: json['id']?.toString(),
+      name: json['name']?.toString() ?? 'Session',
+      startTime: EventScheduleDay._stringOrNull(json['start_time']),
+      endTime: EventScheduleDay._stringOrNull(json['end_time']),
+      requiredForAttendance:
+          json['required_for_attendance'] == null ||
+          json['required_for_attendance'] == true ||
+          json['required_for_attendance'].toString() == '1',
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'name': name,
+      'start_time': startTime,
+      'end_time': endTime,
+      'required_for_attendance': requiredForAttendance,
+    };
+  }
+
+  String get timeRangeLabel {
+    final start = EventScheduleDay._formatTime(startTime);
+    final end = EventScheduleDay._formatTime(endTime);
+    if (start == null && end == null) return 'Time TBA';
+    if (start == null) return 'Until $end';
+    if (end == null) return 'From $start';
+    return '$start - $end';
+  }
+}
+
+List<EventScheduleSession> eventScheduleSessionsFromJson(Object? value) {
+  if (value is! List) {
+    return const [];
+  }
+
+  final sessions = value
+      .whereType<Map>()
+      .map(
+        (item) =>
+            EventScheduleSession.fromJson(Map<String, dynamic>.from(item)),
+      )
+      .toList();
+
+  return List.unmodifiable(sessions);
 }
 
 List<EventScheduleDay> eventScheduleDaysFromJson(Object? value) {

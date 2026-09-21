@@ -17,6 +17,9 @@ import '../domain/scanner_session.dart';
 import '../domain/student_id_validator.dart';
 
 class ScannerController extends ChangeNotifier {
+  static const Duration _sessionEarlyCheckInBuffer = Duration(hours: 1);
+  static const Duration _sessionCheckoutGracePeriod = Duration(hours: 1);
+
   ScannerController({
     required ScannerLocalStore localDatabase,
     required ScannerRemoteApi apiClient,
@@ -440,17 +443,18 @@ class ScannerController extends ChangeNotifier {
     student ??= manual
         ? null
         : await _localDatabase.findStudentByQr(lookupValue);
+    final now = _nowFactory().toUtc();
+    final matchedSchedule = _matchingScheduleForScan(now, scanType);
 
     final duplicateKey = _duplicateKey(
       eventId: activeSession.eventId,
       eventParticipationScopeId: activeSession.eventParticipationScopeId,
-      eventDayId: null,
+      eventDayId: matchedSchedule?.dayId,
       value: lookupValue,
       type: scanType,
     );
 
     final lastScanAt = recentScanCache[duplicateKey];
-    final now = _nowFactory().toUtc();
     if (lastScanAt != null && now.difference(lastScanAt) < duplicateCooldown) {
       final duplicateResult = ScanCaptureResult(
         success: false,
@@ -475,6 +479,8 @@ class ScannerController extends ChangeNotifier {
       final scan = OfflineScan(
         eventId: activeSession.eventId,
         eventParticipationScopeId: activeSession.eventParticipationScopeId,
+        eventDayId: matchedSchedule?.dayId,
+        eventDaySessionId: matchedSchedule?.sessionId,
         studentId: student?.studentId,
         qrCodeValue: storedQrValue,
         scanType: scanType,
@@ -525,6 +531,109 @@ class ScannerController extends ChangeNotifier {
       isSavingScan = false;
       notifyListeners();
     }
+  }
+
+  _MatchedSchedule? _matchingScheduleForScan(
+    DateTime scannedAt,
+    ScanType type,
+  ) {
+    final candidates = <_MatchedSchedule>[];
+
+    for (final day in eventDays) {
+      final dayDate = day.date;
+      if (dayDate == null) {
+        continue;
+      }
+
+      final sessions = day.sessions.isNotEmpty
+          ? day.sessions
+          : [
+              EventScheduleSession(
+                id: null,
+                name: 'Session ${day.dayNumber}',
+                startTime: day.startTime,
+                endTime: day.endTime,
+              ),
+            ];
+
+      for (final session in sessions) {
+        final start = _combineDateAndTime(dayDate, session.startTime);
+        final end = _combineDateAndTime(dayDate, session.endTime);
+        if (start == null || end == null) {
+          continue;
+        }
+
+        final windowStart = type == ScanType.timeIn
+            ? start.subtract(_sessionEarlyCheckInBuffer)
+            : start;
+        final windowEnd = type == ScanType.timeOut
+            ? end.add(_sessionCheckoutGracePeriod)
+            : end;
+
+        if (scannedAt.isBefore(windowStart.toUtc()) ||
+            scannedAt.isAfter(windowEnd.toUtc())) {
+          continue;
+        }
+
+        candidates.add(
+          _MatchedSchedule(
+            dayId: day.id,
+            sessionId: session.id,
+            startsAt: start.toUtc(),
+            endsAt: end.toUtc(),
+          ),
+        );
+      }
+    }
+
+    if (candidates.isEmpty) {
+      return null;
+    }
+
+    candidates.sort((a, b) {
+      if (type == ScanType.timeIn) {
+        final aUpcoming = !a.startsAt.isBefore(scannedAt);
+        final bUpcoming = !b.startsAt.isBefore(scannedAt);
+        if (aUpcoming != bUpcoming) {
+          return aUpcoming ? -1 : 1;
+        }
+
+        return _absoluteDifference(
+          a.startsAt,
+          scannedAt,
+        ).compareTo(_absoluteDifference(b.startsAt, scannedAt));
+      }
+
+      return _absoluteDifference(
+        a.endsAt,
+        scannedAt,
+      ).compareTo(_absoluteDifference(b.endsAt, scannedAt));
+    });
+
+    return candidates.first;
+  }
+
+  DateTime? _combineDateAndTime(DateTime date, String? time) {
+    if (time == null || time.trim().isEmpty) {
+      return null;
+    }
+
+    final parts = time.split(':');
+    if (parts.length < 2) {
+      return null;
+    }
+
+    final hour = int.tryParse(parts[0]);
+    final minute = int.tryParse(parts[1]);
+    if (hour == null || minute == null) {
+      return null;
+    }
+
+    return DateTime(date.year, date.month, date.day, hour, minute);
+  }
+
+  int _absoluteDifference(DateTime first, DateTime second) {
+    return first.difference(second).abs().inSeconds;
   }
 
   Future<void> syncPending() async {
@@ -654,19 +763,21 @@ class ScannerController extends ChangeNotifier {
     ScannerSession activeSession,
     List<OfflineScan> batch,
   ) async {
-    for (var retryAttempt = 0; retryAttempt <= _maxSyncRetries; retryAttempt++) {
+    for (
+      var retryAttempt = 0;
+      retryAttempt <= _maxSyncRetries;
+      retryAttempt++
+    ) {
       try {
-        return await _apiClient.syncScans(
-          session: activeSession,
-          scans: batch,
-        );
+        return await _apiClient.syncScans(session: activeSession, scans: batch);
       } catch (error) {
         if (!_isRetryableSyncError(error) || retryAttempt == _maxSyncRetries) {
           rethrow;
         }
 
         final delay = _retryDelayFor(error, retryAttempt);
-        statusMessage = 'Server is temporarily unavailable. Retrying sync shortly.';
+        statusMessage =
+            'Server is temporarily unavailable. Retrying sync shortly.';
         notifyListeners();
         await _syncRetryDelay(delay);
       }
@@ -1091,6 +1202,20 @@ class ScannerController extends ChangeNotifier {
         !(result.length == 1 && result.contains(ConnectivityResult.none));
     notifyListeners();
   }
+}
+
+class _MatchedSchedule {
+  const _MatchedSchedule({
+    required this.dayId,
+    required this.sessionId,
+    required this.startsAt,
+    required this.endsAt,
+  });
+
+  final String? dayId;
+  final String? sessionId;
+  final DateTime startsAt;
+  final DateTime endsAt;
 }
 
 enum ScanResultKind { success, unresolved, duplicate, error }

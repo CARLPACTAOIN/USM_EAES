@@ -1,3 +1,7 @@
 [mcp_servers.laravel-boost]
 command = "php"
 args = ["Web/artisan", "boost:mcp"]
+
+[mcp_servers.plantuml]
+command = "npx"
+args = ["-y", "@plantuml/mcp-js"]

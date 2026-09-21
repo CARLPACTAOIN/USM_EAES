@@ -9,6 +9,7 @@ use App\Models\EventParticipationScope;
 use App\Models\RawScan;
 use App\Models\User;
 use App\Services\AdminScopeService;
+use App\Services\EventSessionScheduleService;
 use App\Services\ParticipationScopeService;
 use App\Support\AdminScope;
 use Carbon\Carbon;
@@ -29,6 +30,8 @@ class EventAttendanceRules extends Component
 
     public array $scopeLateCutoffMins = [];
 
+    public array $sessionRows = [];
+
     public ?string $notice = null;
 
     public ?string $errorNotice = null;
@@ -47,6 +50,7 @@ class EventAttendanceRules extends Component
                 $scope->id => $scope->late_cutoff_min !== null ? (string) $scope->late_cutoff_min : '',
             ])
             ->all();
+        $this->sessionRows = $this->sessionRowsForEvent($event);
     }
 
     public function setEventPreset(?int $minutes): void
@@ -131,6 +135,96 @@ class EventAttendanceRules extends Component
         $this->notice = 'Participant late cutoff updated.';
     }
 
+    public function addSession(string $eventDayId): void
+    {
+        $event = $this->eventForDisplay();
+        $this->authorizeEventRuleEdit($event);
+
+        if ($this->sessionEditingLocked($event)) {
+            $this->errorNotice = 'Session schedules are locked after the event starts or after scans are captured.';
+
+            return;
+        }
+
+        $day = collect($this->sessionRows)->firstWhere('id', $eventDayId);
+        if (! $day) {
+            return;
+        }
+
+        $index = array_search($eventDayId, array_column($this->sessionRows, 'id'), true);
+        $sessionCount = count($this->sessionRows[$index]['sessions']);
+        $this->sessionRows[$index]['sessions'][] = [
+            'name' => 'Session '.($sessionCount + 1),
+            'start_time' => $day['start_time'],
+            'end_time' => $day['end_time'],
+            'required_for_attendance' => true,
+        ];
+    }
+
+    public function removeSession(string $eventDayId, int $sessionIndex): void
+    {
+        $event = $this->eventForDisplay();
+        $this->authorizeEventRuleEdit($event);
+
+        if ($this->sessionEditingLocked($event)) {
+            $this->errorNotice = 'Session schedules are locked after the event starts or after scans are captured.';
+
+            return;
+        }
+
+        $dayIndex = array_search($eventDayId, array_column($this->sessionRows, 'id'), true);
+        if ($dayIndex === false || count($this->sessionRows[$dayIndex]['sessions']) <= 1) {
+            return;
+        }
+
+        unset($this->sessionRows[$dayIndex]['sessions'][$sessionIndex]);
+        $this->sessionRows[$dayIndex]['sessions'] = array_values($this->sessionRows[$dayIndex]['sessions']);
+    }
+
+    public function saveSessions(EventSessionScheduleService $sessionSchedules): void
+    {
+        $this->resetFeedback();
+
+        $event = $this->eventForDisplay();
+        $this->authorizeEventRuleEdit($event);
+
+        if ($this->sessionEditingLocked($event)) {
+            $this->errorNotice = 'Session schedules are locked after the event starts or after scans are captured.';
+
+            return;
+        }
+
+        $this->validate([
+            'sessionRows' => ['required', 'array', 'min:1'],
+            'sessionRows.*.date' => ['required', 'date'],
+            'sessionRows.*.start_time' => ['required', 'date_format:H:i'],
+            'sessionRows.*.end_time' => ['required', 'date_format:H:i'],
+            'sessionRows.*.sessions' => ['required', 'array', 'min:1'],
+            'sessionRows.*.sessions.*.name' => ['nullable', 'string', 'max:80'],
+            'sessionRows.*.sessions.*.start_time' => ['required', 'date_format:H:i'],
+            'sessionRows.*.sessions.*.end_time' => ['required', 'date_format:H:i'],
+            'sessionRows.*.sessions.*.required_for_attendance' => ['boolean'],
+        ]);
+
+        try {
+            $normalized = $sessionSchedules->normalizeEventDays($this->sessionRows);
+        } catch (\DomainException $exception) {
+            $this->addError('sessionRows', $exception->getMessage());
+
+            return;
+        }
+
+        foreach ($event->eventDays()->with('sessions')->get() as $eventDay) {
+            $row = collect($normalized)->firstWhere('id', $eventDay->id);
+            if ($row) {
+                $sessionSchedules->replaceSessions($eventDay, $row['sessions']);
+            }
+        }
+
+        $this->sessionRows = $this->sessionRowsForEvent($event->fresh(['eventDays.sessions']));
+        $this->notice = 'Session schedule updated.';
+    }
+
     public function render(): View
     {
         $event = $this->eventForDisplay();
@@ -140,6 +234,7 @@ class EventAttendanceRules extends Component
             'event' => $event,
             'participantScopes' => $participantScopes,
             'attendancePolicyLocked' => $this->attendancePolicyLocked($event),
+            'sessionEditingLocked' => $this->sessionEditingLocked($event),
             'canManageEventRules' => $this->canManageEventRules($event),
             'canEditScopeCutoffs' => $this->editableScopeMap($event, $participantScopes),
             'user' => auth()->user(),
@@ -150,6 +245,7 @@ class EventAttendanceRules extends Component
     {
         $event = Event::with([
             'eventDays',
+            'eventDays.sessions',
             'participationScopes.organization',
             'participationScopes.college',
             'participationScopes.delegatedOrganization',
@@ -302,6 +398,38 @@ class EventAttendanceRules extends Component
             'evaluation_closed',
             'completed',
         ], true);
+    }
+
+    private function sessionEditingLocked(Event $event): bool
+    {
+        return $this->attendancePolicyLocked($event)
+            || RawScan::where('event_id', $event->id)->exists();
+    }
+
+    private function sessionRowsForEvent(Event $event): array
+    {
+        $event->loadMissing('eventDays.sessions');
+        $sessionSchedules = app(EventSessionScheduleService::class);
+
+        return $event->eventDays
+            ->sortBy('day_number')
+            ->map(fn (EventDay $day): array => [
+                'id' => $day->id,
+                'date' => $day->date?->toDateString() ?? '',
+                'start_time' => substr((string) $day->start_time, 0, 5),
+                'end_time' => substr((string) $day->end_time, 0, 5),
+                'sessions' => $sessionSchedules->sessionsForDay($day)
+                    ->map(fn ($session): array => [
+                        'name' => (string) $session->name,
+                        'start_time' => substr((string) $session->start_time, 0, 5),
+                        'end_time' => substr((string) $session->end_time, 0, 5),
+                        'required_for_attendance' => (bool) $session->required_for_attendance,
+                    ])
+                    ->values()
+                    ->all(),
+            ])
+            ->values()
+            ->all();
     }
 
     private function validateOnlyEventCutoff(): array

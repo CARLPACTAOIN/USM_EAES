@@ -7,6 +7,7 @@ use App\Models\Event;
 use App\Models\EventParticipationScope;
 use App\Models\RawScan;
 use App\Services\EventAnalyticsCache;
+use App\Services\EventSessionScheduleService;
 use Carbon\Carbon;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -61,8 +62,10 @@ class ResolveAttendanceJob implements ShouldQueue
         ];
     }
 
-    public function handle(EventAnalyticsCache $analyticsCache): void
+    public function handle(EventAnalyticsCache $analyticsCache, ?EventSessionScheduleService $sessionSchedules = null): void
     {
+        $sessionSchedules ??= app(EventSessionScheduleService::class);
+
         if (empty($this->studentIds)) {
             return;
         }
@@ -77,11 +80,11 @@ class ResolveAttendanceJob implements ShouldQueue
         $eventParticipationScopeId = $this->eventParticipationScopeId;
 
         // Fetch event parameters
-        $event = Event::with(['eventDays', 'participationScopes'])->findOrFail($eventId);
+        $event = Event::with(['eventDays.sessions', 'participationScopes'])->findOrFail($eventId);
         $eventDays = $event->eventDays;
         $participationScopes = $event->participationScopes->keyBy('id');
 
-        DB::transaction(function () use ($eventId, $studentIds, $event, $eventDays, $eventParticipationScopeId, $participationScopes): void {
+        DB::transaction(function () use ($eventId, $studentIds, $event, $eventDays, $eventParticipationScopeId, $participationScopes, $sessionSchedules): void {
             if ($eventParticipationScopeId) {
                 EventParticipationScope::query()
                     ->whereKey($eventParticipationScopeId)
@@ -101,7 +104,7 @@ class ResolveAttendanceJob implements ShouldQueue
                 ->lockForUpdate()
                 ->get()
                 ->groupBy(function ($record) {
-                    return $record->student_id.'_'.$record->event_day_id.'_'.($record->event_participation_scope_id ?? '');
+                    return $record->student_id.'_'.$record->event_day_id.'_'.($record->event_day_session_id ?? '').'_'.($record->event_participation_scope_id ?? '');
                 });
 
             // Fetch all raw scans for these students on this event
@@ -131,102 +134,117 @@ class ResolveAttendanceJob implements ShouldQueue
 
                     $scopeId = $studentScans->first()?->event_participation_scope_id;
 
-                    // Group student scans by matching event day
-                    $scansByDay = [];
+                    // Group student scans by matching event-day session.
+                    $scansBySession = [];
                     foreach ($studentScans as $scan) {
-                        $scanDate = Carbon::parse($scan->scanned_at)->toDateString();
+                        $matchedSession = $scan->event_day_session_id
+                            ? null
+                            : $sessionSchedules->resolveSessionForScan($event, Carbon::parse($scan->scanned_at), $scan->scan_type);
 
-                        // Match to event day by date
-                        $matchedDay = $eventDays->first(function ($day) use ($scanDate) {
-                            return $day->date->toDateString() === $scanDate;
-                        });
+                        $dayId = $scan->event_day_id ?: ($matchedSession['day']->id ?? null);
+                        $sessionId = $scan->event_day_session_id ?: ($matchedSession['session']->id ?? null);
 
-                        if ($matchedDay) {
-                            $scansByDay[$matchedDay->id][] = $scan;
+                        if ($dayId) {
+                            $scansBySession[$dayId.'_'.($sessionId ?? '')][] = $scan;
                         }
                     }
 
-                    // Process EILO per day
+                    // Process EILO per session, using one implicit full-day session for legacy rows.
                     foreach ($eventDays as $day) {
-                        $dayScans = collect($scansByDay[$day->id] ?? []);
+                        foreach ($sessionSchedules->sessionsForDay($day) as $session) {
+                            $sessionKey = $day->id.'_'.($session->id ?? '');
+                            $sessionScans = collect($scansBySession[$sessionKey] ?? []);
 
-                        $timeInScan = $dayScans->where('scan_type', 'time_in')->first();
-                        $timeOutScan = $dayScans->where('scan_type', 'time_out')->last();
+                            $timeInScan = $sessionScans->where('scan_type', 'time_in')->first();
+                            $timeOutScan = $sessionScans->where('scan_type', 'time_out')->last();
 
-                        $timeIn = $timeInScan ? Carbon::parse($timeInScan->scanned_at) : null;
-                        $timeOut = $timeOutScan ? Carbon::parse($timeOutScan->scanned_at) : null;
+                            $timeIn = $timeInScan ? Carbon::parse($timeInScan->scanned_at) : null;
+                            $timeOut = $timeOutScan ? Carbon::parse($timeOutScan->scanned_at) : null;
 
-                        // If neither time_in nor time_out exists, skip creating/updating records for this day
-                        if (! $timeIn && ! $timeOut) {
-                            continue;
-                        }
-
-                        // Key to search existing record
-                        $recordKey = $studentId.'_'.$day->id.'_'.($scopeId ?? '');
-                        $existingGroup = $existingRecords->get($recordKey);
-                        $existingRecord = $existingGroup ? $existingGroup->first() : null;
-
-                        // 1. Calculate official punctuality status from organizer policy, or scope fallback.
-                        $attendanceStatus = 'absent';
-                        $scope = $scopeId ? $participationScopes->get($scopeId) : null;
-                        $lateCutoffMinutes = $event->lateCutoffMinutesFor($scope);
-
-                        if ($timeIn) {
-                            // Compare time portion
-                            $scanTime = Carbon::createFromTimeString($timeIn->format('H:i:s'));
-                            $dayStartTime = Carbon::createFromTimeString($day->start_time);
-                            $diffInMinutes = $dayStartTime->diffInMinutes($scanTime, false); // Negative if early
-
-                            if ($diffInMinutes <= 0) {
-                                $attendanceStatus = 'present_on_time';
-                            } elseif ($diffInMinutes <= $lateCutoffMinutes) {
-                                $attendanceStatus = 'late';
-                            } else {
-                                $attendanceStatus = 'late_cutoff';
+                            // If neither time_in nor time_out exists, skip creating/updating records for this session.
+                            if (! $timeIn && ! $timeOut) {
+                                continue;
                             }
-                        }
 
-                        // 2. Calculate Left-Early anomaly
-                        $leftEarly = false;
-                        if ($timeOut) {
-                            $scanTimeOut = Carbon::createFromTimeString($timeOut->format('H:i:s'));
-                            $dayEndTime = Carbon::createFromTimeString($day->end_time);
+                            // Key to search existing record
+                            $recordKey = $studentId.'_'.$day->id.'_'.($session->id ?? '').'_'.($scopeId ?? '');
+                            $existingGroup = $existingRecords->get($recordKey);
+                            $existingRecord = $existingGroup ? $existingGroup->first() : null;
 
-                            // If they scan out earlier than end_time minus buffer threshold
-                            $cutoffTime = $dayEndTime->copy()->subMinutes($event->left_early_buffer_min);
-                            if ($scanTimeOut->lt($cutoffTime)) {
-                                $leftEarly = true;
+                            // 1. Calculate official punctuality status from organizer policy, or scope fallback.
+                            $attendanceStatus = 'absent';
+                            $scope = $scopeId ? $participationScopes->get($scopeId) : null;
+                            $lateCutoffMinutes = $event->lateCutoffMinutesFor($scope);
+
+                            if ($timeIn) {
+                                // Compare time portion
+                                $scanTime = Carbon::createFromTimeString($timeIn->format('H:i:s'));
+                                $sessionStartTime = Carbon::createFromTimeString($session->start_time);
+                                $diffInMinutes = $sessionStartTime->diffInMinutes($scanTime, false); // Negative if early
+
+                                if ($diffInMinutes <= 0) {
+                                    $attendanceStatus = 'present_on_time';
+                                } elseif ($diffInMinutes <= $lateCutoffMinutes) {
+                                    $attendanceStatus = 'late';
+                                } else {
+                                    $attendanceStatus = 'late_cutoff';
+                                }
                             }
-                        }
 
-                        // 3. Upsert Canonical Attendance Record
-                        AttendanceRecord::updateOrCreate(
-                            [
-                                'event_id' => $eventId,
-                                'event_participation_scope_id' => $scopeId,
-                                'event_day_id' => $day->id,
-                                'student_id' => $studentId,
-                            ],
-                            [
-                                'time_in' => $timeIn,
-                                'time_out' => $timeOut,
-                                'society_status' => $attendanceStatus,
-                                'competition_status' => $attendanceStatus,
-                                'left_early' => $leftEarly,
-                                'valid' => $existingRecord ? $existingRecord->valid : false, // Preserve evaluation gate validation state
-                                'force_validated' => $existingRecord ? $existingRecord->force_validated : false,
-                                'validated_by' => $existingRecord ? $existingRecord->validated_by : null,
-                            ]
-                        );
+                            // 2. Calculate Left-Early anomaly
+                            $leftEarly = false;
+                            if ($timeOut) {
+                                $scanTimeOut = Carbon::createFromTimeString($timeOut->format('H:i:s'));
+                                $sessionEndTime = Carbon::createFromTimeString($session->end_time);
 
-                        // Also, update the raw scans to associate them with the event_day_id if not done yet
-                        if ($timeInScan && empty($timeInScan->event_day_id)) {
-                            $timeInScan->event_day_id = $day->id;
-                            $timeInScan->save();
-                        }
-                        if ($timeOutScan && empty($timeOutScan->event_day_id)) {
-                            $timeOutScan->event_day_id = $day->id;
-                            $timeOutScan->save();
+                                // If they scan out earlier than end_time minus buffer threshold
+                                $cutoffTime = $sessionEndTime->copy()->subMinutes($event->left_early_buffer_min);
+                                if ($scanTimeOut->lt($cutoffTime)) {
+                                    $leftEarly = true;
+                                }
+                            }
+
+                            $completionStatus = $timeIn && $timeOut && ! $leftEarly ? 'complete' : 'partial';
+
+                            // 3. Upsert Canonical Attendance Record
+                            AttendanceRecord::updateOrCreate(
+                                [
+                                    'event_id' => $eventId,
+                                    'event_participation_scope_id' => $scopeId,
+                                    'event_day_id' => $day->id,
+                                    'event_day_session_id' => $session->id,
+                                    'student_id' => $studentId,
+                                ],
+                                [
+                                    'time_in' => $timeIn,
+                                    'time_out' => $timeOut,
+                                    'society_status' => $attendanceStatus,
+                                    'competition_status' => $attendanceStatus,
+                                    'left_early' => $leftEarly,
+                                    'completion_status' => $completionStatus,
+                                    'valid' => $existingRecord ? $existingRecord->valid : false, // Preserve evaluation gate validation state
+                                    'force_validated' => $existingRecord ? $existingRecord->force_validated : false,
+                                    'validated_by' => $existingRecord ? $existingRecord->validated_by : null,
+                                ]
+                            );
+
+                            // Also, update the raw scans to associate them with the event_day/session ids if not done yet.
+                            foreach ([$timeInScan, $timeOutScan] as $scan) {
+                                if (! $scan) {
+                                    continue;
+                                }
+
+                                $updates = [];
+                                if (empty($scan->event_day_id)) {
+                                    $updates['event_day_id'] = $day->id;
+                                }
+                                if (empty($scan->event_day_session_id) && $session->id) {
+                                    $updates['event_day_session_id'] = $session->id;
+                                }
+                                if ($updates !== []) {
+                                    $scan->update($updates);
+                                }
+                            }
                         }
                     }
                 }

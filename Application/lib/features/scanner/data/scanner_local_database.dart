@@ -22,7 +22,7 @@ class ScannerLocalDatabase implements ScannerLocalStore {
     final path = p.join(await getDatabasesPath(), 'eaes_scanner.db');
     final db = await openDatabase(
       path,
-      version: 3,
+      version: 4,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -49,6 +49,7 @@ class ScannerLocalDatabase implements ScannerLocalStore {
         event_id TEXT NOT NULL,
         event_participation_scope_id TEXT,
         event_day_id TEXT,
+        event_day_session_id TEXT,
         student_id TEXT,
         qr_code_value TEXT NOT NULL,
         scan_type TEXT NOT NULL,
@@ -139,6 +140,12 @@ class ScannerLocalDatabase implements ScannerLocalStore {
       await database.execute(
         'CREATE INDEX IF NOT EXISTS idx_offline_scans_scope_sync '
         'ON offline_scans(event_id, event_participation_scope_id, sync_status)',
+      );
+    }
+
+    if (oldVersion < 4) {
+      await database.execute(
+        'ALTER TABLE offline_scans ADD COLUMN event_day_session_id TEXT',
       );
     }
   }

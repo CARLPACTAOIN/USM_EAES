@@ -69,6 +69,7 @@ class AttendanceSyncController extends Controller
             'scans.*.device_id' => 'required|string',
             'scans.*.manual_entry' => 'required|boolean',
             'scans.*.qr_code_value' => 'required|string',
+            'scans.*.event_day_session_id' => 'nullable|uuid|exists:event_day_sessions,id',
         ]);
 
         if ($validator->fails()) {
@@ -150,6 +151,8 @@ class AttendanceSyncController extends Controller
                 continue;
             }
 
+            $resolvedSession = $this->scannerSessions->resolveScanSession($event, $scannedAt, $scan['scan_type']);
+
             // Resolve student_id
             $student = $studentsByQr->get($scan['qr_code_value']) ?: $employeeUsersByQr->get($scan['qr_code_value']);
             $studentId = $student ? $student->id : null;
@@ -186,7 +189,8 @@ class AttendanceSyncController extends Controller
                 'id' => (string) Str::uuid(),
                 'event_id' => $eventId,
                 'event_participation_scope_id' => $scope->id,
-                'event_day_id' => $scan['event_day_id'] ?? null,
+                'event_day_id' => $resolvedSession['day']->id ?? ($scan['event_day_id'] ?? null),
+                'event_day_session_id' => $resolvedSession['session']->id ?? ($scan['event_day_session_id'] ?? null),
                 'scanner_session_id' => $session->id,
                 'scanner_user_id' => $request->user()->id,
                 'captured_by_organization_id' => $scope->organization_id ?: $event->organization_id,

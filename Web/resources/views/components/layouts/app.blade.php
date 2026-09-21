@@ -97,7 +97,7 @@
     @endif
     @vite(['resources/css/app.css', 'resources/js/app.js'])
     <link rel="stylesheet" href="{{ asset('css/site-refresh.css') }}">
-    @if(request()->routeIs('dashboard.events*') || request()->routeIs('dashboard.venues*') || request()->routeIs('dashboard.admin-users*') || request()->routeIs('dashboard.admin-access*') || request()->routeIs('dashboard.analytics*') || request()->routeIs('portal.profile*'))
+    @if(request()->routeIs('dashboard.events*') || request()->routeIs('dashboard.venues*') || request()->routeIs('dashboard.venue-availability*') || request()->routeIs('dashboard.admin-users*') || request()->routeIs('dashboard.admin-access*') || request()->routeIs('dashboard.analytics*') || request()->routeIs('portal.profile*'))
         <link rel="stylesheet" href="{{ asset('css/proposal-modal.css') }}">
     @endif
     @livewireStyles
@@ -161,6 +161,14 @@
                     <span class="flex-1">Event Proposals</span>
                     @livewire('dashboard.notification-sidebar-badge', ['type' => 'needs_action'], key('sidebar-notification-needs-action'))
                 </a>
+
+                @if(auth()->user()?->can('create-proposals'))
+                <a href="{{ route('dashboard.venue-availability') }}"
+                   class="sidebar-link relative {{ request()->routeIs('dashboard.venue-availability*') ? 'sidebar-link-active' : '' }}">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 20h16M6 20V8l6-4 6 4v12M9 12h6m-6 4h6"/></svg>
+                    Venue Availability
+                </a>
+                @endif
 
                 <a href="{{ route('dashboard.pending-links') }}"
                    class="sidebar-link relative {{ request()->routeIs('dashboard.pending-links*') ? 'sidebar-link-active' : '' }}">

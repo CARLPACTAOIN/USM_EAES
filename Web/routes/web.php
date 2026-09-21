@@ -109,6 +109,7 @@ Route::middleware(['auth'])->group(function () {
 
             // Admin User Provisioning (Super Admin only)
             Route::get('/admin-users', [AdminAccessController::class, 'index'])->name('dashboard.admin-users');
+            Route::get('/venue-availability', [VenueController::class, 'availability'])->name('dashboard.venue-availability');
             Route::get('/venues', [VenueController::class, 'index'])->name('dashboard.venues');
             Route::get('/admin-access', [AdminAccessController::class, 'index'])->name('dashboard.admin-access');
             Route::get('/admin-users/search', [AdminAccessController::class, 'searchUsers'])->name('dashboard.admin-users.search');

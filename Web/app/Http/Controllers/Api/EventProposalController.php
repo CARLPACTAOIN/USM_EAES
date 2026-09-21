@@ -8,6 +8,7 @@ use App\Services\AdminScopeService;
 use App\Services\EventNotificationService;
 use App\Services\EventPermitService;
 use App\Services\EventProposalDraftService;
+use App\Services\EventSessionScheduleService;
 use App\Services\ParticipationScopeService;
 use App\Support\EventTenantScope;
 use DomainException;
@@ -25,6 +26,7 @@ class EventProposalController extends Controller
         private readonly EventNotificationService $eventNotifications,
         private readonly EventProposalDraftService $proposalDrafts,
         private readonly EventPermitService $eventPermits,
+        private readonly EventSessionScheduleService $sessionSchedules,
     ) {}
 
     /**
@@ -33,7 +35,7 @@ class EventProposalController extends Controller
     public function index(Request $request): JsonResponse
     {
         $user = $request->user();
-        $query = Event::with(['organization', 'eventDays', 'venue']);
+        $query = Event::with(['organization', 'eventDays.sessions', 'venue']);
         $scope = $this->adminScopes->forUser($user);
 
         if (! $scope) {
@@ -103,12 +105,19 @@ class EventProposalController extends Controller
             'event_days.*.date' => 'required|date',
             'event_days.*.start_time' => 'required|date_format:H:i',
             'event_days.*.end_time' => 'required|date_format:H:i|after:event_days.*.start_time',
+            'event_days.*.sessions' => 'nullable|array|min:1',
+            'event_days.*.sessions.*.name' => 'nullable|string|max:80',
+            'event_days.*.sessions.*.start_time' => 'required|date_format:H:i',
+            'event_days.*.sessions.*.end_time' => 'required|date_format:H:i',
+            'event_days.*.sessions.*.required_for_attendance' => 'nullable|boolean',
             'parent_event_id' => 'nullable|uuid|exists:events,id',
             'evaluation_questions' => 'required|array|min:1|max:10',
             'evaluation_questions.*.id' => 'nullable|string|max:80',
             'evaluation_questions.*.label' => 'required|string|max:180',
             'evaluation_questions.*.description' => 'nullable|string|max:500',
         ]);
+
+        $this->addSessionScheduleValidation($validator, (array) $request->input('event_days', []));
 
         if ($validator->fails()) {
             return response()->json([
@@ -208,6 +217,11 @@ class EventProposalController extends Controller
             'event_days.*.date' => 'required|date',
             'event_days.*.start_time' => 'required|date_format:H:i',
             'event_days.*.end_time' => 'required|date_format:H:i',
+            'event_days.*.sessions' => 'nullable|array|min:1',
+            'event_days.*.sessions.*.name' => 'nullable|string|max:80',
+            'event_days.*.sessions.*.start_time' => 'required|date_format:H:i',
+            'event_days.*.sessions.*.end_time' => 'required|date_format:H:i',
+            'event_days.*.sessions.*.required_for_attendance' => 'nullable|boolean',
             'parent_event_id' => 'nullable|uuid|exists:events,id',
             'evaluation_questions' => 'required|array|min:1|max:10',
             'evaluation_questions.*.id' => 'nullable|string|max:80',
@@ -218,6 +232,12 @@ class EventProposalController extends Controller
         $validator->after(function ($validator) use ($request, $event): void {
             if ($request->filled('parent_event_id') && $request->input('parent_event_id') === $event->id) {
                 $validator->errors()->add('parent_event_id', 'A proposal cannot be linked to itself as a parent permit.');
+            }
+
+            try {
+                $this->sessionSchedules->normalizeEventDays((array) $request->input('event_days', []));
+            } catch (DomainException $exception) {
+                $validator->errors()->add('event_days', $exception->getMessage());
             }
         });
 
@@ -285,10 +305,23 @@ class EventProposalController extends Controller
                     'date' => $day['date'],
                     'start_time' => $day['start_time'],
                     'end_time' => $day['end_time'],
+                    'sessions' => $day['sessions'] ?? [],
                 ])
                 ->all(),
             'evaluation_questions' => $request->input('evaluation_questions', []),
         ];
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $eventDays
+     */
+    private function addSessionScheduleValidation(mixed $validator, array $eventDays): void
+    {
+        try {
+            $this->sessionSchedules->normalizeEventDays($eventDays);
+        } catch (DomainException $exception) {
+            $validator->errors()->add('event_days', $exception->getMessage());
+        }
     }
 
     /**
@@ -429,7 +462,7 @@ class EventProposalController extends Controller
     /** @return array<string, mixed> */
     private function eventPayload(Event $event): array
     {
-        $event->loadMissing(['organization', 'eventDays', 'venue']);
+        $event->loadMissing(['organization', 'eventDays.sessions', 'venue']);
         $attributes = $event->toArray();
         unset($attributes['proposal_document_path'], $attributes['venue_confirmation_document_path']);
 

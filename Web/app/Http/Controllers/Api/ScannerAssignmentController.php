@@ -7,6 +7,7 @@ use App\Models\Event;
 use App\Models\EventScannerAssignment;
 use App\Models\ScannerSession;
 use App\Services\EventLifecycleService;
+use App\Services\EventSessionScheduleService;
 use App\Services\ParticipationScopeService;
 use App\Services\ScannerAssignmentService;
 use App\Services\ScannerSessionService;
@@ -21,13 +22,13 @@ class ScannerAssignmentController extends Controller
         private readonly ScannerAssignmentService $assignments,
         private readonly ScannerSessionService $scannerSessions,
         private readonly EventLifecycleService $lifecycle,
-        private readonly ParticipationScopeService $participationScopes
-    ) {
-    }
+        private readonly ParticipationScopeService $participationScopes,
+        private readonly EventSessionScheduleService $sessionSchedules,
+    ) {}
 
     public function index(Request $request)
     {
-        if (!$this->tokenCanManageAssignments($request)) {
+        if (! $this->tokenCanManageAssignments($request)) {
             return response()->json([
                 'success' => false,
                 'message' => 'This token can only be used for its assigned mobile scanner actions.',
@@ -47,7 +48,7 @@ class ScannerAssignmentController extends Controller
 
     public function activate(Request $request, EventScannerAssignment $assignment)
     {
-        if (!$this->tokenCanManageAssignments($request)) {
+        if (! $this->tokenCanManageAssignments($request)) {
             return response()->json([
                 'success' => false,
                 'message' => 'This token cannot activate scanner sessions.',
@@ -78,7 +79,7 @@ class ScannerAssignmentController extends Controller
         $this->lifecycle->update($event);
         $event->refresh()->loadMissing(['eventDays', 'organization']);
 
-        if (!$assignment->isActive()) {
+        if (! $assignment->isActive()) {
             return response()->json([
                 'success' => false,
                 'message' => 'This scanner assignment is no longer active.',
@@ -86,7 +87,7 @@ class ScannerAssignmentController extends Controller
             ], 423);
         }
 
-        if (!$assignment->participationScope) {
+        if (! $assignment->participationScope) {
             return response()->json([
                 'success' => false,
                 'message' => 'This scanner assignment is missing a participant scope.',
@@ -102,7 +103,7 @@ class ScannerAssignmentController extends Controller
             ], $guard['status']);
         }
 
-        if (!$this->activationAllowed($event)) {
+        if (! $this->activationAllowed($event)) {
             return response()->json([
                 'success' => false,
                 'message' => 'Scanner activation is not available for this event.',
@@ -178,7 +179,7 @@ class ScannerAssignmentController extends Controller
         $activationAllowed = $assignment->isActive()
             && $this->activationAllowed($event)
             && $assignment->participationScope
-            && !$this->participationScopes->runtimeGuard($assignment->participationScope);
+            && ! $this->participationScopes->runtimeGuard($assignment->participationScope);
 
         $activeSession = $this->activeAssignmentSession($assignment);
         $activeSessionDeviceMatches = $activeSession && $deviceId
@@ -225,7 +226,7 @@ class ScannerAssignmentController extends Controller
 
     private function eventPayload(Event $event): array
     {
-        $event->loadMissing(['organization', 'eventDays']);
+        $event->loadMissing(['organization', 'eventDays.sessions']);
 
         return [
             'id' => $event->id,
@@ -250,6 +251,16 @@ class ScannerAssignmentController extends Controller
                     'date' => $day->date,
                     'start_time' => $day->start_time,
                     'end_time' => $day->end_time,
+                    'sessions' => $this->sessionSchedules->sessionsForDay($day)
+                        ->map(fn ($session): array => [
+                            'id' => $session->id,
+                            'name' => $session->name,
+                            'start_time' => $session->start_time,
+                            'end_time' => $session->end_time,
+                            'required_for_attendance' => (bool) $session->required_for_attendance,
+                        ])
+                        ->values()
+                        ->all(),
                 ]),
             'sync_grace_ends_at' => $this->lifecycle->syncGraceEndsAt($event)?->toIso8601String(),
         ];
@@ -267,7 +278,7 @@ class ScannerAssignmentController extends Controller
 
         $syncGraceEndsAt = $this->lifecycle->syncGraceEndsAt($event);
 
-        return !$syncGraceEndsAt || now()->lte($syncGraceEndsAt);
+        return ! $syncGraceEndsAt || now()->lte($syncGraceEndsAt);
     }
 
     private function activeAssignmentSession(EventScannerAssignment $assignment): ?ScannerSession
@@ -315,12 +326,12 @@ class ScannerAssignmentController extends Controller
             return false;
         }
 
-        return !$session->expires_at || $session->expires_at->isFuture();
+        return ! $session->expires_at || $session->expires_at->isFuture();
     }
 
     private function sessionDeviceMatches(ScannerSession $session, string $deviceId): ?bool
     {
-        if (!$session->device_fingerprint_hash) {
+        if (! $session->device_fingerprint_hash) {
             return null;
         }
 

@@ -7,6 +7,7 @@ class OfflineScan {
     required this.eventId,
     this.eventParticipationScopeId,
     this.eventDayId,
+    this.eventDaySessionId,
     this.studentId,
     required this.qrCodeValue,
     required this.scanType,
@@ -25,6 +26,7 @@ class OfflineScan {
   final String eventId;
   final String? eventParticipationScopeId;
   final String? eventDayId;
+  final String? eventDaySessionId;
   final String? studentId;
   final String qrCodeValue;
   final ScanType scanType;
@@ -44,6 +46,7 @@ class OfflineScan {
       eventId: row['event_id'] as String,
       eventParticipationScopeId: row['event_participation_scope_id'] as String?,
       eventDayId: row['event_day_id'] as String?,
+      eventDaySessionId: row['event_day_session_id'] as String?,
       studentId: row['student_id'] as String?,
       qrCodeValue: row['qr_code_value'] as String,
       scanType: (row['scan_type'] as String) == ScanType.timeOut.apiValue
@@ -68,6 +71,7 @@ class OfflineScan {
       'event_id': eventId,
       'event_participation_scope_id': eventParticipationScopeId,
       'event_day_id': eventDayId,
+      'event_day_session_id': eventDaySessionId,
       'student_id': studentId,
       'qr_code_value': qrCodeValue,
       'scan_type': scanType.apiValue,
@@ -86,6 +90,7 @@ class OfflineScan {
   Map<String, Object?> toSyncJson() {
     return {
       'event_day_id': eventDayId,
+      'event_day_session_id': eventDaySessionId,
       'event_participation_scope_id': eventParticipationScopeId,
       'qr_code_value': qrCodeValue,
       'scan_type': scanType.apiValue,
@@ -107,6 +112,7 @@ class OfflineScan {
       eventId: eventId,
       eventParticipationScopeId: eventParticipationScopeId,
       eventDayId: eventDayId,
+      eventDaySessionId: eventDaySessionId,
       studentId: studentId,
       qrCodeValue: qrCodeValue,
       scanType: scanType,

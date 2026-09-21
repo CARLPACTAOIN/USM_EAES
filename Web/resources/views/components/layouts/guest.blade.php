@@ -4,8 +4,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="{{ csrf_token() }}">
-    <title>{{ $title ?? 'EAES — USM Event Attendance & Evaluation System' }}</title>
-    <meta name="description" content="University of Southern Mindanao Event Attendance and Evaluation System">
+    <title>{{ $title ?? 'Eventia — USM Event Attendance & Evaluation System' }}</title>
+    <meta name="description" content="Eventia — University of Southern Mindanao Event Attendance and Evaluation System">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Fira+Code:wght@400;500;600&display=swap" rel="stylesheet">

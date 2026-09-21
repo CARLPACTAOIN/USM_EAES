@@ -14,12 +14,14 @@ class AttendanceRecord extends Model
         'event_id',
         'event_participation_scope_id',
         'event_day_id',
+        'event_day_session_id',
         'student_id',
         'time_in',
         'time_out',
         'society_status', // "present_on_time", "late", "late_cutoff", "absent"
         'competition_status', // "present_on_time", "late", "late_cutoff", "absent"
         'left_early',
+        'completion_status',
         'valid',
         'force_validated',
         'validated_by',
@@ -46,6 +48,11 @@ class AttendanceRecord extends Model
     public function eventDay()
     {
         return $this->belongsTo(EventDay::class);
+    }
+
+    public function eventDaySession()
+    {
+        return $this->belongsTo(EventDaySession::class);
     }
 
     public function student()

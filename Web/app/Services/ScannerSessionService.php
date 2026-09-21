@@ -4,6 +4,8 @@ namespace App\Services;
 
 use App\Models\AuditLog;
 use App\Models\Event;
+use App\Models\EventDay;
+use App\Models\EventDaySession;
 use App\Models\EventParticipationScope;
 use App\Models\EventScannerAssignment;
 use App\Models\ScannerSession;
@@ -17,9 +19,9 @@ class ScannerSessionService
 {
     public function __construct(
         private readonly EventLifecycleService $lifecycle,
-        private readonly ParticipationScopeService $participationScopes
-    ) {
-    }
+        private readonly ParticipationScopeService $participationScopes,
+        private readonly EventSessionScheduleService $sessionSchedules,
+    ) {}
 
     public function createSession(
         Event $event,
@@ -42,7 +44,7 @@ class ScannerSessionService
         }
 
         $expiresAt = $this->lifecycle->syncGraceEndsAt($event) ?? now()->addHours($this->syncGraceHours());
-        $newToken = $scannerUser->createToken('scanner-' . $event->id, ['scan-qr-codes', 'manual-entry-id']);
+        $newToken = $scannerUser->createToken('scanner-'.$event->id, ['scan-qr-codes', 'manual-entry-id']);
 
         $session = ScannerSession::create([
             'event_id' => $event->id,
@@ -72,12 +74,12 @@ class ScannerSessionService
     public function reissueTokenForSession(ScannerSession $session, string $deviceId): array
     {
         $scannerUser = $session->scannerUser;
-        if (!$scannerUser) {
+        if (! $scannerUser) {
             throw new \RuntimeException('Scanner session has no scanner user.');
         }
 
         $oldTokenId = $session->token_id;
-        $newToken = $scannerUser->createToken('scanner-' . $session->event_id, ['scan-qr-codes', 'manual-entry-id']);
+        $newToken = $scannerUser->createToken('scanner-'.$session->event_id, ['scan-qr-codes', 'manual-entry-id']);
         $deviceHash = hash('sha256', $deviceId);
 
         $updates = [
@@ -85,11 +87,11 @@ class ScannerSessionService
             'last_seen_at' => now(),
         ];
 
-        if (!$session->activated_at) {
+        if (! $session->activated_at) {
             $updates['activated_at'] = now();
         }
 
-        if (!$session->device_fingerprint_hash) {
+        if (! $session->device_fingerprint_hash) {
             $updates['device_id'] = $deviceId;
             $updates['device_fingerprint_hash'] = $deviceHash;
         }
@@ -136,7 +138,7 @@ class ScannerSessionService
         $user = $request->user();
         $token = $user?->currentAccessToken();
 
-        if (!$user || !$token instanceof PersonalAccessToken || !ScannerAccess::canOpenScannerSession($user, $token)) {
+        if (! $user || ! $token instanceof PersonalAccessToken || ! ScannerAccess::canOpenScannerSession($user, $token)) {
             return $this->deny(403, 'This token is not authorized for scanner sessions.', 'unauthorized');
         }
 
@@ -149,19 +151,19 @@ class ScannerSessionService
             ->where('token_id', (string) $token?->id)
             ->first();
 
-        if (!$session) {
-            if (!ScannerAccess::canAccessEvent($user, $event)) {
+        if (! $session) {
+            if (! ScannerAccess::canAccessEvent($user, $event)) {
                 return $this->deny(403, 'Unauthorized event boundary check.', 'event_boundary');
             }
 
             return $this->deny(403, 'Scanner token does not belong to this event session.', 'event_token_mismatch');
         }
 
-        if (!ScannerAccess::canAccessEvent($user, $event) && !$session->assignment_id) {
+        if (! ScannerAccess::canAccessEvent($user, $event) && ! $session->assignment_id) {
             return $this->deny(403, 'Unauthorized event boundary check.', 'event_boundary');
         }
 
-        if ($session->status === ScannerSession::STATUS_REVOKED && !$this->canSyncAfterAssignmentClosure($session, $event, $forSync)) {
+        if ($session->status === ScannerSession::STATUS_REVOKED && ! $this->canSyncAfterAssignmentClosure($session, $event, $forSync)) {
             return $this->deny(401, 'This scanner session has been revoked by an admin.', 'revoked');
         }
 
@@ -180,7 +182,7 @@ class ScannerSessionService
         }
 
         $scope = $this->scopeForSession($session, $event);
-        if (!$scope) {
+        if (! $scope) {
             return $this->deny(403, 'Scanner session is missing an approved participant scope.', 'participation_scope_missing');
         }
 
@@ -189,26 +191,26 @@ class ScannerSessionService
             return $this->deny($scopeGuard['status'], $scopeGuard['message'], $scopeGuard['reason']);
         }
 
-        if (!$allowCompleted && ($event->status === 'completed' || $event->lifecycle_phase === EventLifecycleService::PHASE_COMPLETED)) {
+        if (! $allowCompleted && ($event->status === 'completed' || $event->lifecycle_phase === EventLifecycleService::PHASE_COMPLETED)) {
             return $this->deny(423, 'Event is completed. New scanner activity is closed.', 'event_completed');
         }
 
         $deviceId = $this->requestDeviceId($request);
         if ($deviceId) {
             $deviceHash = hash('sha256', $deviceId);
-            if ($session->device_fingerprint_hash && !hash_equals($session->device_fingerprint_hash, $deviceHash)) {
+            if ($session->device_fingerprint_hash && ! hash_equals($session->device_fingerprint_hash, $deviceHash)) {
                 return $this->deny(403, 'This scanner session is already bound to another device.', 'device_mismatch');
             }
 
             $updates = ['last_seen_at' => now()];
-            if (!$session->device_fingerprint_hash) {
+            if (! $session->device_fingerprint_hash) {
                 $updates['device_id'] = $deviceId;
                 $updates['device_fingerprint_hash'] = $deviceHash;
                 $updates['activated_at'] = now();
                 $this->audit($event, $session->issuer, 'scanner-session-device-bound', [
                     'scanner_session_id' => $session->id,
                 ]);
-            } elseif (!$session->activated_at) {
+            } elseif (! $session->activated_at) {
                 $updates['activated_at'] = now();
             }
 
@@ -249,7 +251,26 @@ class ScannerSessionService
             };
         }
 
+        if ($scanType) {
+            $matchedSession = $this->sessionSchedules->resolveSessionForScan($event, $scannedAt, $scanType);
+            if (! $matchedSession) {
+                return match ($scanType) {
+                    'time_in' => $this->deny(422, 'Time-in is outside the active session window.', 'session_time_in_window_closed'),
+                    'time_out' => $this->deny(422, 'Time-out is outside the active session window.', 'session_time_out_window_closed'),
+                    default => $this->deny(422, 'Scanning is outside the active session window.', 'session_window_closed'),
+                };
+            }
+        }
+
         return null;
+    }
+
+    /**
+     * @return array{day: EventDay, session: EventDaySession, window_start: Carbon, window_end: Carbon}|null
+     */
+    public function resolveScanSession(Event $event, Carbon $scannedAt, string $scanType): ?array
+    {
+        return $this->sessionSchedules->resolveSessionForScan($event, $scannedAt, $scanType);
     }
 
     public function requestDeviceId(Request $request): ?string
@@ -279,26 +300,45 @@ class ScannerSessionService
             'time_in_window_end' => $scanWindows['time_in'][1]?->toIso8601String(),
             'time_out_window_start' => $scanWindows['time_out'][0]?->toIso8601String(),
             'time_out_window_end' => $scanWindows['time_out'][1]?->toIso8601String(),
+            'event_days' => $event->eventDays()
+                ->with('sessions')
+                ->orderBy('date')
+                ->get()
+                ->map(fn ($day): array => [
+                    'id' => $day->id,
+                    'date' => $day->date?->toDateString(),
+                    'start_time' => substr((string) $day->start_time, 0, 5),
+                    'end_time' => substr((string) $day->end_time, 0, 5),
+                    'sessions' => $this->sessionSchedules->sessionsForDay($day)->map(fn ($session): array => [
+                        'id' => $session->id,
+                        'name' => $session->name,
+                        'start_time' => substr((string) $session->start_time, 0, 5),
+                        'end_time' => substr((string) $session->end_time, 0, 5),
+                        'required_for_attendance' => (bool) $session->required_for_attendance,
+                    ])->values()->all(),
+                ])
+                ->values()
+                ->all(),
             'sync_grace_ends_at' => $this->lifecycle->syncGraceEndsAt($event)?->toIso8601String(),
         ];
     }
 
     private function validateAssignmentState(ScannerSession $session, Event $event, bool $forSync): ?array
     {
-        if (!$session->assignment_id) {
+        if (! $session->assignment_id) {
             return null;
         }
 
         $assignment = $session->assignment;
-        if (!$assignment) {
+        if (! $assignment) {
             return $this->deny(401, 'Scanner assignment is no longer available.', 'assignment_missing');
         }
 
-        if ($assignment->event_participation_scope_id && !$session->event_participation_scope_id) {
+        if ($assignment->event_participation_scope_id && ! $session->event_participation_scope_id) {
             $session->update(['event_participation_scope_id' => $assignment->event_participation_scope_id]);
         }
 
-        if ($assignment->status === EventScannerAssignment::STATUS_ACTIVE && (!$assignment->expires_at || $assignment->expires_at->isFuture())) {
+        if ($assignment->status === EventScannerAssignment::STATUS_ACTIVE && (! $assignment->expires_at || $assignment->expires_at->isFuture())) {
             return null;
         }
 
@@ -325,12 +365,12 @@ class ScannerSessionService
 
     private function canSyncAfterAssignmentClosure(ScannerSession $session, Event $event, bool $forSync): bool
     {
-        if (!$forSync || !$session->assignment_id) {
+        if (! $forSync || ! $session->assignment_id) {
             return false;
         }
 
         $assignment = $session->assignment;
-        if (!$assignment) {
+        if (! $assignment) {
             return false;
         }
 
@@ -339,13 +379,13 @@ class ScannerSessionService
         $sessionClosedByAssignment = $session->status === ScannerSession::STATUS_REVOKED
             && str_contains(strtolower((string) $session->revocation_reason), 'assignment');
 
-        if (!$assignmentClosed && !$sessionClosedByAssignment) {
+        if (! $assignmentClosed && ! $sessionClosedByAssignment) {
             return false;
         }
 
         $syncGraceEndsAt = $this->lifecycle->syncGraceEndsAt($event);
 
-        return !$syncGraceEndsAt || now()->lte($syncGraceEndsAt);
+        return ! $syncGraceEndsAt || now()->lte($syncGraceEndsAt);
     }
 
     private function scopeForSession(ScannerSession $session, Event $event): ?EventParticipationScope

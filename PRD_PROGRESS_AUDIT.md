@@ -2,7 +2,7 @@
 
 **Branch / snapshot:** `main` (local)  
 **PRD source:** `PRD_V1.md` (v2.0 content, filename `PRD_V1.md`)  
-**Last reviewed:** 2026-09-13
+**Last reviewed:** 2026-09-18
 **Backend path:** `Web/` (Laravel 12 backend with UUID schemas)
 
 > This file tracks implementation status only. It does not override `PRD_V1.md`.
@@ -86,12 +86,12 @@
 
 | Feature | Status | Evidence / Notes |
 |---------|--------|------------------|
-| 2.1 Digital PPA submission and venue confirmation | Done | Livewire, web fallback, and API proposal writes share `EventProposalDraftService` for draft-safe venue/PPA capture; student-affairs submission uses one server-side guard requiring an active catalog venue or off-campus address, confirming office/date, private evidence, official PPA softcopy, and existing hardcopy requirements. OSA-only venue catalog management, active listing, scoped evidence downloads, structured API fields, audit records, and notifications are implemented; HR and participant-scope PPAs retain their documented exemptions. |
+| 2.1 Digital PPA submission and venue confirmation | Done | Livewire, web fallback, and API proposal writes share `EventProposalDraftService` for draft-safe venue/PPA capture; student-affairs submission uses one server-side guard requiring a catalog venue, manual campus venue name, or off-campus address, confirming office/date, private evidence, official PPA softcopy, and existing hardcopy requirements. Active catalog listing, scoped evidence downloads, structured API fields, audit records, notifications, and the approved off-PRD read-only system-recorded venue availability view are implemented; HR and participant-scope PPAs retain their documented exemptions. |
 | 2.2 OSA review and permit versioning | Done | Shared service covers web, Livewire, and API submit/review/approve/revision/reject transitions and repeats the venue gate at approval. Approval creates immutable sequential `event_permit_versions`; eligible owning organizers can start a pre-event amendment that supersedes the active permit, preserves historical files and scanner assignments, revokes active scanner sessions, locks scanning, and requires replacement venue evidence and PPA before OSA can create the next version. |
 | 2.3 Participant PPAs and distributed attendance ownership | Done | `event_participation_scopes` model/migration, organizer attendance scopes, Organized/Participating Events dashboard tabs, in-app invitation notifications/acknowledgements/reminders, participant PPA submit/review/approve/request-revision/reject routes, scope-aware scanner assignment/revocation, runtime hydrate/sync gating, and roll-up analytics implemented |
 | 2.4 HR event domain | Done | `events.event_domain`, HR Admin role/permissions, employee roster models, non-student Google onboarding separation, HR no-PPA event creation, and HR roster hydration path implemented; HR Admin provisioning is not handled through OSA Admin Access |
 | 4.2 Organizer-owned late cutoff | Done | Revised from OSA-owned dual thresholds to one official late-cutoff policy: organizer event cutoff is managed from separate Attendance Rules UI, applies first, locks after event start, and falls back to participant scope cutoffs only when unset; legacy status columns are preserved as compatibility mirrors |
-| 4.3 Multi-day session management | Done | EILO groups scans by day and maps to specific `event_day_id` records |
+| 4.3 Multi-day and multi-session attendance management | Done | EILO groups scans by participation scope, day, and configured `event_day_sessions`; scanner sync resolves session windows with the existing early Time-In / Time-Out grace periods, rejects between-session captures, and writes canonical attendance per `event_day_session_id` with `completion_status`. |
 
 ### Epic 5: Evaluation Portal & Gate
 
@@ -114,7 +114,7 @@
 
 | Item | Status | Evidence / Notes |
 |------|--------|------------------|
-| EILO sync resolution (§5.1) | Done | Validated by PHPUnit feature test case `UsmEaesTest` |
+| EILO sync resolution (§5.1) | Done | Validated by PHPUnit feature tests including day-level legacy coverage in `UsmEaesTest` and session-level resolution/window coverage in `EventDaySessionTest` |
 
 ---
 
@@ -144,11 +144,12 @@
 | `admin_assignments` | Done | Source-of-truth admin authority and tenant scope table with active primary admin uniqueness by role/scope/academic year; user profile organization/college/program fields remain student membership |
 | `events` | Done | Custom PPA columns (location, budget, target), lifecycle phase, and event domain migrated with UUID |
 | `event_days` | Done | UUID schema defined and migrated |
+| `event_day_sessions` | Done | UUID configurable same-day session table added under `event_days`, with ordered non-overlapping session rows and required-for-attendance metadata |
 | `event_participation_scopes` | Done | UUID organizer/participant scope table added with PPA status, capture mode, delegated owner, analytics roll-up fields, and participant late-cutoff fallback |
 | `event_scanner_assignments` | Done | UUID scanner assignment table separates admin intent from runtime sessions, with event/scope/user/assigned-by, audience type, status, revocation, expiry, max devices, notes, and last activation fields |
 | `scanner_sessions` | Done | UUID scanner-session table added with event/scope/user/token, assignment link, label, device binding, status, expiry, revocation, and last-seen fields |
-| `raw_scans` | Done | Nullable student, QR, dedup_key, scanner-session/user audit, participation scope, captured-by organization/admin scope, server received, and processed markers migrated with UUID |
-| `attendance_records` | Done | EILO official attendance status, compatibility status mirror, participation scope, validity, and override columns migrated with UUID |
+| `raw_scans` | Done | Nullable student, QR, dedup_key, scanner-session/user audit, participation scope, captured-by organization/admin scope, event-day/session ids, server received, and processed markers migrated with UUID |
+| `attendance_records` | Done | EILO official attendance status, compatibility status mirror, participation scope, event-day/session identity, per-session completion status, validity, and override columns migrated with UUID |
 | `evaluations` | Done | Score JSONB, comment, sentiment metrics migrated with UUID |
 | `audit_logs` (NFR) | Done | Action, UUID targets, change details, admin-assignment lifecycle records, organization-management records, and OSA Admin Access history visibility implemented with UUID |
 | `pending_student_links` (§3.2) | Done | UUID table added for unresolved QR review, resolution, and flagging |
@@ -170,12 +171,24 @@
 
 | Date | Description | Reason | Approved by |
 |------|-------------|--------|-------------|
+| 2026-09-17 | Read-only venue usage and availability view for organizing admins, based only on EAES-recorded on-campus event schedules. Approved/completed events show as used with one-hour setup/cleanup buffers; submitted/under-review events show as tentative; drafts do not block; proposal creation shows inline warnings and supports manual campus venue names without creating catalog records. | Approved narrow deviation from PRD Epic 2, which excluded reservation calendars/schedule-conflict detection and assigned venue master-data maintenance to OSA. The implemented scope does not create holds, reservations, managing-office approvals, or reservation guarantees, and keeps external reservation confirmation required. | User |
 | 2026-05-30 | Database Queue Fallback | Redis database extension missing on local environment; fallback used for jobs | Auto-approved for Dev |
 
 ---
 
 ## Sprint Notes
 
+- **2026-09-18 (multi-session attendance implementation):**
+  - Extended PRD Feature 4.3 from day-only attendance to configurable non-overlapping sessions per event day, preserving a one-session default for simple events and legacy schedules.
+  - Added `event_day_sessions`, session ids on `raw_scans` and `attendance_records`, and per-session `completion_status`; updated scanner sync and `ResolveAttendanceJob` so EILO resolves earliest-in/latest-out per session while the evaluation form remains once per event.
+  - Added proposal and Attendance Rules interfaces for adding/removing named same-day sessions, with validation that sessions stay inside the event day and do not overlap.
+  - Updated Flutter scanner schedule/offline scan models so cached scans can include day/session ids when the activated schedule is available, while server validation remains authoritative.
+  - Verified with focused PHPUnit coverage for default sessions, overlap rejection, between-session scan rejection, raw-scan session persistence, and session-level canonical attendance resolution.
+- **2026-09-17 (venue availability planned-deviation implementation):**
+  - Added a read-only Venue Availability page for organizing admins at `/dashboard/venue-availability`, showing Used, Tentative, and Available venue states from EAES-recorded on-campus events only.
+  - Added shared availability logic with normalized casing/whitespace venue-name matching, one-hour setup/cleanup buffers for approved/completed events, tentative submitted/under-review usage, draft exclusion, catalog/manual venue grouping, managing-office guidance, and the disclaimer that reservation must be confirmed externally.
+  - Added inline proposal-form availability warnings plus manual campus venue entry that does not create catalog records; adjusted the submission guard so manual campus venue names satisfy the venue requirement when no catalog venue is selected.
+  - Verified with focused PHPUnit coverage for buffers, tentative/manual normalization, draft exclusion, page permissions, inline proposal warnings, manual on-campus submission, and existing venue-confirmation regressions.
 - **2026-07-29 (proposal revision workflow):**
   - Added `revision_requested` as a first-class PPA review state for organizer proposals and participant PPAs, with OSA-required revision remarks and final rejection semantics.
   - Added organizer full-proposal edit/resubmit support while draft or revision-requested, preserving scanner locks until approval and keeping organizer scope packet fields synchronized.

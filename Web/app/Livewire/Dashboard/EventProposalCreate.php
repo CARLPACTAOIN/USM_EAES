@@ -9,6 +9,8 @@ use App\Models\User;
 use App\Models\Venue;
 use App\Services\AdminScopeService;
 use App\Services\EventProposalDraftService;
+use App\Services\EventSessionScheduleService;
+use App\Services\VenueAvailabilityService;
 use App\Support\AdminScope;
 use App\Support\EvaluationQuestions;
 use App\Support\EventEvaluationForm;
@@ -101,7 +103,7 @@ class EventProposalCreate extends Component
         $this->editing = filled($eventId);
 
         if ($this->editing) {
-            $event = Event::with(['eventDays', 'evaluationFormVersion', 'organization'])->findOrFail($eventId);
+            $event = Event::with(['eventDays.sessions', 'evaluationFormVersion', 'organization'])->findOrFail($eventId);
             $this->authorizeEditableEvent($event);
             $this->hydrateFromEvent($event);
             $this->currentProposalDocumentName = $event->proposal_document_original_name;
@@ -326,6 +328,7 @@ class EventProposalCreate extends Component
             'currentVenueConfirmationDocumentName' => $this->currentVenueConfirmationDocumentName,
             'activeVenues' => Venue::active()->with('college')->orderBy('name')->get(),
             'readinessItems' => $this->readinessItems(),
+            'venueAvailabilityPreview' => $this->venueAvailabilityPreview(),
         ]);
     }
 
@@ -360,6 +363,11 @@ class EventProposalCreate extends Component
             'eventDays.*.date' => ['required', 'date'],
             'eventDays.*.start_time' => ['required', 'date_format:H:i'],
             'eventDays.*.end_time' => ['required', 'date_format:H:i'],
+            'eventDays.*.sessions' => ['nullable', 'array', 'min:1'],
+            'eventDays.*.sessions.*.name' => ['nullable', 'string', 'max:80'],
+            'eventDays.*.sessions.*.start_time' => ['required', 'date_format:H:i'],
+            'eventDays.*.sessions.*.end_time' => ['required', 'date_format:H:i'],
+            'eventDays.*.sessions.*.required_for_attendance' => ['boolean'],
             'evaluationQuestions' => ['required', 'array', 'min:1', 'max:10'],
             'evaluationQuestions.*.id' => ['nullable', 'string', 'max:80'],
             'evaluationQuestions.*.label' => ['required', 'string', 'max:180'],
@@ -438,6 +446,13 @@ class EventProposalCreate extends Component
             }
         }
 
+        try {
+            app(EventSessionScheduleService::class)->normalizeEventDays($this->eventDays);
+        } catch (DomainException $exception) {
+            $this->addError('eventDays', $exception->getMessage());
+            $valid = false;
+        }
+
         return $valid;
     }
 
@@ -493,6 +508,16 @@ class EventProposalCreate extends Component
                 'date' => $day->date?->toDateString() ?? '',
                 'start_time' => $day->start_time ? substr((string) $day->start_time, 0, 5) : '',
                 'end_time' => $day->end_time ? substr((string) $day->end_time, 0, 5) : '',
+                'sessions' => $day->sessions
+                    ->sortBy('session_number')
+                    ->map(fn ($session): array => [
+                        'name' => (string) $session->name,
+                        'start_time' => $session->start_time ? substr((string) $session->start_time, 0, 5) : '',
+                        'end_time' => $session->end_time ? substr((string) $session->end_time, 0, 5) : '',
+                        'required_for_attendance' => (bool) $session->required_for_attendance,
+                    ])
+                    ->values()
+                    ->all(),
             ])
             ->values()
             ->all();
@@ -574,6 +599,10 @@ class EventProposalCreate extends Component
             'eventDays.*.date' => 'event day date',
             'eventDays.*.start_time' => 'event day start time',
             'eventDays.*.end_time' => 'event day end time',
+            'eventDays.*.sessions.*.name' => 'session name',
+            'eventDays.*.sessions.*.start_time' => 'session start time',
+            'eventDays.*.sessions.*.end_time' => 'session end time',
+            'eventDays.*.sessions.*.required_for_attendance' => 'session required flag',
             'evaluationQuestions' => 'evaluation questions',
             'evaluationQuestions.*.label' => 'evaluation question',
             'evaluationQuestions.*.description' => 'evaluation question description',
@@ -677,6 +706,7 @@ class EventProposalCreate extends Component
                 'date' => $date,
                 'start_time' => (string) ($existing['start_time'] ?? ''),
                 'end_time' => (string) ($existing['end_time'] ?? ''),
+                'sessions' => is_array($existing['sessions'] ?? null) ? $existing['sessions'] : [],
             ];
 
             $cursor->addDay();
@@ -701,8 +731,27 @@ class EventProposalCreate extends Component
                 'date' => (string) data_get($day, 'date', ''),
                 'start_time' => (string) data_get($day, 'start_time', ''),
                 'end_time' => (string) data_get($day, 'end_time', ''),
+                'sessions' => $this->normalizeSessions(data_get($day, 'sessions')),
             ])
-            ->filter(fn (array $day): bool => filled($day['date']) || filled($day['start_time']) || filled($day['end_time']))
+            ->filter(fn (array $day): bool => filled($day['date']) || filled($day['start_time']) || filled($day['end_time']) || $day['sessions'] !== [])
+            ->values()
+            ->all();
+    }
+
+    private function normalizeSessions(mixed $sessions): array
+    {
+        if (! is_array($sessions)) {
+            return [];
+        }
+
+        return collect($sessions)
+            ->map(fn (mixed $session): array => [
+                'name' => (string) data_get($session, 'name', ''),
+                'start_time' => (string) data_get($session, 'start_time', ''),
+                'end_time' => (string) data_get($session, 'end_time', ''),
+                'required_for_attendance' => filter_var(data_get($session, 'required_for_attendance', true), FILTER_VALIDATE_BOOL),
+            ])
+            ->filter(fn (array $session): bool => filled($session['name']) || filled($session['start_time']) || filled($session['end_time']))
             ->values()
             ->all();
     }
@@ -742,6 +791,7 @@ class EventProposalCreate extends Component
             'date' => '',
             'start_time' => '',
             'end_time' => '',
+            'sessions' => [],
         ];
     }
 
@@ -759,7 +809,7 @@ class EventProposalCreate extends Component
     {
         return [
             'Venue selected or described' => $this->locationType === 'on-campus'
-                ? filled($this->venueId)
+                ? filled($this->venueId) || filled($this->locationDetails)
                 : filled($this->locationDetails),
             'Confirming office recorded' => filled($this->venueConfirmationOffice),
             'Confirmation date recorded' => filled($this->venueConfirmationDate),
@@ -767,5 +817,39 @@ class EventProposalCreate extends Component
             'Official PPA softcopy attached' => filled($this->proposalDocument) || filled($this->currentProposalDocumentName),
             'Hardcopy submission confirmed' => $this->hardcopySubmitted,
         ];
+    }
+
+    /** @return array{confirmed: list<array<string, mixed>>, tentative: list<array<string, mixed>>, disclaimer: string, availability_url: ?string} */
+    private function venueAvailabilityPreview(): array
+    {
+        if ($this->locationType !== 'on-campus') {
+            return ['confirmed' => [], 'tentative' => [], 'disclaimer' => app(VenueAvailabilityService::class)->disclaimer(), 'availability_url' => null];
+        }
+
+        $venueName = $this->selectedVenueName();
+        $availability = app(VenueAvailabilityService::class)->warningsForVenueSchedule(
+            venueName: $venueName,
+            eventDays: $this->eventDays,
+            exceptEventId: $this->eventId
+        );
+
+        $firstDay = collect($this->eventDays)->first(fn (array $day): bool => filled($day['date'] ?? null));
+        $availability['availability_url'] = route('dashboard.venue-availability', [
+            'date' => $firstDay['date'] ?? $this->startDate,
+            'startTime' => $firstDay['start_time'] ?? null,
+            'endTime' => $firstDay['end_time'] ?? null,
+            'search' => $venueName,
+        ]);
+
+        return $availability;
+    }
+
+    private function selectedVenueName(): string
+    {
+        if (filled($this->venueId)) {
+            return (string) Venue::whereKey($this->venueId)->value('name');
+        }
+
+        return $this->locationType === 'on-campus' ? $this->locationDetails : '';
     }
 }

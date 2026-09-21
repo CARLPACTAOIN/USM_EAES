@@ -4,19 +4,21 @@ namespace App\Support;
 
 use App\Models\Event;
 use App\Models\EventDay;
+use App\Services\EventSessionScheduleService;
 use Carbon\Carbon;
 
 class EvaluationWindow
 {
     public static function finalEventDay(Event $event): ?EventDay
     {
-        $event->loadMissing('eventDays');
+        $event->loadMissing('eventDays.sessions');
+        $sessionSchedules = app(EventSessionScheduleService::class);
 
         return $event->eventDays
             ->sortByDesc(fn (EventDay $day): string => sprintf(
                 '%s %s',
                 $day->date?->format('Y-m-d') ?? '',
-                $day->end_time ?? '00:00:00'
+                $sessionSchedules->sessionsForDay($day)->max('end_time') ?? $day->end_time ?? '00:00:00'
             ))
             ->first();
     }
@@ -25,12 +27,13 @@ class EvaluationWindow
     {
         $finalDay = self::finalEventDay($event);
 
-        if (!$finalDay) {
+        if (! $finalDay) {
             return null;
         }
 
-        $endTime = $finalDay->end_time ?: '23:59:59';
-        $closedAt = Carbon::parse($finalDay->date->toDateString() . ' ' . $endTime);
+        $sessionSchedules = app(EventSessionScheduleService::class);
+        $endTime = $sessionSchedules->sessionsForDay($finalDay)->max('end_time') ?: $finalDay->end_time ?: '23:59:59';
+        $closedAt = Carbon::parse($finalDay->date->toDateString().' '.$endTime);
 
         return $closedAt->addHours((int) config('services.eaes.evaluation_window_hours', 24));
     }

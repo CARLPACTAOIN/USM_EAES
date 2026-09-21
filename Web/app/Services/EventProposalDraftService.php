@@ -36,7 +36,10 @@ class EventProposalDraftService
         'administrative_office',
     ];
 
-    public function __construct(private readonly ParticipationScopeService $participationScopes) {}
+    public function __construct(
+        private readonly ParticipationScopeService $participationScopes,
+        private readonly EventSessionScheduleService $sessionSchedules,
+    ) {}
 
     /**
      * @param  array<string, mixed>  $data
@@ -87,7 +90,7 @@ class EventProposalDraftService
                     'adviser_signed' => $isHrEvent ? false : $data['adviser_signed'],
                 ]);
 
-                $this->replaceEventDays($event, $data['event_days']);
+                $this->replaceEventDays($event, $this->sessionSchedules->normalizeEventDays($data['event_days']));
 
                 EventEvaluationForm::createForEvent(
                     $event,
@@ -175,7 +178,7 @@ class EventProposalDraftService
                     'adviser_signed' => $isHrEvent ? false : $data['adviser_signed'],
                 ]);
 
-                $this->replaceEventDays($event, $data['event_days']);
+                $this->replaceEventDays($event, $this->sessionSchedules->normalizeEventDays($data['event_days']));
 
                 EventEvaluationForm::createForEvent(
                     $event->fresh(),
@@ -244,20 +247,22 @@ class EventProposalDraftService
     }
 
     /**
-     * @param  list<array{date: string, start_time: string, end_time: string}>  $eventDays
+     * @param  list<array{date: string, start_time: string, end_time: string, sessions?: list<array<string, mixed>>}>  $eventDays
      */
     private function replaceEventDays(Event $event, array $eventDays): void
     {
         $event->eventDays()->delete();
 
         foreach ($eventDays as $index => $dayData) {
-            EventDay::create([
+            $eventDay = EventDay::create([
                 'event_id' => $event->id,
                 'day_number' => $index + 1,
                 'date' => $dayData['date'],
                 'start_time' => $dayData['start_time'],
                 'end_time' => $dayData['end_time'],
             ]);
+
+            $this->sessionSchedules->replaceSessions($eventDay, $dayData['sessions']);
         }
     }
 
@@ -279,7 +284,7 @@ class EventProposalDraftService
         }
 
         if (blank($data['venue_id'] ?? null)) {
-            return ['venue_id' => null, 'location_details' => null];
+            return ['venue_id' => null, 'location_details' => $data['location_details']];
         }
 
         $venue = Venue::active()->find($data['venue_id']);

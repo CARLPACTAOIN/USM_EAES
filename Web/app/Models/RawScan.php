@@ -14,6 +14,7 @@ class RawScan extends Model
         'event_id',
         'event_participation_scope_id',
         'event_day_id',
+        'event_day_session_id',
         'scanner_session_id',
         'scanner_user_id',
         'captured_by_organization_id',
@@ -50,6 +51,11 @@ class RawScan extends Model
     public function eventDay()
     {
         return $this->belongsTo(EventDay::class);
+    }
+
+    public function eventDaySession()
+    {
+        return $this->belongsTo(EventDaySession::class);
     }
 
     public function student()

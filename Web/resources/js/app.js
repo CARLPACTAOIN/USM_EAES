@@ -130,9 +130,69 @@ Alpine.data('eventScheduleEditor', (initialDays, initialStartDate, initialEndDat
         if (!Array.isArray(this.days) || this.days.length === 0) {
             this.days = [this.blankDay()];
         }
+
+        this.days.forEach(day => this.ensureDaySessions(day));
     },
     blankDay() {
-        return { date: '', start_time: '', end_time: '' };
+        return { date: '', start_time: '', end_time: '', sessions: [] };
+    },
+    blankSession(day = {}, index = 0) {
+        return {
+            name: `Session ${index + 1}`,
+            start_time: day.start_time || '',
+            end_time: day.end_time || '',
+            required_for_attendance: true,
+        };
+    },
+    ensureDaySessions(day) {
+        if (!Array.isArray(day.sessions) || day.sessions.length === 0) {
+            day.sessions = [this.blankSession(day, 0)];
+        }
+
+        return day.sessions;
+    },
+    addSession(dayIndex) {
+        const day = this.days[dayIndex];
+
+        if (!day) {
+            return;
+        }
+
+        const sessions = this.ensureDaySessions(day);
+        sessions.push(this.blankSession(day, sessions.length));
+        this.days = [...this.days];
+        this.clearScheduleErrors();
+    },
+    removeSession(dayIndex, sessionIndex) {
+        const day = this.days[dayIndex];
+
+        if (!day) {
+            return;
+        }
+
+        const sessions = this.ensureDaySessions(day);
+
+        if (sessions.length <= 1) {
+            return;
+        }
+
+        sessions.splice(sessionIndex, 1);
+        this.days = [...this.days];
+        this.clearScheduleErrors();
+    },
+    splitDay(dayIndex) {
+        const day = this.days[dayIndex];
+
+        if (!day?.start_time || !day?.end_time) {
+            return;
+        }
+
+        day.sessions = [
+            { name: 'Session 1', start_time: day.start_time, end_time: '12:00', required_for_attendance: true },
+            { name: 'Session 2', start_time: '13:00', end_time: day.end_time, required_for_attendance: true },
+        ];
+        this.days = [...this.days];
+        this.clearScheduleErrors();
     },
     parseDate(value) {
         const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value || '');
@@ -225,7 +285,8 @@ Alpine.data('eventScheduleEditor', (initialDays, initialStartDate, initialEndDat
             nextDays.push({
                 date,
                 start_time: previous.start_time || '',
-                end_time: previous.end_time || ''
+                end_time: previous.end_time || '',
+                sessions: Array.isArray(previous.sessions) ? previous.sessions : [],
             });
             cursor.setUTCDate(cursor.getUTCDate() + 1);
         }
@@ -253,6 +314,11 @@ Alpine.data('eventScheduleEditor', (initialDays, initialStartDate, initialEndDat
             if (firstDay.end_time) {
                 day.end_time = firstDay.end_time;
             }
+
+            if (Array.isArray(day.sessions) && day.sessions.length === 1) {
+                day.sessions[0].start_time = day.start_time;
+                day.sessions[0].end_time = day.end_time;
+            }
         });
     },
     syncDayTime(index, field) {
@@ -261,10 +327,21 @@ Alpine.data('eventScheduleEditor', (initialDays, initialStartDate, initialEndDat
         }
 
         const value = this.days[index][field] || '';
-        this.days.forEach(day => day[field] = value);
+        this.days.forEach(day => {
+            day[field] = value;
+
+            if (Array.isArray(day.sessions) && day.sessions.length === 1) {
+                day.sessions[0][field] = value;
+            }
+        });
     },
     dayError(index, field) {
         const messages = this.errors[`eventDays.${index}.${field}`];
+
+        return Array.isArray(messages) ? messages[0] : (messages || '');
+    },
+    sessionError(dayIndex, sessionIndex, field) {
+        const messages = this.errors[`eventDays.${dayIndex}.sessions.${sessionIndex}.${field}`];
 
         return Array.isArray(messages) ? messages[0] : (messages || '');
     },
