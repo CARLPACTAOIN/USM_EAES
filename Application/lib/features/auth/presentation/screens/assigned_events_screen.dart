@@ -89,6 +89,7 @@ class _AssignedEventsScreenState extends State<AssignedEventsScreen>
           color: isDark ? Colors.white : AppColors.brandGreenDark,
         ),
         title: Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
               Icons.event_note_rounded,
@@ -96,7 +97,12 @@ class _AssignedEventsScreenState extends State<AssignedEventsScreen>
               color: AppColors.usmGold.withValues(alpha: 0.80),
             ),
             const SizedBox(width: 10),
-            const Text('Assigned Events'),
+            const Flexible(
+              child: Text(
+                'Assigned Events',
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
           ],
         ),
         actions: [

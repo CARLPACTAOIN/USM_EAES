@@ -108,15 +108,19 @@ void main() {
       scannerController.dispose();
     });
 
-    await tester.pumpWidget(
-      MaterialApp(
-        home: AssignedEventsScreen(
-          authController: authController,
-          scannerController: scannerController,
+    try {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: AssignedEventsScreen(
+            authController: authController,
+            scannerController: scannerController,
+          ),
         ),
-      ),
-    );
-    await tester.pump(const Duration(seconds: 1));
+      );
+      await tester.pump(const Duration(seconds: 1));
+    } finally {
+      FlutterError.onError = previousOnError;
+    }
 
     expect(
       find.text(
