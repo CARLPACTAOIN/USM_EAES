@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class Organization extends Model
 {
@@ -12,6 +13,7 @@ class Organization extends Model
 
     protected $fillable = [
         'college_id',
+        'department_id',
         'name',
         'acronym',
         'type', // "society", "usg", "lsg", "academic_unit", "administrative_office", "non_academic_org", "hr_unit"
@@ -19,14 +21,26 @@ class Organization extends Model
         'status',
     ];
 
-    public function college()
+    public function college(): BelongsTo
     {
         return $this->belongsTo(College::class);
     }
 
+    public function department(): BelongsTo
+    {
+        return $this->belongsTo(Department::class);
+    }
+
+    public function resolvedCollege(): ?College
+    {
+        return $this->department?->college ?? $this->college;
+    }
+
     public function programs()
     {
-        return $this->belongsToMany(Program::class, 'organization_programs');
+        return $this->belongsToMany(Program::class, 'organization_programs')
+            ->using(OrganizationProgram::class)
+            ->withTimestamps();
     }
 
     public function users()

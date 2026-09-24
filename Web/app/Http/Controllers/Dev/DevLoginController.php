@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Dev;
 use App\Http\Controllers\Controller;
 use App\Models\AdminAssignment;
 use App\Models\College;
+use App\Models\Department;
 use App\Models\Organization;
 use App\Models\Program;
 use App\Models\University;
@@ -60,10 +61,22 @@ class DevLoginController extends Controller
             ]
         );
 
+        $department = Department::firstOrCreate(
+            ['college_id' => $college->id, 'code' => 'ICT'],
+            [
+                'name' => 'Department of Information and Communication Technology',
+                'status' => 'active',
+            ]
+        );
+
         $program = Program::firstOrCreate(
             ['college_id' => $college->id, 'code' => 'BSIS'],
-            ['name' => 'BS Information Systems']
+            [
+                'department_id' => $department->id,
+                'name' => 'BS Information Systems',
+            ]
         );
+        $program->update(['department_id' => $department->id]);
 
         $psits = Organization::firstOrCreate(
             [
@@ -72,10 +85,12 @@ class DevLoginController extends Controller
                 'college_id' => $college->id,
             ],
             [
+                'department_id' => $department->id,
                 'name' => 'Philippine Society of Information Technology Students',
                 'status' => 'active',
             ]
         );
+        $psits->update(['department_id' => $department->id]);
 
         $programIds = Program::query()
             ->where('college_id', $college->id)

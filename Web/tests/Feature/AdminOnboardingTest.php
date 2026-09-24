@@ -6,6 +6,7 @@ use App\Livewire\Dashboard\AdminAccessWorkspace;
 use App\Models\AdminAssignment;
 use App\Models\AuditLog;
 use App\Models\College;
+use App\Models\Department;
 use App\Models\Organization;
 use App\Models\Program;
 use App\Models\University;
@@ -70,6 +71,7 @@ class AdminOnboardingTest extends TestCase
 
         $organization = Organization::where('acronym', 'PSITS')->firstOrFail();
         $this->assertSame('society', $organization->type);
+        $this->assertNotNull($organization->department_id);
         $this->assertTrue($organization->programs()->where('program_id', $program->id)->exists());
         $this->assertDatabaseHas('audit_logs', [
             'target_id' => $organization->id,
@@ -1065,9 +1067,19 @@ class AdminOnboardingTest extends TestCase
 
     private function createCollegeAndProgram(): array
     {
-        $university = University::create(['name' => 'USM', 'domain' => 'usm.edu.ph']);
-        $college = College::create(['university_id' => $university->id, 'name' => 'CEIT', 'code' => 'CEIT']);
-        $program = Program::create(['college_id' => $college->id, 'name' => 'BS Information Systems', 'code' => 'BSIS']);
+        $university = University::factory()->create(['name' => 'USM', 'domain' => 'usm.edu.ph']);
+        $college = College::factory()->for($university)->create(['name' => 'CEIT', 'code' => 'CEIT']);
+        $department = Department::factory()->for($college)->create([
+            'name' => 'Department of Information and Communication Technology',
+            'code' => 'ICT',
+            'status' => 'active',
+        ]);
+        $program = Program::create([
+            'college_id' => $college->id,
+            'department_id' => $department->id,
+            'name' => 'BS Information Systems',
+            'code' => 'BSIS',
+        ]);
 
         return [$college, $program];
     }

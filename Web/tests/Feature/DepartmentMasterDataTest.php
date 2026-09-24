@@ -146,7 +146,7 @@ class DepartmentMasterDataTest extends TestCase
         $this->assertNotNull($department->college->university);
     }
 
-    public function test_usm_seed_data_creates_explicit_departments_without_program_migration(): void
+    public function test_usm_seed_data_creates_explicit_departments_with_program_mappings(): void
     {
         $this->seed(UsmInstitutionalDataSeeder::class);
 
@@ -161,7 +161,9 @@ class DepartmentMasterDataTest extends TestCase
         $program = Program::where('code', 'BSIS')->firstOrFail();
 
         $this->assertSame($ceit->id, $program->college_id);
+        $this->assertSame('ICT', $program->department?->code);
         $this->assertTrue($program->college->is($ceit));
+        $this->assertTrue($program->resolvedCollege()?->is($ceit));
     }
 
     private function createCollege(string $code = 'CEIT'): array

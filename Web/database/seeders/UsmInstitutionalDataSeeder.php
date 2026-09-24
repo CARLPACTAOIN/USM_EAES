@@ -43,6 +43,20 @@ class UsmInstitutionalDataSeeder extends Seeder
             ],
         ];
 
+        $programDepartments = [
+            'CEIT' => [
+                'BSCE' => 'DCE',
+                'BSABE' => 'ABE',
+                'BSCOE' => 'DCOE',
+                'BSECE' => 'DECE',
+                'BSIS' => 'ICT',
+                'BSCS' => 'ICT',
+                'BLIS' => 'ICT',
+            ],
+        ];
+
+        $departmentModels = [];
+
         foreach ($colleges as $code => [$name, $programs]) {
             $college = College::updateOrCreate(
                 ['code' => $code],
@@ -50,16 +64,21 @@ class UsmInstitutionalDataSeeder extends Seeder
             );
 
             foreach ($departments[$code] ?? [] as $departmentCode => $departmentName) {
-                Department::updateOrCreate(
+                $departmentModels[$code][$departmentCode] = Department::updateOrCreate(
                     ['college_id' => $college->id, 'code' => $departmentCode],
                     ['name' => $departmentName, 'status' => 'active']
                 );
             }
 
             foreach ($programs as $programCode => $programName) {
+                $departmentCode = $programDepartments[$code][$programCode] ?? null;
+
                 Program::updateOrCreate(
                     ['college_id' => $college->id, 'code' => $programCode],
-                    ['name' => $programName]
+                    [
+                        'name' => $programName,
+                        'department_id' => $departmentCode ? ($departmentModels[$code][$departmentCode]?->id ?? null) : null,
+                    ]
                 );
             }
 

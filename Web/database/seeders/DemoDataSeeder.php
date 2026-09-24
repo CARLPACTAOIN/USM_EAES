@@ -5,6 +5,7 @@ namespace Database\Seeders;
 use App\Models\AdminAssignment;
 use App\Models\AttendanceRecord;
 use App\Models\College;
+use App\Models\Department;
 use App\Models\Evaluation;
 use App\Models\Event;
 use App\Models\EventDay;
@@ -330,6 +331,16 @@ class DemoDataSeeder extends Seeder
             'Bachelor of Elementary Education' => 'BEED',
         ];
 
+        $ceitProgramDepartments = [
+            'BSCE' => 'DCE',
+            'BSABE' => 'ABE',
+            'BSCOE' => 'DCOE',
+            'BSECE' => 'DECE',
+            'BSIS' => 'ICT',
+            'BSCS' => 'ICT',
+            'BLIS' => 'ICT',
+        ];
+
         $collegesMap = [];
         $programsMap = [];
         $orgsMap = [];
@@ -367,19 +378,20 @@ class DemoDataSeeder extends Seeder
             $localProgramIds = [];
             foreach ($data['programs'] as $pName) {
                 $pCode = $programCodeMap[$pName] ?? substr(strtoupper(preg_replace('/[^A-Z]/', '', $pName)), 0, 6);
+                $departmentCode = $collegeCode === 'CEIT' ? ($ceitProgramDepartments[$pCode] ?? null) : null;
+                $department = $departmentCode
+                    ? Department::where('college_id', $college->id)->where('code', $departmentCode)->first()
+                    : null;
 
-                if (! isset($programsMap[$pCode])) {
-                    $program = Program::firstOrCreate(
-                        ['code' => $pCode],
-                        [
-                            'college_id' => $college->id,
-                            'name' => $pName,
-                        ]
-                    );
-                    $programsMap[$pCode] = $program;
-                } else {
-                    $program = $programsMap[$pCode];
-                }
+                $program = Program::updateOrCreate(
+                    ['college_id' => $college->id, 'code' => $pCode],
+                    [
+                        'name' => $pName,
+                        'department_id' => $department?->id,
+                    ]
+                );
+
+                $programsMap[$pCode] = $program;
                 $localProgramIds[] = $program->id;
             }
 
@@ -387,12 +399,20 @@ class DemoDataSeeder extends Seeder
             $orgAcronym = $data['org_abbreviation'];
             $orgName = $data['org_name'];
 
-            $org = Organization::firstOrCreate(
+            $departmentIds = Program::whereIn('id', $localProgramIds)
+                ->pluck('department_id')
+                ->filter()
+                ->unique()
+                ->values();
+
+            $org = Organization::updateOrCreate(
                 ['acronym' => $orgAcronym],
                 [
                     'college_id' => $college->id,
+                    'department_id' => $departmentIds->count() === 1 ? $departmentIds->first() : null,
                     'name' => $orgName,
                     'type' => 'society',
+                    'status' => 'active',
                 ]
             );
             $orgsMap[$orgAcronym] = $org;

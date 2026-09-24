@@ -134,12 +134,12 @@
 |-----------------|--------|------------------|
 | `universities` | Done | UUID schema defined and migrated |
 | `colleges` | Done | UUID schema defined and migrated |
-| `departments` | Partial | First-class `departments` UUID table, College -> Department relationship, Department model/factory, OSA-only dashboard API CRUD routes, and explicit CEIT Department seed mappings exist. Downstream Program, Organization, profile, membership, proposal, scanner, and analytics consumers still need migration to Department ownership. |
+| `departments` | Partial | First-class `departments` UUID table, College -> Department relationship, Department model/factory, OSA-only dashboard API CRUD routes, explicit CEIT Department seed mappings, and initial Program/Department-backed Organization relationships exist. Student profile, membership, proposal, scanner, and analytics consumers still need full Department ownership migration. |
 | `school_years` | Partial | First-class `school_years` UUID table, OSA-only dashboard API create/list/activate/open-transition/close-transition routes, transactional active-year resolver, database-level single-active partial unique index, lifecycle metadata, and audit rows exist. Downstream memberships, officer rosters, authority projections, proposals, scanner scopes, and analytics still need `school_year_id` integration. |
-| `organizations` | Done | UUID schema defined and migrated; status/logo fields and unique type+college+acronym identity added |
+| `organizations` | Partial | UUID organization schema, status/logo fields, College compatibility identity, nullable `department_id`, Department relationship, OSA org-management validation for Department-backed Societies/Academic Units, and CEIT demo society mappings exist. Downstream contracts still need explicit University/College/Department scope cleanup. |
 | `users` (PRD shape) | Done | Custom user columns migrated; college_id and program_id UUID foreign keys plus nullable controlled `year_level` profile field added |
-| `programs` | Done | UUID schema representing academic programs under colleges, migrated with unique college+code constraint |
-| `organization_programs` | Done | Pivot mapping many-to-many relationship between organizations and programs, migrated |
+| `programs` | Partial | Programs now have nullable `department_id`, Department relationship, and compatibility College resolution while retaining direct `college_id` for existing callers. Explicit CEIT Program -> Department seed mappings exist; later contract work must remove direct College storage once downstream consumers migrate. |
+| `organization_programs` | Partial | The organization/program pivot exists, and OSA organization create/update plus the Eloquent pivot model now reject Department-backed Society/Academic Unit coverage outside the org Department when Department context is present. Remaining membership/profile/proposal consumers still need migration to the corrected Department contract. |
 | `organization_memberships` | Done | UUID multi-membership table added for primary academic, secondary org, non-academic, and officer membership attribution, including mirrored profile Year Level |
 | `employee_profiles` / `employee_roster_entries` | Done | UUID HR/faculty/staff profile and roster tables added for employee verification and HR scanner hydration |
 | `admin_applications` | Deprecated | Legacy student-application table retained for data preservation only; routes, controllers, and UI removed in favor of OSA-direct assignment governance |
@@ -179,6 +179,11 @@
 ---
 
 ## Sprint Notes
+
+- **2026-09-24 (Department-backed programs and academic organizations):**
+  - Added nullable `department_id` compatibility columns to Programs and Organizations, plus Program/Organization/Department relationships and College resolution helpers so existing direct College callers keep working.
+  - Updated OSA organization create/update and the Eloquent organization-program pivot model to reject Department-backed Society/Academic Unit coverage that crosses Department boundaries when Department context is present.
+  - Seeded explicit CEIT Program -> Department mappings and demo/dev PSITS Department context while leaving unknown Department mappings nullable instead of inventing data.
 
 - **2026-09-24 (School Year lifecycle foundation):**
   - Added OSA-controlled School Year master data with UUID schema, unique labels, institutional date fields, draft/active/closed state, activation metadata, transition-window metadata, and a database-level single-active constraint.

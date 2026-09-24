@@ -122,7 +122,7 @@ class AdminAccessController extends Controller
             ->paginate(15)
             ->withQueryString();
 
-        $organizations = Organization::with(['college', 'programs'])
+        $organizations = Organization::with(['college', 'department', 'programs'])
             ->whereIn('type', OrganizationManagementService::ORGANIZATION_TYPES)
             ->when(in_array($orgType, OrganizationManagementService::ORGANIZATION_TYPES, true), function ($query) use ($orgType) {
                 $query->where('type', $orgType);
@@ -142,7 +142,7 @@ class AdminAccessController extends Controller
             ->paginate(8, ['*'], 'orgs_page')
             ->withQueryString();
 
-        $activeOrganizations = Organization::with('college')
+        $activeOrganizations = Organization::with(['college', 'department'])
             ->whereIn('type', OrganizationManagementService::ORGANIZATION_TYPES)
             ->where('status', 'active')
             ->orderBy('name')
@@ -176,7 +176,7 @@ class AdminAccessController extends Controller
 
         [$auditUsers, $auditOrganizations, $auditColleges] = $this->resolveAuditContext($auditLogs);
 
-        $colleges = College::with('programs')->orderBy('name')->get();
+        $colleges = College::with(['departments', 'programs'])->orderBy('name')->get();
         $adminRoles = AdminAssignmentService::ADMIN_ROLES;
         $assignableRoles = AdminAssignmentService::OSA_ASSIGNABLE_ROLES;
         $auditActions = self::AUDIT_ACTIONS;
@@ -289,6 +289,7 @@ class AdminAccessController extends Controller
             'acronym' => ['required', 'string', 'max:20'],
             'type' => ['required', Rule::in(OrganizationManagementService::ORGANIZATION_TYPES)],
             'college_id' => ['nullable', 'uuid', 'exists:colleges,id'],
+            'department_id' => ['nullable', 'uuid', 'exists:departments,id'],
             'program_ids' => ['nullable', 'array'],
             'program_ids.*' => ['uuid', 'exists:programs,id'],
             'status' => ['nullable', Rule::in(['active', 'inactive'])],
@@ -299,7 +300,13 @@ class AdminAccessController extends Controller
             return redirect()->back()->withErrors($validator, 'organization')->withInput();
         }
 
-        $service->create($validator->validated(), $request->user());
+        try {
+            $service->create($validator->validated(), $request->user());
+        } catch (ValidationException $exception) {
+            return redirect()->back()
+                ->withErrors($exception->errors(), 'organization')
+                ->withInput();
+        }
 
         return redirect()->route('dashboard.admin-users', ['tab' => 'organizations'])
             ->with('success', 'Organization created.');
@@ -313,6 +320,7 @@ class AdminAccessController extends Controller
             'name' => ['required', 'string', 'max:255'],
             'acronym' => ['required', 'string', 'max:20'],
             'college_id' => ['nullable', 'uuid', 'exists:colleges,id'],
+            'department_id' => ['nullable', 'uuid', 'exists:departments,id'],
             'program_ids' => ['nullable', 'array'],
             'program_ids.*' => ['uuid', 'exists:programs,id'],
             'status' => ['required', Rule::in(['active', 'inactive'])],
@@ -326,7 +334,14 @@ class AdminAccessController extends Controller
                 ->with('org_edit_error_id', $organization->id);
         }
 
-        $service->update($organization, $validator->validated(), $request->user());
+        try {
+            $service->update($organization, $validator->validated(), $request->user());
+        } catch (ValidationException $exception) {
+            return redirect()->back()
+                ->withErrors($exception->errors(), 'organization')
+                ->withInput()
+                ->with('org_edit_error_id', $organization->id);
+        }
 
         return redirect()->route('dashboard.admin-users', ['tab' => 'organizations'])
             ->with('success', 'Organization updated.');

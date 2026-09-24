@@ -17,6 +17,7 @@ use App\Http\Controllers\Web\SchoolYearController;
 use App\Http\Controllers\Web\VenueController;
 use App\Models\AdminAssignment;
 use App\Models\College;
+use App\Models\Department;
 use App\Models\Organization;
 use App\Models\Program;
 use App\Models\University;
@@ -160,22 +161,34 @@ Route::get('/dev/login/{role}', function (string $role) {
         ]
     );
 
-    // Seed programs
-    $program1 = Program::firstOrCreate(
-        ['code' => 'BSIS'],
+    $department = Department::firstOrCreate(
+        ['college_id' => $college->id, 'code' => 'ICT'],
         [
-            'college_id' => $college->id,
-            'name' => 'Bachelor of Science in Information Systems',
+            'name' => 'Department of Information and Communication Technology',
+            'status' => 'active',
         ]
     );
 
-    $program2 = Program::firstOrCreate(
-        ['code' => 'BSCS'],
+    // Seed programs
+    $program1 = Program::firstOrCreate(
+        ['college_id' => $college->id, 'code' => 'BSIS'],
         [
             'college_id' => $college->id,
+            'department_id' => $department->id,
+            'name' => 'Bachelor of Science in Information Systems',
+        ]
+    );
+    $program1->update(['department_id' => $department->id]);
+
+    $program2 = Program::firstOrCreate(
+        ['college_id' => $college->id, 'code' => 'BSCS'],
+        [
+            'college_id' => $college->id,
+            'department_id' => $department->id,
             'name' => 'Bachelor of Science in Computer Science',
         ]
     );
+    $program2->update(['department_id' => $department->id]);
 
     $orgType = match ($role) {
         'USG Admin' => 'usg',
@@ -198,6 +211,7 @@ Route::get('/dev/login/{role}', function (string $role) {
     $org = Organization::firstOrCreate(
         ['acronym' => $orgAcronym, 'type' => $orgType, 'college_id' => in_array($orgType, ['lsg', 'society', 'academic_unit'], true) ? $college->id : null],
         [
+            'department_id' => in_array($orgType, ['society', 'academic_unit'], true) ? $department->id : null,
             'name' => match ($orgType) {
                 'lsg' => 'College of Engineering Local Student Government',
                 'usg' => 'University Student Government',
@@ -209,6 +223,9 @@ Route::get('/dev/login/{role}', function (string $role) {
             'status' => 'active',
         ]
     );
+    if (in_array($orgType, ['society', 'academic_unit'], true)) {
+        $org->update(['department_id' => $department->id]);
+    }
 
     // Link programs to organization
     if (! $org->programs()->where('program_id', $program1->id)->exists()) {
