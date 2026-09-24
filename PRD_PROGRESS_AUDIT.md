@@ -135,6 +135,7 @@
 | `universities` | Done | UUID schema defined and migrated |
 | `colleges` | Done | UUID schema defined and migrated |
 | `departments` | Partial | First-class `departments` UUID table, College -> Department relationship, Department model/factory, OSA-only dashboard API CRUD routes, and explicit CEIT Department seed mappings exist. Downstream Program, Organization, profile, membership, proposal, scanner, and analytics consumers still need migration to Department ownership. |
+| `school_years` | Partial | First-class `school_years` UUID table, OSA-only dashboard API create/list/activate/open-transition/close-transition routes, transactional active-year resolver, database-level single-active partial unique index, lifecycle metadata, and audit rows exist. Downstream memberships, officer rosters, authority projections, proposals, scanner scopes, and analytics still need `school_year_id` integration. |
 | `organizations` | Done | UUID schema defined and migrated; status/logo fields and unique type+college+acronym identity added |
 | `users` (PRD shape) | Done | Custom user columns migrated; college_id and program_id UUID foreign keys plus nullable controlled `year_level` profile field added |
 | `programs` | Done | UUID schema representing academic programs under colleges, migrated with unique college+code constraint |
@@ -178,6 +179,11 @@
 ---
 
 ## Sprint Notes
+
+- **2026-09-24 (School Year lifecycle foundation):**
+  - Added OSA-controlled School Year master data with UUID schema, unique labels, institutional date fields, draft/active/closed state, activation metadata, transition-window metadata, and a database-level single-active constraint.
+  - Added dashboard API create/list/activate/open-transition/close-transition routes backed by a transactional lifecycle service so status changes are explicit OSA actions and never inferred from dates.
+  - Added audit rows and focused feature coverage for OSA-only access, single-active enforcement, prior active-year closure, transition controls, and lifecycle attribution.
 
 - **2026-09-24 (Department master data foundation):**
   - Added first-class Department master data under Colleges with UUID schema, scoped code uniqueness, model/factory support, OSA-only dashboard API create/list/update routes, audit rows for create/update actions, and focused feature coverage.
