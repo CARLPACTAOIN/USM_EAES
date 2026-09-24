@@ -6,6 +6,7 @@ namespace App\Models;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
@@ -14,7 +15,7 @@ use Spatie\Permission\Traits\HasRoles;
 class User extends Authenticatable
 {
     /** @use HasFactory<UserFactory> */
-    use HasFactory, Notifiable, HasUuids, HasApiTokens, HasRoles;
+    use HasApiTokens, HasFactory, HasRoles, HasUuids, Notifiable;
 
     /**
      * The attributes that are mass assignable.
@@ -28,6 +29,7 @@ class User extends Authenticatable
         'google_sub',
         'organization_id',
         'college_id',
+        'department_id',
         'program_id',
         'student_id_number',
         'qr_code_value',
@@ -115,6 +117,11 @@ class User extends Authenticatable
     public function college()
     {
         return $this->belongsTo(College::class);
+    }
+
+    public function department(): BelongsTo
+    {
+        return $this->belongsTo(Department::class);
     }
 
     public function program()

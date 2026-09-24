@@ -1,6 +1,7 @@
 <x-layouts.app :title="'My Profile — EAES'">
     @php
         $collegeId = old('college_id', $user->college_id ?? $user->organization?->college_id);
+        $departmentId = old('department_id', $user->department_id ?? $user->program?->department_id);
         $programId = old('program_id', $user->program_id);
         $organizationId = old('organization_id', $user->organization_id);
         $yearLevel = old('year_level', $user->year_level);
@@ -12,6 +13,11 @@
                 'label' => 'College selected',
                 'note' => 'Your academic unit at USM',
                 'done' => filled($collegeId),
+            ],
+            [
+                'label' => 'Department selected',
+                'note' => 'Your program-owning department',
+                'done' => filled($departmentId),
             ],
             [
                 'label' => 'Program selected',
@@ -130,6 +136,13 @@
                                     @endif
                                 </div>
                                 <div class="p-4 rounded-xl border border-(--color-border) bg-(--color-surface)">
+                                    <p class="text-xs text-(--color-text-secondary) font-medium">Department</p>
+                                    <p class="font-semibold text-(--color-text-primary) mt-1 text-sm">{{ $user->department?->name ?? $user->program?->department?->name ?? 'Not set' }}</p>
+                                    @if($user->department?->code ?? $user->program?->department?->code)
+                                        <span class="text-xs text-(--color-text-tertiary) font-data block mt-1">{{ $user->department?->code ?? $user->program?->department?->code }}</span>
+                                    @endif
+                                </div>
+                                <div class="p-4 rounded-xl border border-(--color-border) bg-(--color-surface)">
                                     <p class="text-xs text-(--color-text-secondary) font-medium">Academic Program</p>
                                     <p class="font-semibold text-(--color-text-primary) mt-1 text-sm">{{ $user->program?->name ?? 'Not set' }}</p>
                                     @if($user->program?->code)
@@ -215,9 +228,11 @@
                             </h2>
 
                             <div x-data="dependentSelect(
-                                @js(json_encode($orgsByCollege)),
-                                @js(json_encode($programsByCollege)),
+                                @js(json_encode($departmentsByCollege)),
+                                @js(json_encode($programsByDepartment)),
+                                @js(json_encode($orgsByProgram)),
                                 @js($collegeId),
+                                @js($departmentId),
                                 @js($programId),
                                 @js($organizationId)
                             )" class="proposal-grid">
@@ -237,20 +252,42 @@
                                 </div>
 
                                 <div>
+                                    <label for="department_id" class="form-label">Department <span class="text-(--color-destructive)">*</span></label>
+                                    <select name="department_id" id="department_id"
+                                            x-model="selectedDepartment"
+                                            class="form-input form-select @error('department_id') form-input-error @enderror">
+                                        <option value="">Select your department</option>
+                                        <template x-for="department in filteredDepartments" :key="department.id">
+                                            <option :value="department.id" x-text="`${department.code} — ${department.name}`"></option>
+                                        </template>
+                                    </select>
+                                    @error('department_id') <p class="form-error" role="alert">{{ $message }}</p> @enderror
+                                </div>
+
+                                <div>
                                     <label for="program_id" class="form-label">Academic program <span class="text-(--color-destructive)">*</span></label>
                                     <select name="program_id" id="program_id"
                                             x-model="selectedProgram"
                                             class="form-input form-select @error('program_id') form-input-error @enderror">
                                         <option value="">Select your program</option>
-                                        @foreach($programsByCollege as $colId => $progs)
-                                            @foreach($progs as $prog)
-                                                <option value="{{ $prog['id'] }}" x-show="selectedCollege === '{{ $colId }}'">
-                                                    {{ $prog['code'] }} — {{ $prog['name'] }}
-                                                </option>
-                                            @endforeach
-                                        @endforeach
+                                        <template x-for="program in filteredPrograms" :key="program.id">
+                                            <option :value="program.id" x-text="`${program.code} — ${program.name}`"></option>
+                                        </template>
                                     </select>
                                     @error('program_id') <p class="form-error" role="alert">{{ $message }}</p> @enderror
+                                </div>
+
+                                <div>
+                                    <label for="organization_id" class="form-label">Organization / society <span class="text-(--color-destructive)">*</span></label>
+                                    <select name="organization_id" id="organization_id"
+                                            x-model="selectedOrg"
+                                            class="form-input form-select @error('organization_id') form-input-error @enderror">
+                                        <option value="">Select your organization</option>
+                                        <template x-for="organization in filteredOrgs" :key="organization.id">
+                                            <option :value="organization.id" x-text="`${organization.acronym} — ${organization.name}`"></option>
+                                        </template>
+                                    </select>
+                                    @error('organization_id') <p class="form-error" role="alert">{{ $message }}</p> @enderror
                                 </div>
 
                                 <div>
@@ -265,23 +302,6 @@
                                     </select>
                                     <p class="form-helper">Choose your current year standing for cohort analytics and reports.</p>
                                     @error('year_level') <p class="form-error" role="alert">{{ $message }}</p> @enderror
-                                </div>
-
-                                <div class="proposal-grid-full">
-                                    <label for="organization_id" class="form-label">Organization / society <span class="text-(--color-destructive)">*</span></label>
-                                    <select name="organization_id" id="organization_id"
-                                            x-model="selectedOrg"
-                                            class="form-input form-select @error('organization_id') form-input-error @enderror">
-                                        <option value="">Select your organization</option>
-                                        @foreach($orgsByCollege as $colId => $orgs)
-                                            @foreach($orgs as $org)
-                                                <option value="{{ $org['id'] }}" x-show="selectedCollege === '{{ $colId }}' || '{{ $colId }}' === 'university_wide'">
-                                                    {{ $org['acronym'] }} — {{ $org['name'] }}
-                                                </option>
-                                            @endforeach
-                                        @endforeach
-                                    </select>
-                                    @error('organization_id') <p class="form-error" role="alert">{{ $message }}</p> @enderror
                                 </div>
                             </div>
                         </section>

@@ -19,7 +19,9 @@ use App\Livewire\Dashboard\NotificationSidebarBadge;
 use App\Livewire\Dashboard\PendingQrLinks;
 use App\Models\AdminAssignment;
 use App\Models\AttendanceRecord;
+use App\Models\CanonicalPpaPacket;
 use App\Models\College;
+use App\Models\Department;
 use App\Models\Evaluation;
 use App\Models\Event;
 use App\Models\EventDay;
@@ -31,6 +33,7 @@ use App\Models\PendingStudentLink;
 use App\Models\Program;
 use App\Models\RawScan;
 use App\Models\ScannerSession;
+use App\Models\SchoolYear;
 use App\Models\University;
 use App\Models\User;
 use App\Models\Venue;
@@ -99,21 +102,39 @@ class WebPortalTest extends TestCase
     {
         $uni = University::create(['name' => 'USM', 'domain' => 'usm.edu.ph']);
         $college = College::create(['university_id' => $uni->id, 'name' => 'CEIT', 'code' => 'CEIT']);
-        $org = Organization::create(['college_id' => $college->id, 'name' => 'PSITS', 'acronym' => 'PSITS', 'type' => 'society']);
+        $department = Department::create(['college_id' => $college->id, 'name' => 'Department of Information Systems', 'code' => 'DIS']);
+        $org = Organization::create([
+            'college_id' => $college->id,
+            'department_id' => $department->id,
+            'name' => 'PSITS',
+            'acronym' => 'PSITS',
+            'type' => 'society',
+        ]);
         $program = Program::create([
             'college_id' => $college->id,
+            'department_id' => $department->id,
             'name' => 'BS Information Systems',
             'code' => 'BSIS',
         ]);
         $org->programs()->attach($program->id);
+        $schoolYear = SchoolYear::firstOrCreate(
+            ['label' => '2026-2027'],
+            [
+                'starts_on' => '2026-07-01',
+                'ends_on' => '2027-06-30',
+                'status' => SchoolYear::STATUS_ACTIVE,
+                'activated_at' => now(),
+            ]
+        );
 
-        return compact('uni', 'college', 'org', 'program');
+        return compact('uni', 'college', 'department', 'org', 'program', 'schoolYear');
     }
 
     private function createStudent(Organization $org): User
     {
         $program = Program::where('code', 'BSIS')->first() ?? Program::create([
             'college_id' => $org->college_id,
+            'department_id' => $org->department_id,
             'name' => 'BS Information Systems',
             'code' => 'BSIS',
         ]);
@@ -124,6 +145,7 @@ class WebPortalTest extends TestCase
             'password' => null,
             'organization_id' => $org->id,
             'college_id' => $org->college_id,
+            'department_id' => $org->department_id,
             'program_id' => $program->id,
             'program_code' => $program->code,
             'year_level' => '3rd_year',
@@ -510,6 +532,7 @@ class WebPortalTest extends TestCase
         $this->actingAs($student)
             ->post(route('portal.profile.update'), [
                 'college_id' => $h['college']->id,
+                'department_id' => $h['department']->id,
                 'program_id' => $h['program']->id,
                 'organization_id' => $h['org']->id,
                 'year_level' => '3rd_year',
@@ -520,20 +543,188 @@ class WebPortalTest extends TestCase
             ->assertSessionHas('success');
 
         $student->refresh();
+        $this->assertEquals($h['college']->id, $student->college_id);
+        $this->assertEquals($h['department']->id, $student->department_id);
+        $this->assertEquals($h['program']->id, $student->program_id);
         $this->assertEquals('BSIS', $student->program_code);
         $this->assertEquals('3rd_year', $student->year_level);
         $this->assertEquals('2023-00100', $student->student_id_number);
         $this->assertEquals('QR-UNIQUE-001', $student->qr_code_value);
-        $this->assertDatabaseHas('organization_memberships', [
+
+        $membership = OrganizationMembership::query()
+            ->where('user_id', $student->id)
+            ->where('organization_id', $h['org']->id)
+            ->where('membership_type', 'primary_academic')
+            ->where('source', 'profile')
+            ->where('school_year_id', $h['schoolYear']->id)
+            ->first();
+
+        $this->assertNotNull($membership);
+        $this->assertModelExists($membership);
+        $this->assertSame($h['college']->id, $membership->college_id);
+        $this->assertSame($h['department']->id, $membership->department_id);
+        $this->assertSame($h['program']->id, $membership->program_id);
+        $this->assertSame('3rd_year', $membership->year_level);
+        $this->assertSame(OrganizationMembership::STATUS_ACTIVE, $membership->status);
+    }
+
+    public function test_profile_registration_rejects_invalid_academic_path_combinations(): void
+    {
+        $h = $this->createHierarchy();
+        $student = $this->createStudent($h['org']);
+        $otherCollege = College::create([
+            'university_id' => $h['uni']->id,
+            'name' => 'College of Arts and Sciences',
+            'code' => 'CAS',
+        ]);
+        $otherDepartment = Department::create([
+            'college_id' => $otherCollege->id,
+            'name' => 'Department of Biology',
+            'code' => 'BIO',
+        ]);
+        $sameCollegeOtherDepartment = Department::create([
+            'college_id' => $h['college']->id,
+            'name' => 'Department of Engineering',
+            'code' => 'DOE',
+        ]);
+        $otherProgram = Program::create([
+            'college_id' => $h['college']->id,
+            'department_id' => $sameCollegeOtherDepartment->id,
+            'name' => 'BS Agricultural Engineering',
+            'code' => 'BSAE',
+        ]);
+        $uncoveredOrg = Organization::create([
+            'college_id' => $h['college']->id,
+            'department_id' => $h['department']->id,
+            'name' => 'Unlinked Academic Society',
+            'acronym' => 'UAS',
+            'type' => 'society',
+        ]);
+        $departmentlessOrg = Organization::create([
+            'college_id' => $h['college']->id,
+            'name' => 'Departmentless Society',
+            'acronym' => 'DLS',
+            'type' => 'society',
+        ]);
+        $departmentlessOrg->programs()->attach($h['program']->id);
+        $inactiveOrg = Organization::create([
+            'college_id' => $h['college']->id,
+            'department_id' => $h['department']->id,
+            'name' => 'Inactive Academic Society',
+            'acronym' => 'IAS',
+            'type' => 'society',
+            'status' => 'inactive',
+        ]);
+        $inactiveOrg->programs()->attach($h['program']->id);
+
+        $payload = [
+            'college_id' => $h['college']->id,
+            'department_id' => $h['department']->id,
+            'program_id' => $h['program']->id,
+            'organization_id' => $h['org']->id,
+            'year_level' => '3rd_year',
+            'student_id_number' => '2023-00150',
+            'qr_code_value' => 'QR-UNIQUE-PATH',
+        ];
+
+        $this->actingAs($student)
+            ->post(route('portal.profile.update'), array_merge($payload, [
+                'department_id' => $otherDepartment->id,
+            ]))
+            ->assertSessionHasErrors('department_id');
+
+        $this->actingAs($student)
+            ->post(route('portal.profile.update'), array_merge($payload, [
+                'program_id' => $otherProgram->id,
+            ]))
+            ->assertSessionHasErrors('program_id');
+
+        $this->actingAs($student)
+            ->post(route('portal.profile.update'), array_merge($payload, [
+                'organization_id' => $uncoveredOrg->id,
+            ]))
+            ->assertSessionHasErrors('organization_id');
+
+        $this->actingAs($student)
+            ->post(route('portal.profile.update'), array_merge($payload, [
+                'organization_id' => $departmentlessOrg->id,
+            ]))
+            ->assertSessionHasErrors('organization_id');
+
+        $this->actingAs($student)
+            ->post(route('portal.profile.update'), array_merge($payload, [
+                'organization_id' => $inactiveOrg->id,
+            ]))
+            ->assertSessionHasErrors('organization_id');
+    }
+
+    public function test_profile_registration_reties_legacy_primary_membership_to_active_school_year(): void
+    {
+        $h = $this->createHierarchy();
+        $student = $this->createStudent($h['org']);
+
+        $legacyMembership = OrganizationMembership::create([
             'user_id' => $student->id,
             'organization_id' => $h['org']->id,
             'college_id' => $h['college']->id,
+            'department_id' => $h['department']->id,
             'program_id' => $h['program']->id,
-            'year_level' => '3rd_year',
+            'year_level' => '2nd_year',
             'membership_type' => 'primary_academic',
             'source' => 'profile',
             'status' => OrganizationMembership::STATUS_ACTIVE,
+            'verified_at' => now()->subDay(),
         ]);
+
+        $this->actingAs($student)
+            ->post(route('portal.profile.update'), [
+                'college_id' => $h['college']->id,
+                'department_id' => $h['department']->id,
+                'program_id' => $h['program']->id,
+                'organization_id' => $h['org']->id,
+                'year_level' => '3rd_year',
+                'student_id_number' => '2023-00152',
+                'qr_code_value' => 'QR-UNIQUE-LEGACY-SY',
+            ])
+            ->assertRedirect(route('portal.profile'));
+
+        $this->assertSame('inactive', $legacyMembership->fresh()->status);
+
+        $activeMembership = OrganizationMembership::query()
+            ->where('user_id', $student->id)
+            ->where('organization_id', $h['org']->id)
+            ->where('school_year_id', $h['schoolYear']->id)
+            ->where('status', OrganizationMembership::STATUS_ACTIVE)
+            ->first();
+
+        $this->assertNotNull($activeMembership);
+        $this->assertModelExists($activeMembership);
+    }
+
+    public function test_profile_registration_requires_active_school_year_for_membership(): void
+    {
+        $h = $this->createHierarchy();
+        $student = $this->createStudent($h['org']);
+        SchoolYear::query()->update(['status' => SchoolYear::STATUS_DRAFT]);
+
+        $this->actingAs($student)
+            ->post(route('portal.profile.update'), [
+                'college_id' => $h['college']->id,
+                'department_id' => $h['department']->id,
+                'program_id' => $h['program']->id,
+                'organization_id' => $h['org']->id,
+                'year_level' => '3rd_year',
+                'student_id_number' => '2023-00151',
+                'qr_code_value' => 'QR-UNIQUE-NO-SY',
+            ])
+            ->assertSessionHasErrors('school_year');
+
+        $this->assertFalse(
+            OrganizationMembership::query()
+                ->where('user_id', $student->id)
+                ->where('school_year_id', $h['schoolYear']->id)
+                ->exists()
+        );
     }
 
     public function test_profile_registration_requires_valid_year_level(): void
@@ -543,6 +734,7 @@ class WebPortalTest extends TestCase
 
         $payload = [
             'college_id' => $h['college']->id,
+            'department_id' => $h['department']->id,
             'program_id' => $h['program']->id,
             'organization_id' => $h['org']->id,
             'student_id_number' => '2023-00101',
@@ -569,6 +761,7 @@ class WebPortalTest extends TestCase
         $this->actingAs($student)
             ->post(route('portal.profile.update'), [
                 'college_id' => $h['college']->id,
+                'department_id' => $h['department']->id,
                 'program_id' => $h['program']->id,
                 'organization_id' => $h['org']->id,
                 'year_level' => '3rd_year',
@@ -589,6 +782,7 @@ class WebPortalTest extends TestCase
         $this->actingAs($student)
             ->post(route('portal.profile.update'), [
                 'college_id' => $h['college']->id,
+                'department_id' => $h['department']->id,
                 'program_id' => $h['program']->id,
                 'organization_id' => $h['org']->id,
                 'year_level' => '3rd_year',
@@ -1815,6 +2009,7 @@ class WebPortalTest extends TestCase
         $basePayload = [
             'title' => 'Documented PPA Event',
             'proposal_category' => 'activity',
+            'activity_role' => CanonicalPpaPacket::ROLE_ORGANIZER,
             'start_date' => today()->addDays(10)->toDateString(),
             'end_date' => today()->addDays(10)->toDateString(),
             'location_type' => 'on-campus',
@@ -1824,6 +2019,17 @@ class WebPortalTest extends TestCase
             'source_of_fund' => 'Organization fund',
             'budget_cost' => 2500,
             'resolution_number' => 'RES-2026-001',
+            'proponent_name' => 'Fallback Secretary',
+            'proponent_position' => 'Secretary',
+            'proponent_organization' => 'PSITS',
+            'proponent_email' => 'fallback.secretary@usm.edu.ph',
+            'proponent_contact_number' => '09170000000',
+            'rationale' => 'A fallback request should still create the canonical packet.',
+            'general_objective' => 'Keep proposal and permit data captured once.',
+            'specific_objectives' => "Capture packet fields\nSynchronize compatibility fields",
+            'methodology' => 'Normal multipart form submission.',
+            'major_activities' => "Preparation\nSubmission",
+            'expected_output' => 'One structured canonical packet.',
             'hardcopy_submitted' => '1',
             'head_organization_signed' => '1',
             'adviser_signed' => '1',
@@ -1858,13 +2064,19 @@ class WebPortalTest extends TestCase
             ->assertRedirect(route('dashboard.events'))
             ->assertSessionHas('success');
 
-        $event = Event::where('title', 'Documented PPA Event')->first();
+        $event = Event::with('canonicalPpaPacket')->where('title', 'Documented PPA Event')->first();
         $this->assertNotNull($event);
         $this->assertSame('activity', $event->proposal_category);
         $this->assertTrue($event->hardcopy_submitted);
         $this->assertTrue($event->head_organization_signed);
         $this->assertTrue($event->adviser_signed);
         $this->assertSame('official-ppa.docx', $event->proposal_document_original_name);
+        $this->assertNotNull($event->canonicalPpaPacket);
+        $this->assertSame(CanonicalPpaPacket::ROLE_ORGANIZER, $event->canonicalPpaPacket->activity_role);
+        $this->assertSame($event->title, $event->canonicalPpaPacket->title);
+        $this->assertSame($event->location_details, $event->canonicalPpaPacket->location_details);
+        $this->assertSame($event->budget_allocations['source_of_fund'], $event->canonicalPpaPacket->source_of_fund);
+        $this->assertSame(['Capture packet fields', 'Synchronize compatibility fields'], $event->canonicalPpaPacket->specific_objectives);
         $this->assertNotNull($event->evaluation_form_version_id);
         $this->assertDatabaseHas('evaluation_form_versions', [
             'event_id' => $event->id,
@@ -2070,6 +2282,67 @@ class WebPortalTest extends TestCase
             'title' => 'Evaluation - Livewire Created PPA Event',
         ]);
         Storage::disk('local')->assertExists($event->proposal_document_path);
+    }
+
+    public function test_livewire_event_proposal_create_saves_canonical_packet_and_syncs_event_fields(): void
+    {
+        $h = $this->createHierarchy();
+        $societyAdmin = $this->createAdmin('Society Admin', $h['org']);
+        $eventDate = today()->addDays(12)->toDateString();
+
+        Livewire::actingAs($societyAdmin)
+            ->test(EventProposalCreate::class)
+            ->set('title', 'Canonical Packet Assembly')
+            ->set('proposalCategory', 'project')
+            ->set('activityRole', CanonicalPpaPacket::ROLE_CO_ORGANIZER)
+            ->set('startDate', $eventDate)
+            ->set('endDate', $eventDate)
+            ->set('locationType', 'off-campus')
+            ->set('locationDetails', 'Kabacan Training Center')
+            ->set('implementingOffice', 'PSITS')
+            ->set('collaboratingOffice', 'Guidance Office')
+            ->set('targetParticipants', '120 BSIS students')
+            ->set('sourceOfFund', 'Organization fund')
+            ->set('budgetCost', '3750')
+            ->set('proponentName', 'Jane Secretary')
+            ->set('proponentPosition', 'Secretary')
+            ->set('proponentOrganization', 'PSITS')
+            ->set('proponentEmail', 'jane.secretary@usm.edu.ph')
+            ->set('proponentContactNumber', '09171234567')
+            ->set('rationale', 'Student leadership continuity needs a structured activity.')
+            ->set('generalObjective', 'Prepare students for responsible event operations.')
+            ->set('specificObjectives', "Orient committee members\nValidate activity logistics")
+            ->set('methodology', 'Briefing, workshop, and guided output review.')
+            ->set('majorActivities', "Committee briefing\nOutput review")
+            ->set('expectedOutput', 'A validated activity operations checklist.')
+            ->set('eventDays', [[
+                'date' => $eventDate,
+                'start_time' => '08:00',
+                'end_time' => '12:00',
+            ]])
+            ->set('evaluationQuestions', $this->customEvaluationQuestions())
+            ->call('createProposal')
+            ->assertRedirect(route('dashboard.events'));
+
+        $event = Event::with('canonicalPpaPacket')->where('title', 'Canonical Packet Assembly')->firstOrFail();
+        $packet = $event->canonicalPpaPacket;
+
+        $this->assertNotNull($packet);
+        $this->assertSame(CanonicalPpaPacket::ROLE_CO_ORGANIZER, $packet->activity_role);
+        $this->assertSame($event->title, $packet->title);
+        $this->assertSame($event->proposal_category, $packet->proposal_category);
+        $this->assertSame($event->start_date->toDateString(), $packet->start_date->toDateString());
+        $this->assertSame($event->end_date->toDateString(), $packet->end_date->toDateString());
+        $this->assertSame($event->location_type, $packet->location_type);
+        $this->assertSame($event->location_details, $packet->location_details);
+        $this->assertSame($event->target_demographics['implementing_office'], $packet->implementing_office);
+        $this->assertSame($event->target_demographics['collaborating_office'], $packet->collaborating_office);
+        $this->assertSame($event->budget_allocations['source_of_fund'], $packet->source_of_fund);
+        $this->assertSame('3750.00', $packet->budget_cost);
+        $this->assertSame('Jane Secretary', $packet->proponent_name);
+        $this->assertSame(['Orient committee members', 'Validate activity logistics'], $packet->specific_objectives);
+        $this->assertSame(['Committee briefing', 'Output review'], $packet->major_activities);
+        $this->assertSame(Event::STATUS_DRAFT, $event->status);
     }
 
     public function test_livewire_event_proposal_create_generates_daily_attendance_schedule(): void

@@ -56,7 +56,7 @@
 | `spatie/laravel-permission` package | Done | Installed and customized to support UUID model_id |
 | Roles & permissions seeders (§2.2 table) | Done | `RolePermissionSeeder` maps all active permissions and roles for web/api guards |
 | Tenant-scoped middleware (org/college) | Done | `TenantScopeMiddleware` intercepts routing to restrict organization and college boundaries |
-| User model aligned with PRD (UUID, `google_sub`, `organization_id`, etc.) | Done | `User.php` updated with UUID primary key, `HasUuids` trait, and fillables |
+| User model aligned with PRD (UUID, `google_sub`, Student Academic Path, etc.) | Done | `User.php` has UUID identity, current College/Department/Program/Organization profile projections, Year Level, user type, and profile flow validation for College -> Department -> Program -> eligible Organization/Society relationships. |
 
 ---
 
@@ -79,7 +79,7 @@
 | Feature | Status | Evidence / Notes |
 |---------|--------|------------------|
 | 1.1 Google OAuth + `@usm.edu.ph` + Sanctum tokens | Done | `GoogleAuthController` redirects with account selection + USM domain hint, checks domain, clears rejected sessions, and issues web auth |
-| 1.2 Student profile + QR registration | Done | Student profile page supporting both onboarding/edit mode (with dependent College/Program/Organization/Year Level selects and webcam QR capture) and a clean read-only view mode when complete. QR inputs collapse by default if already registered. |
+| 1.2 Student profile + QR registration | Done | Student profile onboarding/edit mode supports dependent College -> Department -> Program -> eligible Organization/Society -> Year Level selects, webcam/manual QR capture, backend cascade validation, user profile projections, and active-School-Year primary `organization_memberships` persistence. |
 | 1.3 OSA admin assignment governance | Done | OSA Admin Access page for direct organization management, term-bound `admin_assignments`, a filtered OSA-only Audit History tab for governance audit rows, and non-OSA scoped Organization Profile logo management; student admin-application routes/UI removed; `AdminScopeService` assignment-scoped admin boundaries; OSA assignment creation restricted to USG, LSG, Society, Academic Unit, and Office Event roles; Super Admin (OSA) remains bootstrap-controlled and HR Admin provisioning remains independent; `AdminAssignmentService` role-only permission projection sync; legacy `admin_applications` deprecated |
 
 ### Epic 2: PPA
@@ -134,13 +134,13 @@
 |-----------------|--------|------------------|
 | `universities` | Done | UUID schema defined and migrated |
 | `colleges` | Done | UUID schema defined and migrated |
-| `departments` | Partial | First-class `departments` UUID table, College -> Department relationship, Department model/factory, OSA-only dashboard API CRUD routes, explicit CEIT Department seed mappings, and initial Program/Department-backed Organization relationships exist. Student profile, membership, proposal, scanner, and analytics consumers still need full Department ownership migration. |
-| `school_years` | Partial | First-class `school_years` UUID table, OSA-only dashboard API create/list/activate/open-transition/close-transition routes, transactional active-year resolver, database-level single-active partial unique index, lifecycle metadata, and audit rows exist. Downstream memberships, officer rosters, authority projections, proposals, scanner scopes, and analytics still need `school_year_id` integration. |
+| `departments` | Partial | First-class `departments` UUID table, College -> Department relationship, Department model/factory, OSA-only dashboard API CRUD routes, explicit CEIT Department seed mappings, Program/Department-backed Organization relationships, and Student Academic Path profile/membership consumption exist. Proposal, scanner, and analytics consumers still need full Department ownership migration. |
+| `school_years` | Partial | First-class `school_years` UUID table, OSA-only dashboard API create/list/activate/open-transition/close-transition routes, transactional active-year resolver, database-level single-active partial unique index, lifecycle metadata, audit rows, and active-year student profile membership assignment exist. Officer rosters, authority projections, proposals, scanner scopes, and analytics still need `school_year_id` integration. |
 | `organizations` | Partial | UUID organization schema, status/logo fields, College compatibility identity, nullable `department_id`, Department relationship, OSA org-management validation for Department-backed Societies/Academic Units, and CEIT demo society mappings exist. Downstream contracts still need explicit University/College/Department scope cleanup. |
-| `users` (PRD shape) | Done | Custom user columns migrated; college_id and program_id UUID foreign keys plus nullable controlled `year_level` profile field added |
+| `users` (PRD shape) | Done | Custom user columns now include College, Department, Program, Organization, Program Code, Year Level, Google identity, and user type profile projections, with Student Academic Path validation on profile save. |
 | `programs` | Partial | Programs now have nullable `department_id`, Department relationship, and compatibility College resolution while retaining direct `college_id` for existing callers. Explicit CEIT Program -> Department seed mappings exist; later contract work must remove direct College storage once downstream consumers migrate. |
-| `organization_programs` | Partial | The organization/program pivot exists, and OSA organization create/update plus the Eloquent pivot model now reject Department-backed Society/Academic Unit coverage outside the org Department when Department context is present. Remaining membership/profile/proposal consumers still need migration to the corrected Department contract. |
-| `organization_memberships` | Done | UUID multi-membership table added for primary academic, secondary org, non-academic, and officer membership attribution, including mirrored profile Year Level |
+| `organization_programs` | Partial | The organization/program pivot exists; OSA organization create/update rejects Department-backed Society/Academic Unit coverage outside the org Department; Student Academic Path now filters and validates selected Organizations/Societies through covered Programs. Direct pivot writes and remaining proposal/scanner/analytics consumers still need migration to the corrected Department contract. |
+| `organization_memberships` | Partial | UUID multi-membership, profile demographic attribution, nullable Department, and active-School-Year primary profile membership persistence exist. Revised PRD still requires replacing remaining `academic_year` contracts, removing officer membership as the authority model, and extending corrected hierarchy validation into downstream scanner/analytics consumers. |
 | `employee_profiles` / `employee_roster_entries` | Done | UUID HR/faculty/staff profile and roster tables added for employee verification and HR scanner hydration |
 | `admin_applications` | Deprecated | Legacy student-application table retained for data preservation only; routes, controllers, and UI removed in favor of OSA-direct assignment governance |
 | `admin_assignments` | Done | Source-of-truth admin authority and tenant scope table with active primary admin uniqueness by role/scope/academic year; user profile organization/college/program fields remain student membership |
@@ -180,6 +180,10 @@
 
 ## Sprint Notes
 
+- **2026-09-24 (Student Academic Path delivery):**
+  - Added Student Academic Path profile persistence for College -> Department -> Program -> eligible Organization/Society -> Year Level, including `users.department_id` and Department/active-School-Year fields on profile-sourced `organization_memberships`.
+  - Updated student profile onboarding/edit selectors to cascade from Department and Program-backed organization eligibility instead of the older compressed College -> Program -> Organization path.
+  - Added backend validation and focused feature coverage for valid path persistence, invalid College/Department/Program/Organization combinations, legacy membership retie, and active School Year assignment.
 - **2026-09-24 (Department-backed programs and academic organizations):**
   - Added nullable `department_id` compatibility columns to Programs and Organizations, plus Program/Organization/Department relationships and College resolution helpers so existing direct College callers keep working.
   - Updated OSA organization create/update and the Eloquent organization-program pivot model to reject Department-backed Society/Academic Unit coverage that crosses Department boundaries when Department context is present.

@@ -647,22 +647,46 @@ Alpine.data('participantAudienceBuilder', (config) => ({
     },
 }));
 
-/* ─── Dependent Dropdowns (College → Organization) ───────── */
-Alpine.data('dependentSelect', (orgsJson = '{}', programsJson = '{}', initialCollege = '', initialProgram = '', initialOrg = '') => ({
-    allOrgs: typeof orgsJson === 'string' ? JSON.parse(orgsJson) : orgsJson,
+/* ─── Dependent Dropdowns (College → Department → Program → Organization) ───────── */
+Alpine.data('dependentSelect', (
+    departmentsJson = '{}',
+    programsJson = '{}',
+    orgsJson = '{}',
+    initialCollege = '',
+    initialDepartment = '',
+    initialProgram = '',
+    initialOrg = ''
+) => ({
+    allDepartments: typeof departmentsJson === 'string' ? JSON.parse(departmentsJson) : departmentsJson,
     allPrograms: typeof programsJson === 'string' ? JSON.parse(programsJson) : programsJson,
+    allOrgs: typeof orgsJson === 'string' ? JSON.parse(orgsJson) : orgsJson,
     selectedCollege: initialCollege || '',
+    selectedDepartment: initialDepartment || '',
     selectedProgram: initialProgram || '',
     selectedOrg: initialOrg || '',
-    filteredOrgs: [],
+    filteredDepartments: [],
     filteredPrograms: [],
+    filteredOrgs: [],
     init() {
-        this.filteredOrgs = this.allOrgs[this.selectedCollege] || [];
-        this.filteredPrograms = this.allPrograms[this.selectedCollege] || [];
+        this.filteredDepartments = this.allDepartments[this.selectedCollege] || [];
+        this.filteredPrograms = this.allPrograms[this.selectedDepartment] || [];
+        this.filteredOrgs = this.allOrgs[this.selectedProgram] || [];
         this.$watch('selectedCollege', (val) => {
-            this.filteredOrgs = this.allOrgs[val] || [];
-            this.filteredPrograms = this.allPrograms[val] || [];
+            this.filteredDepartments = this.allDepartments[val] || [];
+            this.filteredPrograms = [];
+            this.filteredOrgs = [];
+            this.selectedDepartment = '';
             this.selectedProgram = '';
+            this.selectedOrg = '';
+        });
+        this.$watch('selectedDepartment', (val) => {
+            this.filteredPrograms = this.allPrograms[val] || [];
+            this.filteredOrgs = [];
+            this.selectedProgram = '';
+            this.selectedOrg = '';
+        });
+        this.$watch('selectedProgram', (val) => {
+            this.filteredOrgs = this.allOrgs[val] || [];
             this.selectedOrg = '';
         });
     }

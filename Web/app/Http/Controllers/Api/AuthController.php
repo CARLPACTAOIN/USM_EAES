@@ -3,10 +3,10 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\User;
 use App\Models\Event;
-use App\Support\ScannerAccess;
+use App\Models\User;
 use App\Services\ScannerSessionService;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Http;
@@ -18,9 +18,7 @@ class AuthController extends Controller
 {
     private const MOBILE_ASSIGNMENT_ABILITIES = ['scanner-assignments'];
 
-    public function __construct(private readonly ScannerSessionService $scannerSessions)
-    {
-    }
+    public function __construct(private readonly ScannerSessionService $scannerSessions) {}
 
     public function mobileGoogleLogin(Request $request)
     {
@@ -48,7 +46,7 @@ class AuthController extends Controller
         $email = Str::lower((string) ($googleUser['email'] ?? ''));
         $allowedDomain = $this->allowedEmailDomain();
 
-        if (!Str::endsWith($email, '@' . $allowedDomain)) {
+        if (! Str::endsWith($email, '@'.$allowedDomain)) {
             return response()->json([
                 'success' => false,
                 'message' => "Access restricted to institutional @{$allowedDomain} accounts.",
@@ -66,20 +64,20 @@ class AuthController extends Controller
         );
 
         $updates = [];
-        if (!$user->google_sub && isset($googleUser['sub'])) {
+        if (! $user->google_sub && isset($googleUser['sub'])) {
             $updates['google_sub'] = $googleUser['sub'];
         }
         if (($googleUser['name'] ?? null) && $user->name !== $googleUser['name']) {
             $updates['name'] = $googleUser['name'];
         }
-        if (!$user->user_type) {
+        if (! $user->user_type) {
             $updates['user_type'] = $this->userTypeForEmail($email);
         }
         if ($updates !== []) {
             $user->forceFill($updates)->save();
         }
 
-        if (!$user->hasAnyRole(['Student', 'Faculty', 'Super Admin (OSA)', 'USG Admin', 'LSG Admin', 'Society Admin', 'Academic Unit Admin', 'Office Event Admin', 'HR Admin', 'Scanner'])) {
+        if (! $user->hasAnyRole(['Student', 'Faculty', 'Super Admin (OSA)', 'USG Admin', 'LSG Admin', 'Society Admin', 'Academic Unit Admin', 'Office Event Admin', 'HR Admin', 'Scanner'])) {
             $user->assignRole($this->userTypeForEmail($email) === 'student' ? 'Student' : 'Faculty');
         }
 
@@ -99,8 +97,7 @@ class AuthController extends Controller
     /**
      * Authenticate a user (specifically scanners/officers) and return a Sanctum API token.
      *
-     * @param  \Illuminate\Http\Request  $request
-     * @return \Illuminate\Http\JsonResponse
+     * @return JsonResponse
      */
     public function login(Request $request)
     {
@@ -113,24 +110,24 @@ class AuthController extends Controller
         if ($validator->fails()) {
             return response()->json([
                 'success' => false,
-                'errors' => $validator->errors()
+                'errors' => $validator->errors(),
             ], 422);
         }
 
         $user = User::where('email', $request->email)->first();
 
-        if (!$user || !Hash::check($request->password, $user->password)) {
+        if (! $user || ! Hash::check($request->password, $user->password)) {
             return response()->json([
                 'success' => false,
-                'message' => 'Invalid email or password.'
+                'message' => 'Invalid email or password.',
             ], 401);
         }
 
         // Verify the user has administrative/scanning access
-        if (!$user->hasAnyRole(['Super Admin (OSA)', 'USG Admin', 'LSG Admin', 'Society Admin', 'Academic Unit Admin', 'Office Event Admin', 'HR Admin', 'Scanner'])) {
+        if (! $user->hasAnyRole(['Super Admin (OSA)', 'USG Admin', 'LSG Admin', 'Society Admin', 'Academic Unit Admin', 'Office Event Admin', 'HR Admin', 'Scanner'])) {
             return response()->json([
                 'success' => false,
-                'message' => 'Unauthorized. This account does not have scanner privileges.'
+                'message' => 'Unauthorized. This account does not have scanner privileges.',
             ], 403);
         }
 
@@ -146,15 +143,14 @@ class AuthController extends Controller
                 'email' => $user->email,
                 'organization_id' => $user->organization_id,
                 'roles' => $user->getRoleNames(),
-            ]
+            ],
         ]);
     }
 
     /**
      * Validate a tokenized deep-link session and return the scanner details.
      *
-     * @param  \Illuminate\Http\Request  $request
-     * @return \Illuminate\Http\JsonResponse
+     * @return JsonResponse
      */
     public function validateScannerSession(Request $request)
     {
@@ -175,15 +171,15 @@ class AuthController extends Controller
         $eventId = $request->input('event_id');
         $event = Event::find($eventId);
 
-        if (!$event) {
+        if (! $event) {
             return response()->json([
                 'success' => false,
-                'message' => 'Event not found or invalid.'
+                'message' => 'Event not found or invalid.',
             ], 404);
         }
 
         $access = $this->scannerSessions->validateRequest($request, $event, allowCompleted: true);
-        if (!$access['allowed']) {
+        if (! $access['allowed']) {
             return response()->json([
                 'success' => false,
                 'message' => $access['message'],
@@ -218,15 +214,14 @@ class AuthController extends Controller
                 'id' => $user->id,
                 'name' => $user->name,
                 'roles' => $user->getRoleNames(),
-            ]
+            ],
         ]);
     }
 
     /**
      * Log the user out (revoke current token).
      *
-     * @param  \Illuminate\Http\Request  $request
-     * @return \Illuminate\Http\JsonResponse
+     * @return JsonResponse
      */
     public function logout(Request $request)
     {
@@ -234,7 +229,7 @@ class AuthController extends Controller
 
         return response()->json([
             'success' => true,
-            'message' => 'Token revoked successfully.'
+            'message' => 'Token revoked successfully.',
         ]);
     }
 
@@ -244,13 +239,13 @@ class AuthController extends Controller
             'id_token' => $idToken,
         ]);
 
-        if (!$response->ok()) {
+        if (! $response->ok()) {
             throw new \RuntimeException('Google tokeninfo rejected the ID token.');
         }
 
         $payload = $response->json();
         $clientIds = config('services.google.mobile_client_ids', []);
-        if ($clientIds !== [] && !in_array($payload['aud'] ?? null, $clientIds, true)) {
+        if ($clientIds !== [] && ! in_array($payload['aud'] ?? null, $clientIds, true)) {
             throw new \RuntimeException('Google ID token audience is not configured for this app.');
         }
 
@@ -269,6 +264,7 @@ class AuthController extends Controller
             'email' => $user->email,
             'organization_id' => $user->organization_id,
             'college_id' => $user->college_id,
+            'department_id' => $user->department_id,
             'program_id' => $user->program_id,
             'year_level' => $user->year_level,
             'user_type' => $user->user_type,

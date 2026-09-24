@@ -3,22 +3,22 @@
 namespace App\Http\Controllers\Web;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\UpdateStudentProfileRequest;
 use App\Models\AttendanceRecord;
 use App\Models\College;
+use App\Models\Department;
 use App\Models\Evaluation;
 use App\Models\Event;
 use App\Models\Organization;
-use App\Models\OrganizationMembership;
 use App\Models\Program;
 use App\Models\User;
-use App\Support\EventEvaluationForm;
+use App\Services\StudentProfileService;
 use App\Support\EvaluationWindow;
+use App\Support\EventEvaluationForm;
 use App\Support\YearLevels;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
-use Illuminate\Validation\Rule;
 
 class PortalController extends Controller
 {
@@ -33,6 +33,9 @@ class PortalController extends Controller
         $profileComplete = $user->student_id_number
             && $user->qr_code_value
             && $user->year_level
+            && $user->college_id
+            && $user->department_id
+            && $user->program_id
             && $user->organization_id;
 
         $pendingEvalEvents = $this->evaluationCollections($user)['pendingEvalEvents'];
@@ -65,111 +68,72 @@ class PortalController extends Controller
      */
     public function profile(Request $request)
     {
-        $user = $request->user();
+        $user = $request->user()->load(['organization', 'college', 'department', 'program.department']);
         $colleges = College::orderBy('name')->get();
 
-        // Build college→organizations map for dependent dropdown
-        $orgsByCollege = [];
-        $allOrgs = Organization::orderBy('name')->get();
-        foreach ($allOrgs as $org) {
-            $key = $org->college_id ?? 'university_wide';
-            $orgsByCollege[$key][] = ['id' => $org->id, 'name' => $org->name, 'acronym' => $org->acronym];
-        }
+        $departmentsByCollege = [];
+        Department::query()
+            ->where('status', 'active')
+            ->orderBy('name')
+            ->get()
+            ->each(function (Department $department) use (&$departmentsByCollege): void {
+                $departmentsByCollege[$department->college_id][] = [
+                    'id' => $department->id,
+                    'name' => $department->name,
+                    'code' => $department->code,
+                ];
+            });
 
-        // Build college→programs map for dependent dropdown
-        $programsByCollege = [];
-        $allPrograms = Program::orderBy('name')->get();
-        foreach ($allPrograms as $prog) {
-            $programsByCollege[$prog->college_id][] = ['id' => $prog->id, 'name' => $prog->name, 'code' => $prog->code];
-        }
+        $programsByDepartment = [];
+        Program::query()
+            ->whereNotNull('department_id')
+            ->orderBy('name')
+            ->get()
+            ->each(function (Program $program) use (&$programsByDepartment): void {
+                $programsByDepartment[$program->department_id][] = [
+                    'id' => $program->id,
+                    'name' => $program->name,
+                    'code' => $program->code,
+                ];
+            });
+
+        $orgsByProgram = [];
+        Organization::query()
+            ->whereIn('type', ['society', 'non_academic_org', 'academic_unit'])
+            ->where(function ($query): void {
+                $query->where('status', 'active')
+                    ->orWhereNull('status');
+            })
+            ->with('programs:id')
+            ->orderBy('name')
+            ->get()
+            ->each(function (Organization $organization) use (&$orgsByProgram): void {
+                foreach ($organization->programs as $program) {
+                    if (in_array($organization->type, ['society', 'academic_unit'], true)
+                        && $organization->department_id === null) {
+                        continue;
+                    }
+
+                    $orgsByProgram[$program->id][] = [
+                        'id' => $organization->id,
+                        'name' => $organization->name,
+                        'acronym' => $organization->acronym,
+                        'type' => $organization->type,
+                    ];
+                }
+            });
 
         $yearLevelOptions = YearLevels::options();
 
-        return view('portal.profile', compact('user', 'colleges', 'orgsByCollege', 'programsByCollege', 'yearLevelOptions'));
+        return view('portal.profile', compact('user', 'colleges', 'departmentsByCollege', 'programsByDepartment', 'orgsByProgram', 'yearLevelOptions'));
     }
 
     /**
      * Update student profile (PRD Feature 1.2).
      */
-    public function updateProfile(Request $request)
+    public function updateProfile(UpdateStudentProfileRequest $request, StudentProfileService $profiles)
     {
-        $user = $request->user();
-
-        $validator = Validator::make($request->all(), [
-            'college_id' => 'required|uuid|exists:colleges,id',
-            'program_id' => 'required|uuid|exists:programs,id',
-            'organization_id' => 'required|uuid|exists:organizations,id',
-            'year_level' => ['required', Rule::in(YearLevels::values())],
-            'student_id_number' => [
-                'required', 'string', 'max:20',
-                'unique:users,student_id_number,' . $user->id,
-            ],
-            'qr_code_value' => [
-                'required', 'string', 'max:255',
-                'unique:users,qr_code_value,' . $user->id,
-            ],
-        ], [
-            'student_id_number.unique' => 'This Student ID number is already registered to another account.',
-            'qr_code_value.unique' => 'This QR code value is already registered to another account.',
-        ]);
-
-        if ($validator->fails()) {
-            return redirect()->back()->withErrors($validator)->withInput();
-        }
-
-        $program = Program::findOrFail($request->program_id);
-        if ($program->college_id !== $request->college_id) {
-            return redirect()->back()
-                ->withErrors(['program_id' => 'Select a program that belongs to the chosen college.'])
-                ->withInput();
-        }
-
-        $organization = Organization::findOrFail($request->organization_id);
-        if ($organization->college_id !== $request->college_id) {
-            return redirect()->back()
-                ->withErrors(['organization_id' => 'Select a society/organization that belongs to the chosen college.'])
-                ->withInput();
-        }
-
-        // Ensure the society covers the selected program
-        if ($organization->type === 'society' && !$organization->programs()->where('program_id', $program->id)->exists()) {
-            return redirect()->back()
-                ->withErrors(['organization_id' => 'The selected society does not cover your chosen academic program.'])
-                ->withInput();
-        }
-
-        DB::transaction(function () use ($user, $request, $program, $organization): void {
-            $user->update([
-                'college_id' => $request->college_id,
-                'program_id' => $request->program_id,
-                'organization_id' => $request->organization_id,
-                'program_code' => $program->code,
-                'year_level' => $request->year_level,
-                'student_id_number' => $request->student_id_number,
-                'qr_code_value' => $request->qr_code_value,
-            ]);
-
-            $user->organizationMemberships()
-                ->where('source', 'profile')
-                ->where('membership_type', 'primary_academic')
-                ->where('organization_id', '!=', $organization->id)
-                ->update(['status' => 'inactive']);
-
-            $user->organizationMemberships()->updateOrCreate(
-                [
-                    'organization_id' => $organization->id,
-                    'membership_type' => 'primary_academic',
-                    'source' => 'profile',
-                ],
-                [
-                    'college_id' => $request->college_id,
-                    'program_id' => $request->program_id,
-                    'year_level' => $request->year_level,
-                    'status' => OrganizationMembership::STATUS_ACTIVE,
-                    'verified_at' => now(),
-                ]
-            );
-        });
+        $profiles->update($request->user(), $request->validated());
 
         return redirect()->route('portal.profile')
             ->with('success', 'Profile updated successfully.');
@@ -227,15 +191,15 @@ class PortalController extends Controller
             $scoreRules["section_scores.{$key}"] = [
                 $question['required'] ? 'required' : 'nullable',
                 'integer',
-                'min:' . $question['scale_min'],
-                'max:' . $question['scale_max'],
+                'min:'.$question['scale_min'],
+                'max:'.$question['scale_max'],
             ];
         }
 
         $scoreValidator = Validator::make($request->all(), $scoreRules);
         $scoreValidator->after(function ($validator) use ($request, $questionMap): void {
             foreach (array_keys((array) $request->input('section_scores', [])) as $key) {
-                if (!array_key_exists($key, $questionMap)) {
+                if (! array_key_exists($key, $questionMap)) {
                     $validator->errors()->add("section_scores.{$key}", 'This evaluation question does not belong to this event.');
                 }
             }
@@ -245,7 +209,7 @@ class PortalController extends Controller
             return redirect()->back()->withErrors($scoreValidator)->withInput();
         }
 
-        if (!AttendanceRecord::where('event_id', $eventId)->where('student_id', $user->id)->exists()) {
+        if (! AttendanceRecord::where('event_id', $eventId)->where('student_id', $user->id)->exists()) {
             abort(403, 'Only attendees can submit an evaluation.');
         }
 
