@@ -3,6 +3,7 @@
 namespace Database\Seeders;
 
 use App\Models\College;
+use App\Models\Department;
 use App\Models\Organization;
 use App\Models\Program;
 use App\Models\University;
@@ -32,11 +33,28 @@ class UsmInstitutionalDataSeeder extends Seeder
             'CFCST' => ['College of Fisheries, Computing Sciences and Technology', []],
         ];
 
+        $departments = [
+            'CEIT' => [
+                'DCE' => 'Department of Civil Engineering',
+                'ABE' => 'Department of Agricultural and Biosystems Engineering',
+                'DCOE' => 'Department of Computer Engineering',
+                'DECE' => 'Department of Electronics Engineering',
+                'ICT' => 'Department of Information and Communication Technology',
+            ],
+        ];
+
         foreach ($colleges as $code => [$name, $programs]) {
             $college = College::updateOrCreate(
                 ['code' => $code],
                 ['university_id' => $university->id, 'name' => $name]
             );
+
+            foreach ($departments[$code] ?? [] as $departmentCode => $departmentName) {
+                Department::updateOrCreate(
+                    ['college_id' => $college->id, 'code' => $departmentCode],
+                    ['name' => $departmentName, 'status' => 'active']
+                );
+            }
 
             foreach ($programs as $programCode => $programName) {
                 Program::updateOrCreate(

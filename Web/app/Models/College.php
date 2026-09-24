@@ -32,6 +32,11 @@ class College extends Model
         return $this->hasMany(Program::class);
     }
 
+    public function departments(): HasMany
+    {
+        return $this->hasMany(Department::class);
+    }
+
     public function venues(): HasMany
     {
         return $this->hasMany(Venue::class);

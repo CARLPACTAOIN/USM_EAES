@@ -24,6 +24,8 @@ class AdminAccessWorkspace extends Component
         'expire-admin-assignment',
         'approve-admin-application',
         'reject-admin-application',
+        'create-department',
+        'update-department',
         'create-organization',
         'update-organization',
         'update-organization-logo',
@@ -36,6 +38,8 @@ class AdminAccessWorkspace extends Component
         'expire-admin-assignment' => 'Assignment expired',
         'approve-admin-application' => 'Admin Application Approved',
         'reject-admin-application' => 'Admin Application Rejected',
+        'create-department' => 'Department Created',
+        'update-department' => 'Department Updated',
         'create-organization' => 'Organization Created',
         'update-organization' => 'Organization Updated',
         'update-organization-logo' => 'Organization Logo Updated',
@@ -169,6 +173,7 @@ class AdminAccessWorkspace extends Component
 
         if ($assignment->status !== AdminAssignment::STATUS_ACTIVE) {
             $this->errorNotice = 'Only active admin assignments can be expired.';
+
             return;
         }
 
@@ -185,6 +190,7 @@ class AdminAccessWorkspace extends Component
 
         if ($assignment->status !== AdminAssignment::STATUS_ACTIVE) {
             $this->errorNotice = 'Only active admin assignments can be revoked.';
+
             return;
         }
 
@@ -192,6 +198,7 @@ class AdminAccessWorkspace extends Component
 
         if (mb_strlen($reason) > 1000) {
             $this->addError("revokeReasons.{$assignmentId}", 'The reason must not exceed 1000 characters.');
+
             return;
         }
 
@@ -253,7 +260,7 @@ class AdminAccessWorkspace extends Component
                 $query->where('academic_year', '!=', $currentAy);
             })
             ->when($assignSearch !== '', function ($query) use ($assignSearch) {
-                $needle = '%' . mb_strtolower($assignSearch) . '%';
+                $needle = '%'.mb_strtolower($assignSearch).'%';
                 $query->where(function ($inner) use ($needle) {
                     $inner->whereHas('user', function ($userQuery) use ($needle) {
                         $userQuery->whereRaw('LOWER(name) LIKE ?', [$needle])
@@ -287,7 +294,7 @@ class AdminAccessWorkspace extends Component
                 $query->where('status', $this->orgStatus);
             })
             ->when($orgSearch !== '', function ($query) use ($orgSearch) {
-                $needle = '%' . mb_strtolower($orgSearch) . '%';
+                $needle = '%'.mb_strtolower($orgSearch).'%';
                 $query->where(function ($inner) use ($needle) {
                     $inner->whereRaw('LOWER(name) LIKE ?', [$needle])
                         ->orWhereRaw('LOWER(acronym) LIKE ?', [$needle]);
@@ -312,7 +319,7 @@ class AdminAccessWorkspace extends Component
                 $query->whereDate('created_at', '<=', $this->auditTo);
             })
             ->when($auditSearch !== '', function ($query) use ($auditSearch) {
-                $needle = '%' . mb_strtolower($auditSearch) . '%';
+                $needle = '%'.mb_strtolower($auditSearch).'%';
                 $query->where(function ($inner) use ($needle) {
                     $inner->whereRaw('LOWER(action) LIKE ?', [$needle])
                         ->orWhereRaw('LOWER(CAST(details AS TEXT)) LIKE ?', [$needle])
@@ -334,15 +341,15 @@ class AdminAccessWorkspace extends Component
         foreach ($auditLogs as $log) {
             $details = $log->details ?? [];
 
-            if (!empty($details['user_id'])) {
+            if (! empty($details['user_id'])) {
                 $userIds[] = $details['user_id'];
             }
 
-            if (!empty($details['organization_id'])) {
+            if (! empty($details['organization_id'])) {
                 $organizationIds[] = $details['organization_id'];
             }
 
-            if (!empty($details['college_id'])) {
+            if (! empty($details['college_id'])) {
                 $collegeIds[] = $details['college_id'];
             }
         }
@@ -370,7 +377,7 @@ class AdminAccessWorkspace extends Component
     {
         $year = now()->year;
 
-        return $year . '-' . ($year + 1);
+        return $year.'-'.($year + 1);
     }
 
     private function isDateString(mixed $value): bool

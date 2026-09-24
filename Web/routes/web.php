@@ -7,6 +7,7 @@ use App\Http\Controllers\Web\AiInsightsController;
 use App\Http\Controllers\Web\AnalyticsOverviewController;
 use App\Http\Controllers\Web\AuthController;
 use App\Http\Controllers\Web\DashboardController;
+use App\Http\Controllers\Web\DepartmentController;
 use App\Http\Controllers\Web\EventAnalyticsController;
 use App\Http\Controllers\Web\EventExportController;
 use App\Http\Controllers\Web\NotificationController;
@@ -114,6 +115,9 @@ Route::middleware(['auth'])->group(function () {
             Route::get('/admin-access', [AdminAccessController::class, 'index'])->name('dashboard.admin-access');
             Route::get('/admin-users/search', [AdminAccessController::class, 'searchUsers'])->name('dashboard.admin-users.search');
             Route::post('/admin-users', [AdminAccessController::class, 'store'])->name('dashboard.admin-users.create');
+            Route::get('/departments', [DepartmentController::class, 'index'])->name('dashboard.departments.index');
+            Route::post('/departments', [DepartmentController::class, 'store'])->name('dashboard.departments.store');
+            Route::put('/departments/{department}', [DepartmentController::class, 'update'])->name('dashboard.departments.update');
             Route::post('/organizations', [AdminAccessController::class, 'storeOrganization'])->name('dashboard.organizations.store');
             Route::put('/organizations/{organization}', [AdminAccessController::class, 'updateOrganization'])->name('dashboard.organizations.update');
             Route::post('/admin-assignments/{assignment}/revoke', [AdminAccessController::class, 'revoke'])->name('dashboard.admin-assignments.revoke');

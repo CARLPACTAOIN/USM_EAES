@@ -134,6 +134,7 @@
 |-----------------|--------|------------------|
 | `universities` | Done | UUID schema defined and migrated |
 | `colleges` | Done | UUID schema defined and migrated |
+| `departments` | Partial | First-class `departments` UUID table, College -> Department relationship, Department model/factory, OSA-only dashboard API CRUD routes, and explicit CEIT Department seed mappings exist. Downstream Program, Organization, profile, membership, proposal, scanner, and analytics consumers still need migration to Department ownership. |
 | `organizations` | Done | UUID schema defined and migrated; status/logo fields and unique type+college+acronym identity added |
 | `users` (PRD shape) | Done | Custom user columns migrated; college_id and program_id UUID foreign keys plus nullable controlled `year_level` profile field added |
 | `programs` | Done | UUID schema representing academic programs under colleges, migrated with unique college+code constraint |
@@ -177,6 +178,10 @@
 ---
 
 ## Sprint Notes
+
+- **2026-09-24 (Department master data foundation):**
+  - Added first-class Department master data under Colleges with UUID schema, scoped code uniqueness, model/factory support, OSA-only dashboard API create/list/update routes, audit rows for create/update actions, and focused feature coverage.
+  - Seeded explicit CEIT Department records without migrating Programs away from their existing direct College relationship; Program -> College compatibility remains for downstream tickets.
 
 - **2026-09-18 (multi-session attendance implementation):**
   - Extended PRD Feature 4.3 from day-only attendance to configurable non-overlapping sessions per event day, preserving a one-session default for simple events and legacy schedules.
