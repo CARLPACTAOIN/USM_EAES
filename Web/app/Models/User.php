@@ -128,4 +128,9 @@ class User extends Authenticatable
     {
         return $this->belongsTo(Program::class);
     }
+
+    public function organizationOfficers()
+    {
+        return $this->hasMany(OrganizationOfficer::class);
+    }
 }

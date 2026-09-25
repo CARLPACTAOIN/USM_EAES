@@ -72,4 +72,9 @@ class Organization extends Model
     {
         return $this->hasMany(Event::class);
     }
+
+    public function officerRosters()
+    {
+        return $this->hasMany(OrganizationOfficerRoster::class);
+    }
 }

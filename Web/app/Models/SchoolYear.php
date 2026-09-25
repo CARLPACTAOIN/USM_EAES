@@ -76,4 +76,9 @@ class SchoolYear extends Model
     {
         return $this->transition_started_at !== null && $this->transition_closed_at === null;
     }
+
+    public function officerRosters()
+    {
+        return $this->hasMany(OrganizationOfficerRoster::class);
+    }
 }

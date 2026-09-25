@@ -2,7 +2,7 @@
 
 **Branch / snapshot:** `main` (local)  
 **PRD source:** `PRD_V1.md` (v2.0 content, filename `PRD_V1.md`)  
-**Last reviewed:** 2026-09-18
+**Last reviewed:** 2026-09-24
 **Backend path:** `Web/` (Laravel 12 backend with UUID schemas)
 
 > This file tracks implementation status only. It does not override `PRD_V1.md`.
@@ -41,7 +41,7 @@
 | Item | Status | Evidence / Notes |
 |------|--------|------------------|
 | Scope: evaluation-focused (no digital semestral accomplishment report) | N/A | Confirmed in PRD §1.2 |
-| PPA digitization | Done | Web dashboard and APIs capture proposal metadata, official PPA softcopy upload, hardcopy/signature status, externally confirmed venue evidence, submit/review/approve/reject, immutable permit versions, venue amendments, participant-scope PPAs, and account-based scoped scanner assignments |
+| PPA digitization | Partial | Existing web and API flows now create a structured `canonical_ppa_packets` source for organizer/co-organizer proposal drafts while preserving compatibility projections into `events`; they also capture official PPA softcopy, legacy hardcopy/signature status, venue evidence, OSA review, immutable permit versions, amendments, participant PPAs, and scoped scanner assignments. Revised Epic 2 still requires participant packet reuse, generated proposal/permit views, configurable templates, Workflow Runs and Tasks, Institutional Approver Accounts, the Organizer Checklist, Approval Trails, and Permit Copy Owners. |
 | QR attendance + evaluation gate | Done | Sync controllers, EILO background job, pending QR dashboard, and student evaluation gate verified |
 | Offline scanner + sync | Done | Flutter scanner has Google mobile login, assigned-event listing/activation/resume, platform-backed device identity, participation-scope display, mode switching, SQLite repository, camera/manual capture UI, scope-stamped offline scans, API sync client, restart-safe scanner-session snapshots, offline restore after app close, controller tests, scanner-session phase indicators, and assignment-activation token coverage |
 | Event lifecycle + scanner sessions | Done | `events.lifecycle_phase`, `events.event_domain`, `event_participation_scopes`, `event_scanner_assignments`, `scanner_sessions`, assignment/scope-aware hydrate/sync guards, revocation, device binding, venue-amendment session revocation, idempotent same-device activation resume, cross-device transfer blocking, scan-window validation, scheduled lifecycle updates, and Event Proposals lazy lifecycle refresh implemented |
@@ -55,7 +55,7 @@
 |------|--------|------------------|
 | `spatie/laravel-permission` package | Done | Installed and customized to support UUID model_id |
 | Roles & permissions seeders (§2.2 table) | Done | `RolePermissionSeeder` maps all active permissions and roles for web/api guards |
-| Tenant-scoped middleware (org/college) | Done | `TenantScopeMiddleware` intercepts routing to restrict organization and college boundaries |
+| Tenant-scoped middleware and Authority Projection | Partial | Existing `TenantScopeMiddleware` and `AdminScopeService` restrict organization/college boundaries through active `admin_assignments`. Revised PRD requires School-Year-aware Authority Projections sourced from verified Officer Rosters, Department scope, explicit multi-organization context selection, and audited OSA overrides. |
 | User model aligned with PRD (UUID, `google_sub`, Student Academic Path, etc.) | Done | `User.php` has UUID identity, current College/Department/Program/Organization profile projections, Year Level, user type, and profile flow validation for College -> Department -> Program -> eligible Organization/Society relationships. |
 
 ---
@@ -64,7 +64,7 @@
 
 | Item | Status | Evidence / Notes |
 |------|--------|------------------|
-| Roster hydration API (§3.1) | Done | Hydrate route `/events/{id}/hydrate` returns compressed roster scoped to the activated `event_participation_scope_id`, including student, multi-membership, non-academic, and HR roster paths |
+| Roster hydration API (§3.1) | Partial | Hydrate route `/events/{id}/hydrate` is correctly scoped to the activated `event_participation_scope_id` and supports student, multi-membership, non-academic, and HR paths. Revised PRD still requires School Year, Department, Program, eligible Organization/Society, membership status, participant-PPA status, and Officer-Derived Authority to feed the roster and scanner-assignment resolvers. |
 | Unresolved scan + server resolution (§3.2) | Done | `raw_scans` supports nullable `student_id`; pending QR links table and resolve/flag views with audit logging implemented |
 | Bulk sync + idempotency keys (§3.3) | Done | `/attendance/sync` preserves scan-window and scope guards while `AttendanceSyncPersistenceService` atomically inserts with `insertOrIgnore`, re-queries request UUID winners, creates unresolved pending links only for winners, and writes a durable resolution outbox record in the same transaction; PostgreSQL/SQLite partial indexes remain final duplicate authority |
 | `ResolveAttendanceJob` + queue throttling | Done | Queueable EILO job uses scoped `WithoutOverlapping`, bounded retries/backoff/timeout, participation-scope row locking (event-row fallback for legacy jobs), attendance identity indexes as final duplicate defense, PII-safe failure logging, and the dedicated `attendance` queue; the scheduled outbox dispatcher retries Redis handoff after recovery |
@@ -80,16 +80,19 @@
 |---------|--------|------------------|
 | 1.1 Google OAuth + `@usm.edu.ph` + Sanctum tokens | Done | `GoogleAuthController` redirects with account selection + USM domain hint, checks domain, clears rejected sessions, and issues web auth |
 | 1.2 Student profile + QR registration | Done | Student profile onboarding/edit mode supports dependent College -> Department -> Program -> eligible Organization/Society -> Year Level selects, webcam/manual QR capture, backend cascade validation, user profile projections, and active-School-Year primary `organization_memberships` persistence. |
-| 1.3 OSA admin assignment governance | Done | OSA Admin Access page for direct organization management, term-bound `admin_assignments`, a filtered OSA-only Audit History tab for governance audit rows, and non-OSA scoped Organization Profile logo management; student admin-application routes/UI removed; `AdminScopeService` assignment-scoped admin boundaries; OSA assignment creation restricted to USG, LSG, Society, Academic Unit, and Office Event roles; Super Admin (OSA) remains bootstrap-controlled and HR Admin provisioning remains independent; `AdminAssignmentService` role-only permission projection sync; legacy `admin_applications` deprecated |
+| 1.3 School Year and officer governance | Partial | Existing OSA Admin Access, `admin_assignments`, audit history, organization management, and scoped `AdminScopeService` provide reusable enforcement infrastructure. Missing revised scope: OSA-controlled School Years and transition periods, Officer Rosters selected from registered members, Adviser Verification, Officer Change Requests, automatic President/Secretary Authority Projections, explicit scope selection for multiple authorities, and OSA-only advanced overrides. Current `admin_assignments` remain the source of truth and direct OSA assignment path, which the revised PRD supersedes for normal student-organization authority. |
 
 ### Epic 2: PPA
 
 | Feature | Status | Evidence / Notes |
 |---------|--------|------------------|
-| 2.1 Digital PPA submission and venue confirmation | Done | Livewire, web fallback, and API proposal writes share `EventProposalDraftService` for draft-safe venue/PPA capture; student-affairs submission uses one server-side guard requiring a catalog venue, manual campus venue name, or off-campus address, confirming office/date, private evidence, official PPA softcopy, and existing hardcopy requirements. Active catalog listing, scoped evidence downloads, structured API fields, audit records, notifications, and the approved off-PRD read-only system-recorded venue availability view are implemented; HR and participant-scope PPAs retain their documented exemptions. |
-| 2.2 OSA review and permit versioning | Done | Shared service covers web, Livewire, and API submit/review/approve/revision/reject transitions and repeats the venue gate at approval. Approval creates immutable sequential `event_permit_versions`; eligible owning organizers can start a pre-event amendment that supersedes the active permit, preserves historical files and scanner assignments, revokes active scanner sessions, locks scanning, and requires replacement venue evidence and PPA before OSA can create the next version. |
-| 2.3 Participant PPAs and distributed attendance ownership | Done | `event_participation_scopes` model/migration, organizer attendance scopes, Organized/Participating Events dashboard tabs, in-app invitation notifications/acknowledgements/reminders, participant PPA submit/review/approve/request-revision/reject routes, scope-aware scanner assignment/revocation, runtime hydrate/sync gating, and roll-up analytics implemented |
-| 2.4 HR event domain | Done | `events.event_domain`, HR Admin role/permissions, employee roster models, non-student Google onboarding separation, HR no-PPA event creation, and HR roster hydration path implemented; HR Admin provisioning is not handled through OSA Admin Access |
+| 2.1 Digital PPA packet and workflow binding | Partial | Existing Livewire, web fallback, and API proposal writes share `EventProposalDraftService` for draft-safe venue/PPA capture and now synchronize organizer/co-organizer draft data into `canonical_ppa_packets` with activity role, proponent, schedule, venue, budget, objective, methodology, activity, output, and beneficiary fields while preserving legacy `events` projections. The current submission guard enforces venue/PPA evidence and documented HR/participant exemptions. Missing revised scope: participant packets do not yet reuse this table, generated proposal/permit views are not rendered from the packet, and first submission does not select an applicable immutable Published Template Version or create a proposal Workflow Run. |
+| 2.2 Proposal Process Template governance | Not Started | No OSA-managed template, immutable version, step/dependency, applicability-rule, or assignment-rule models and administration surfaces exist. |
+| 2.3 Institutional approval tasks and dashboard decisions | Not Started | Current approval remains an OSA-only event transition and legacy `head_organization_signed` / `adviser_signed` flags remain in use. Institutional Approver Accounts, School-Year/Department/Officer-Roster-aware task resolution, distinct Chief Security and OSA entities, shared approver work queues, canonical task decisions, controlled reassignment, and dashboard decisions as the signature replacement are not implemented. |
+| 2.4 Organizer checklist and revision loop | Partial | Existing proposal create/edit and OSA revision/resubmission paths preserve remarks and event status transitions. Missing revised scope: the selected two-pane Organizer Checklist, connected progress rail, prerequisite-aware task states, current-action panel, Workflow Run preservation, and task-level notification links. |
+| 2.5 Approval Trail, Digital Permit, and permit versioning | Partial | Existing `EventPermitService` creates immutable sequential `event_permit_versions`, preserves historical venue/PPA snapshots, handles pre-event amendments, revokes active scanner sessions, and keeps scanner assignments. Missing revised scope: immutable workflow-specific Approval Trails, all-required-task plus OSA gating, approval metadata blocks, workflow-linked permit snapshots generated from the approved Canonical PPA Packet, and Permit Copy Owner records for OSA, Security, and the organizer. |
+| 2.6 Participant PPAs and distributed attendance ownership | Partial | `event_participation_scopes` model/migration, organizer attendance scopes, Organized/Participating Events dashboard tabs, in-app invitation notifications/acknowledgements/reminders, participant PPA submit/review/approve/request-revision/reject routes, scope-aware scanner assignment/revocation, runtime hydrate/sync gating, and roll-up analytics implemented. Missing revised scope: participant PPAs must reuse the Canonical PPA Packet with `activity_role=Participant`, bind to participant-specific template/workflow behavior where configured, inherit parent venue/date/permit context, and avoid duplicate venue confirmation or venue-custodian routing by default. |
+| 2.7 Event domains | Done | `events.event_domain`, HR Admin role/permissions, employee roster models, non-student Google onboarding separation, HR no-PPA event creation, and HR roster hydration path implemented; HR Admin provisioning is not handled through OSA Admin Access. |
 | 4.2 Organizer-owned late cutoff | Done | Revised from OSA-owned dual thresholds to one official late-cutoff policy: organizer event cutoff is managed from separate Attendance Rules UI, applies first, locks after event start, and falls back to participant scope cutoffs only when unset; legacy status columns are preserved as compatibility mirrors |
 | 4.3 Multi-day and multi-session attendance management | Done | EILO groups scans by participation scope, day, and configured `event_day_sessions`; scanner sync resolves session windows with the existing early Time-In / Time-Out grace periods, rejects between-session captures, and writes canonical attendance per `event_day_session_id` with `completion_status`. |
 
@@ -104,9 +107,9 @@
 
 | Feature | Status | Evidence / Notes |
 |---------|--------|------------------|
-| 6.1 Aggregated analytics dashboards | Done | Two-level analytics implemented: (1) full per-event analytics workspace at `/dashboard/events/{event}/analytics` backed by shared page/API metric logic, with overview, attendance drilldown, Program and Year Level demographics, evaluations, sentiment, participant scopes, scanner/sync, and export context; quick modal previews use `/dashboard/events/{event}/analytics/data`; (2) Organization Performance Analytics page supporting program/year-level filtering under each organization (cascade filters: SY, Sem, College, Org, Program, Year Level, Event Type), detailed late/absent/left-early indicators, and a Program Comparison Leaderboard — all scoped by Spatie RBAC. |
+| 6.1 Aggregated analytics dashboards | Partial | Existing event and Organization Performance analytics provide shared metric logic, Program/Year Level demographics, evaluations, sentiment, participant-scope/scanner context, and SY/Semester/College/Organization/Program/Year Level/Event Type filters. Revised PRD requires first-class School Year records, Department between College and Program, corrected Society eligibility, School-Year-aware authority, cascading scope validation, and immutable historical hierarchy snapshots. |
 | 6.2 PDF/Excel export engine | Done | Dashboard export routes generate scoped PDF/XLSX attendance and evaluation reports with event metadata, participant scope, PPA hardcopy status, student Program/Year Level columns, validity, ratings, comments, sentiment fields, timestamp, and generated-by user |
-| 6.3 Gawad Parangal metrics | Done | Web organization analytics and the unchanged Gawad API contract now share `OrganizationAnalyticsService`: completed organizer-owned non-HR eligibility, organizer-scope attendance denominators with legacy fallback, unique active-member counts, pooled numeric evaluation scores, and existing SY/semester/event-type/program/year-level filters are covered by focused PHPUnit consistency and tenant-boundary tests; manual non-system fields remain deferred |
+| 6.3 Gawad Parangal metrics | Partial | Web analytics and the Gawad API share `OrganizationAnalyticsService` with organizer-scope attendance denominators, active-member counts, evaluation scores, and current filters. Revised PRD requires the corrected School Year, Department, Program, Society/Organization, membership-status, and Participation Scope model before the metrics are complete. |
 
 ---
 
@@ -141,13 +144,16 @@
 | `programs` | Partial | Programs now have nullable `department_id`, Department relationship, and compatibility College resolution while retaining direct `college_id` for existing callers. Explicit CEIT Program -> Department seed mappings exist; later contract work must remove direct College storage once downstream consumers migrate. |
 | `organization_programs` | Partial | The organization/program pivot exists; OSA organization create/update rejects Department-backed Society/Academic Unit coverage outside the org Department; Student Academic Path now filters and validates selected Organizations/Societies through covered Programs. Direct pivot writes and remaining proposal/scanner/analytics consumers still need migration to the corrected Department contract. |
 | `organization_memberships` | Partial | UUID multi-membership, profile demographic attribution, nullable Department, and active-School-Year primary profile membership persistence exist. Revised PRD still requires replacing remaining `academic_year` contracts, removing officer membership as the authority model, and extending corrected hierarchy validation into downstream scanner/analytics consumers. |
+| `organization_officer_rosters` / `organization_officers` | Partial | First-class `organization_officer_rosters` and `organization_officers` UUID tables, School Year binding, status lifecycle (draft, submitted, changes_requested, verified, locked, superseded), draft save vs submission gates, registered member eligibility for student officers, eligible institutional account requirement for Adviser, supporting evidence file / attestation upload, and preparer authorization for outgoing officers / adviser fallback exist. Adviser Verification (#25) and Authority Projection sync (#26) remain to complete the full governance loop. |
+| `officer_change_requests` | Not Started | Mid-year officer replacement/revocation/expiry and preserved history are not modeled. |
 | `employee_profiles` / `employee_roster_entries` | Done | UUID HR/faculty/staff profile and roster tables added for employee verification and HR scanner hydration |
-| `admin_applications` | Deprecated | Legacy student-application table retained for data preservation only; routes, controllers, and UI removed in favor of OSA-direct assignment governance |
-| `admin_assignments` | Done | Source-of-truth admin authority and tenant scope table with active primary admin uniqueness by role/scope/academic year; user profile organization/college/program fields remain student membership |
-| `events` | Done | Custom PPA columns (location, budget, target), lifecycle phase, and event domain migrated with UUID |
+| `admin_applications` | Off-PRD | Legacy table remains physically present although routes/controllers/UI are removed. Revised PRD cleanly removes this pre-deployment authority model rather than preserving it for production history. |
+| `admin_assignments` Authority Projection | Partial | Existing table drives admin authority and tenant scope by role/scope/academic-year string. Revised PRD makes it a projection sourced from verified Officer Rosters, audited OSA overrides, bootstrap, or HR authority, with `school_year_id` and Department scope. |
+| `osa_authority_overrides` | Not Started | No dedicated reasoned, audited OSA-only grant/replace/lock/revoke/correct exception model exists. |
+| `events` | Partial | Custom PPA columns, lifecycle phase, and event domain exist. Revised PRD adds `school_year_id` and historical hierarchy/authority context. |
 | `event_days` | Done | UUID schema defined and migrated |
 | `event_day_sessions` | Done | UUID configurable same-day session table added under `event_days`, with ordered non-overlapping session rows and required-for-attendance metadata |
-| `event_participation_scopes` | Done | UUID organizer/participant scope table added with PPA status, capture mode, delegated owner, analytics roll-up fields, and participant late-cutoff fallback |
+| `event_participation_scopes` | Partial | UUID organizer/participant scope, PPA status, capture mode, delegated owner, analytics roll-up, and participant late-cutoff behavior exist. Revised PRD adds School Year and Department scope and requires corrected hierarchy/membership/PPA resolver behavior. |
 | `event_scanner_assignments` | Done | UUID scanner assignment table separates admin intent from runtime sessions, with event/scope/user/assigned-by, audience type, status, revocation, expiry, max devices, notes, and last activation fields |
 | `scanner_sessions` | Done | UUID scanner-session table added with event/scope/user/token, assignment link, label, device binding, status, expiry, revocation, and last-seen fields |
 | `raw_scans` | Done | Nullable student, QR, dedup_key, scanner-session/user audit, participation scope, captured-by organization/admin scope, event-day/session ids, server received, and processed markers migrated with UUID |
@@ -180,13 +186,27 @@
 
 ## Sprint Notes
 
+- **2026-09-26 (Officer Roster preparation and submission delivery - Issue #24):**
+  - Added first-class `organization_officer_rosters` and `organization_officers` UUID schema, models, relationships, and factories with School Year binding and status lifecycle (`draft`, `submitted`, `changes_requested`, `verified`, `locked`, `superseded`).
+  - Implemented `OfficerRosterService` with preparer authorization (outgoing verified President or Secretary during active year or transition period, with eligible Adviser initiation fallback only when outgoing officers are unavailable).
+  - Added registered member validation for student officers (President, Secretary) and institutional account eligibility checks for Adviser.
+  - Enforced draft saving vs submission gates (requiring active President, Secretary, Adviser, and supporting evidence file or attestation upload prior to submission).
+  - Added dashboard API endpoints for show, eligible-members, eligible-advisers, draft save, and submission.
+  - Added comprehensive feature test coverage in `tests/Feature/OfficerRosterTest.php` (14 tests, 59 assertions passing).
+
+- **2026-09-24 (organizer Canonical PPA Packet foundation):**
+  - Added `canonical_ppa_packets` with UUID identity, one packet per event, activity role, proponent/contact, schedule, venue, budget, objectives, methodology, activity, output, beneficiary, and summary fields for PRD Feature 2.1.
+  - Routed Livewire, multipart web fallback, and API proposal create/update payloads through shared packet synchronization in `EventProposalDraftService`, while keeping legacy `events` fields as compatibility projections during migration.
+  - Updated the Event Proposal modal into a guided canonical packet flow with Organizer/Co-Organizer/Participant role selection, proponent defaults, and optional draft-safe packet fields; added focused PHPUnit coverage for single-entry capture, role selection, draft persistence, and compatibility synchronization.
+
 - **2026-09-24 (Student Academic Path delivery):**
   - Added Student Academic Path profile persistence for College -> Department -> Program -> eligible Organization/Society -> Year Level, including `users.department_id` and Department/active-School-Year fields on profile-sourced `organization_memberships`.
   - Updated student profile onboarding/edit selectors to cascade from Department and Program-backed organization eligibility instead of the older compressed College -> Program -> Organization path.
-  - Added backend validation and focused feature coverage for valid path persistence, invalid College/Department/Program/Organization combinations, legacy membership retie, and active School Year assignment.
+  - Added backend validation and focused feature coverage for valid path persistence, invalid College/Department/Program/Organization combinations, and active School Year assignment.
+
 - **2026-09-24 (Department-backed programs and academic organizations):**
   - Added nullable `department_id` compatibility columns to Programs and Organizations, plus Program/Organization/Department relationships and College resolution helpers so existing direct College callers keep working.
-  - Updated OSA organization create/update and the Eloquent organization-program pivot model to reject Department-backed Society/Academic Unit coverage that crosses Department boundaries when Department context is present.
+  - Updated OSA organization create/update to infer Department from selected Programs when possible and reject Department-backed Society/Academic Unit coverage that crosses Department boundaries.
   - Seeded explicit CEIT Program -> Department mappings and demo/dev PSITS Department context while leaving unknown Department mappings nullable instead of inventing data.
 
 - **2026-09-24 (School Year lifecycle foundation):**
@@ -198,6 +218,12 @@
   - Added first-class Department master data under Colleges with UUID schema, scoped code uniqueness, model/factory support, OSA-only dashboard API create/list/update routes, audit rows for create/update actions, and focused feature coverage.
   - Seeded explicit CEIT Department records without migrating Programs away from their existing direct College relationship; Program -> College compatibility remains for downstream tickets.
 
+- **2026-09-24 (PRD revision from completed Wayfinder map #12):**
+  - Corrected the institutional hierarchy to University -> College -> Department -> Program and made Department-backed Academic Organizations cover only Programs from the same Department.
+  - Replaced academic-year strings and automatic calendar assumptions with OSA-controlled first-class School Years, one active year, and an explicit transition period.
+  - Made adviser-verified Officer Rosters the source of truth for normal President/Secretary organization authority; retained `admin_assignments` only as an Authority Projection and reserved reasoned advanced overrides for OSA.
+  - Revised proposal assignment resolution, scanner/attendance scope, analytics/Gawad filters, and schema expectations around School Year, Department, Officer Roster, and Participation Scope.
+  - Reclassified affected audit entries from Done to Partial or Not Started where the current implementation satisfies only the superseded model.
 - **2026-09-18 (multi-session attendance implementation):**
   - Extended PRD Feature 4.3 from day-only attendance to configurable non-overlapping sessions per event day, preserving a one-session default for simple events and legacy schedules.
   - Added `event_day_sessions`, session ids on `raw_scans` and `attendance_records`, and per-session `completion_status`; updated scanner sync and `ResolveAttendanceJob` so EILO resolves earliest-in/latest-out per session while the evaluation form remains once per event.

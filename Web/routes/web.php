@@ -11,6 +11,7 @@ use App\Http\Controllers\Web\DepartmentController;
 use App\Http\Controllers\Web\EventAnalyticsController;
 use App\Http\Controllers\Web\EventExportController;
 use App\Http\Controllers\Web\NotificationController;
+use App\Http\Controllers\Web\OfficerRosterController;
 use App\Http\Controllers\Web\OrganizationProfileController;
 use App\Http\Controllers\Web\PortalController;
 use App\Http\Controllers\Web\SchoolYearController;
@@ -51,7 +52,7 @@ Route::middleware(['auth'])->group(function () {
     });
 
     // ─── Admin Dashboard ────────────────────────────────────
-    Route::middleware(['role:Super Admin (OSA)|USG Admin|LSG Admin|Society Admin|Academic Unit Admin|Office Event Admin|HR Admin'])
+    Route::middleware(['role:Super Admin (OSA)|USG Admin|LSG Admin|Society Admin|Academic Unit Admin|Office Event Admin|HR Admin|Faculty'])
         ->prefix('dashboard')
         ->group(function () {
             Route::get('/', [DashboardController::class, 'index'])->name('dashboard');
@@ -129,6 +130,13 @@ Route::middleware(['auth'])->group(function () {
             Route::put('/organizations/{organization}', [AdminAccessController::class, 'updateOrganization'])->name('dashboard.organizations.update');
             Route::post('/admin-assignments/{assignment}/revoke', [AdminAccessController::class, 'revoke'])->name('dashboard.admin-assignments.revoke');
             Route::post('/admin-assignments/{assignment}/expire', [AdminAccessController::class, 'expire'])->name('dashboard.admin-assignments.expire');
+
+            // Officer Roster (PRD Feature 1.3)
+            Route::get('/organizations/{organization}/officer-roster', [OfficerRosterController::class, 'show'])->name('dashboard.officer-rosters.show');
+            Route::get('/organizations/{organization}/officer-roster/eligible-members', [OfficerRosterController::class, 'eligibleMembers'])->name('dashboard.officer-rosters.eligible-members');
+            Route::get('/organizations/{organization}/officer-roster/eligible-advisers', [OfficerRosterController::class, 'eligibleAdvisers'])->name('dashboard.officer-rosters.eligible-advisers');
+            Route::post('/organizations/{organization}/officer-rosters/{schoolYear}/draft', [OfficerRosterController::class, 'saveDraft'])->name('dashboard.officer-rosters.draft');
+            Route::post('/organizations/{organization}/officer-rosters/{schoolYear}/submit', [OfficerRosterController::class, 'submit'])->name('dashboard.officer-rosters.submit');
         });
 });
 
