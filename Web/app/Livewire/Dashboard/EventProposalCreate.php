@@ -175,6 +175,20 @@ class EventProposalCreate extends Component
         }
     }
 
+    public function updatedLocationType(string $value): void
+    {
+        if ($value !== 'on-campus') {
+            $this->venueId = '';
+        }
+
+        if ($value !== 'off-campus') {
+            $this->venueConfirmationOffice = '';
+            $this->venueConfirmationDate = '';
+            $this->venueConfirmationReferenceNumber = '';
+            $this->venueConfirmationDocument = null;
+        }
+    }
+
     public function updatedSameTimeForAllDays(bool $value): void
     {
         if ($value) {
@@ -367,7 +381,7 @@ class EventProposalCreate extends Component
             'parentEventId' => ['nullable', 'uuid', 'exists:events,id'],
             'startDate' => ['required', 'date'],
             'endDate' => ['required', 'date', 'after_or_equal:startDate'],
-            'locationType' => ['required', 'string', 'in:on-campus,off-campus'],
+            'locationType' => ['required', 'string', 'in:on-campus,off-campus,online'],
             'locationDetails' => ['nullable', 'string'],
             'venueId' => ['nullable', 'uuid', 'exists:venues,id'],
             'venueConfirmationOffice' => ['nullable', 'string', 'max:255'],
@@ -911,13 +925,12 @@ class EventProposalCreate extends Component
             'Venue selected or described' => $this->locationType === 'on-campus'
                 ? filled($this->venueId) || filled($this->locationDetails)
                 : filled($this->locationDetails),
-            'Confirming office recorded' => filled($this->venueConfirmationOffice),
-            'Confirmation date recorded' => filled($this->venueConfirmationDate),
-            'Confirmation evidence attached' => filled($this->venueConfirmationDocument) || filled($this->currentVenueConfirmationDocumentName),
-            'Official PPA softcopy attached' => filled($this->proposalDocument) || filled($this->currentProposalDocumentName),
-            'Hardcopy submission confirmed' => $this->hardcopySubmitted,
+            'Off-campus confirming office recorded' => $this->locationType !== 'off-campus' || filled($this->venueConfirmationOffice),
+            'Off-campus confirmation date recorded' => $this->locationType !== 'off-campus' || filled($this->venueConfirmationDate),
+            'Off-campus evidence attached' => $this->locationType !== 'off-campus' || filled($this->venueConfirmationDocument) || filled($this->currentVenueConfirmationDocumentName),
             'Activity role selected' => filled($this->activityRole),
             'Objectives drafted' => filled($this->generalObjective) || filled($this->specificObjectives),
+            'Budget recorded' => filled($this->sourceOfFund) && filled($this->budgetCost),
         ];
     }
 

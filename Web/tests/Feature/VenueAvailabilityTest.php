@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Livewire\Dashboard\EventProposalCreate;
 use App\Models\AdminAssignment;
+use App\Models\CanonicalPpaPacket;
 use App\Models\College;
 use App\Models\Event;
 use App\Models\EventDay;
@@ -219,6 +220,19 @@ class VenueAvailabilityTest extends TestCase
             'parent_event_id' => null,
             'title' => 'Manual Campus Venue Event',
             'proposal_category' => 'activity',
+            'canonical_packet' => [
+                'activity_role' => CanonicalPpaPacket::ROLE_ORGANIZER,
+                'proponent_name' => 'Venue Secretary',
+                'proponent_position' => 'Secretary',
+                'proponent_organization' => $organization->name,
+                'proponent_email' => 'venue.secretary@usm.edu.ph',
+                'proponent_contact_number' => '09170000000',
+                'rationale' => 'Manual campus venue proposals use the generated packet.',
+                'general_objective' => 'Submit a manual campus venue packet.',
+                'specific_objectives' => ['Prepare venue details', 'Submit generated packet'],
+                'methodology' => 'Coordinate with the campus venue office.',
+                'expected_output' => 'A submitted manual venue packet.',
+            ],
             'start_date' => $date,
             'end_date' => $date,
             'location_type' => 'on-campus',
@@ -227,8 +241,14 @@ class VenueAvailabilityTest extends TestCase
             'venue_confirmation_office' => 'Campus Facilities Office',
             'venue_confirmation_date' => today()->toDateString(),
             'venue_confirmation_reference_number' => 'VC-100',
-            'target_demographics' => [],
-            'budget_allocations' => [],
+            'target_demographics' => [
+                'implementing_office' => $organization->name,
+                'target_participants' => 'Manual venue participants',
+            ],
+            'budget_allocations' => [
+                'source_of_fund' => 'Organization fund',
+                'budget_cost' => 1500,
+            ],
             'resolution_number' => null,
             'hardcopy_submitted' => false,
             'head_organization_signed' => false,

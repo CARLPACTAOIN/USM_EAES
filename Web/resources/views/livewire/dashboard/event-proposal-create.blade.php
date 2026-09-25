@@ -377,6 +377,7 @@
                     <select id="livewire-location-type" name="location_type" class="form-input form-select @error('locationType') form-input-error @enderror" required wire:model.live="locationType">
                         <option value="on-campus" @selected($locationType === 'on-campus')>On-Campus</option>
                         <option value="off-campus" @selected($locationType === 'off-campus')>Off-Campus</option>
+                        <option value="online" @selected($locationType === 'online')>Online</option>
                     </select>
                     @error('locationType') <p class="form-error" role="alert">{{ $message }}</p> @enderror
                 </div>
@@ -399,11 +400,18 @@
                         <p class="form-helper">Use when the venue is not in the catalog. This will not add a catalog record.</p>
                         @error('locationDetails') <p class="form-error" role="alert">{{ $message }}</p> @enderror
                     </div>
-                @else
+                @elseif($locationType === 'off-campus')
                     <div>
                         <label for="livewire-location-details" class="form-label">Off-Campus Venue Name and Address</label>
                         <input type="text" id="livewire-location-details" name="location_details" class="form-input @error('locationDetails') form-input-error @enderror"
                                placeholder="Venue name, street, municipality" value="{{ $locationDetails }}" wire:model="locationDetails">
+                        @error('locationDetails') <p class="form-error" role="alert">{{ $message }}</p> @enderror
+                    </div>
+                @else
+                    <div>
+                        <label for="livewire-location-details" class="form-label">Online Platform or Link</label>
+                        <input type="text" id="livewire-location-details" name="location_details" class="form-input @error('locationDetails') form-input-error @enderror"
+                               placeholder="e.g. Google Meet link or LMS room" value="{{ $locationDetails }}" wire:model="locationDetails">
                         @error('locationDetails') <p class="form-error" role="alert">{{ $message }}</p> @enderror
                     </div>
                 @endif
@@ -450,10 +458,11 @@
             </div>
         </fieldset>
 
+        @if($locationType === 'off-campus')
         <fieldset class="proposal-modal-section">
             <legend class="proposal-section-title">
                 <span class="proposal-section-step">4</span>
-                Venue confirmation
+                Off-campus venue confirmation
             </legend>
 
             <div class="proposal-grid">
@@ -507,6 +516,16 @@
             </div>
             <p class="form-helper">You may save an incomplete draft. Every item above is required before submission to OSA.</p>
         </fieldset>
+        @else
+            <div class="proposal-question-preview" aria-live="polite" aria-label="Submission readiness">
+                @foreach($readinessItems as $label => $complete)
+                    <div class="proposal-question-preview-item">
+                        <span class="proposal-question-preview-index">{{ $complete ? '✓' : '•' }}</span>
+                        <span>{{ $label }}</span>
+                    </div>
+                @endforeach
+            </div>
+        @endif
 
         <fieldset class="proposal-modal-section">
             <legend class="proposal-section-title">
@@ -553,7 +572,7 @@
         <fieldset class="proposal-modal-section">
             <legend class="proposal-section-title">
                 <span class="proposal-section-step">6</span>
-                Official PPA packet
+                Optional supporting records
             </legend>
 
             <div class="proposal-grid">
@@ -563,13 +582,13 @@
                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" d="M12 16v-8m0 0l-3 3m3-3l3 3M4 16.5V18a2 2 0 002 2h12a2 2 0 002-2v-1.5"/></svg>
                         </span>
                         <div>
-                            <label for="livewire-proposal-document" class="form-label">Official PPA Proposal Softcopy <span class="text-(--color-text-tertiary)">(student affairs)</span></label>
+                            <label for="livewire-proposal-document" class="form-label">Legacy PPA Proposal Softcopy <span class="text-(--color-text-tertiary)">(optional)</span></label>
                             <input type="file" id="livewire-proposal-document" name="proposal_document"
                                    class="form-input @error('proposalDocument') form-input-error @enderror"
                                    accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                                    wire:model="proposalDocument">
                             <p class="form-helper">
-                                Accepted: PDF, DOC, DOCX up to 10 MB.
+                                Accepted: PDF, DOC, DOCX up to 10 MB. The generated proposal preview now comes from the canonical packet.
                                 @if($editing && $currentProposalDocumentName)
                                     Current file: {{ $currentProposalDocumentName }}.
                                 @endif
@@ -592,7 +611,7 @@
         <fieldset class="proposal-modal-section">
             <legend class="proposal-section-title">
                 <span class="proposal-section-step">7</span>
-                OSA hardcopy status
+                Optional physical tracking
             </legend>
 
             <div class="proposal-check-grid">
@@ -600,7 +619,7 @@
                     <input type="checkbox" name="hardcopy_submitted" value="1" wire:model="hardcopySubmitted" @checked($hardcopySubmitted)>
                     <span>
                         <span class="proposal-check-title">Hardcopy submitted</span>
-                        <span class="proposal-check-note">Physical PPA packet received by OSA.</span>
+                        <span class="proposal-check-note">Legacy physical packet received by OSA, when still collected.</span>
                     </span>
                 </label>
                 <label class="proposal-check-item">

@@ -27,6 +27,7 @@ use App\Support\AdminScope;
 use App\Support\EventTenantScope;
 use Carbon\Carbon;
 use DomainException;
+use Illuminate\Contracts\View\View;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -159,7 +160,7 @@ class DashboardController extends Controller
             'activity_role' => 'nullable|in:organizer,co-organizer,participant',
             'start_date' => 'required|date',
             'end_date' => 'required|date|after_or_equal:start_date',
-            'location_type' => 'required|in:on-campus,off-campus',
+            'location_type' => 'required|in:on-campus,off-campus,online',
             'location_details' => 'nullable|string',
             'venue_id' => 'nullable|uuid|exists:venues,id',
             'venue_confirmation_office' => 'nullable|string|max:255',
@@ -342,7 +343,7 @@ class DashboardController extends Controller
             'activity_role' => 'nullable|in:organizer,co-organizer,participant',
             'start_date' => 'required|date',
             'end_date' => 'required|date|after_or_equal:start_date',
-            'location_type' => 'required|in:on-campus,off-campus',
+            'location_type' => 'required|in:on-campus,off-campus,online',
             'location_details' => 'nullable|string',
             'venue_id' => 'nullable|uuid|exists:venues,id',
             'venue_confirmation_office' => 'nullable|string|max:255',
@@ -629,6 +630,32 @@ class DashboardController extends Controller
         }
 
         return redirect()->back()->with('success', 'Venue amendment started. Scanning is locked until OSA approval.');
+    }
+
+    public function proposalPreview(Request $request, Event $event): View
+    {
+        $this->authorizeEventAccess($event, $request->user());
+        $event->loadMissing(['canonicalPpaPacket', 'eventDays.sessions', 'organization', 'venue']);
+
+        abort_unless($event->canonicalPpaPacket, 404, 'Canonical PPA packet not found.');
+
+        return view('dashboard.events.proposal-preview', [
+            'event' => $event,
+            'packet' => $event->canonicalPpaPacket,
+        ]);
+    }
+
+    public function permitPreview(Request $request, Event $event): View
+    {
+        $this->authorizeEventAccess($event, $request->user());
+        $event->loadMissing(['canonicalPpaPacket', 'eventDays.sessions', 'organization', 'venue']);
+
+        abort_unless($event->canonicalPpaPacket, 404, 'Canonical PPA packet not found.');
+
+        return view('dashboard.events.permit-preview', [
+            'event' => $event,
+            'packet' => $event->canonicalPpaPacket,
+        ]);
     }
 
     /**

@@ -15,44 +15,62 @@ class EventProposalSubmissionGuard
             return [];
         }
 
+        $event->loadMissing(['canonicalPpaPacket', 'venue']);
+
         $missing = [];
+        $packet = $event->canonicalPpaPacket;
 
-        if (! $event->proposal_document_path || ! Storage::exists($event->proposal_document_path)) {
-            $missing[] = 'official PPA softcopy';
+        if (! $packet) {
+            return ['canonical PPA packet'];
         }
 
-        if (! $event->hardcopy_submitted) {
-            $missing[] = 'OSA hardcopy confirmation';
+        foreach ($this->requiredPacketFields() as $field => $label) {
+            if (blank(data_get($packet, $field))) {
+                $missing[] = $label;
+            }
         }
 
-        if ($event->location_type === 'on-campus') {
-            if (! $event->venue_id) {
-                if (blank($event->location_details)) {
+        $proposalCategory = $packet->proposal_category ?: $event->proposal_category;
+        $missing = array_merge($missing, $this->missingStructuredPacketRequirements($packet, $proposalCategory));
+
+        if ($packet->location_type === 'on-campus') {
+            if (! $packet->venue_id) {
+                if (blank($packet->location_details)) {
                     $missing[] = 'campus venue name';
                 }
-            } elseif (! $event->venue()->active()->exists()) {
+            } elseif (! $packet->venue()->active()->exists()) {
                 $missing[] = 'active on-campus venue';
             }
-        } elseif ($event->location_type === 'off-campus') {
-            if ($event->venue_id || blank($event->location_details)) {
+        } elseif ($packet->location_type === 'off-campus') {
+            if ($packet->venue_id || blank($packet->location_details)) {
                 $missing[] = 'off-campus venue name and address';
+            }
+        } elseif ($packet->location_type === 'online') {
+            if ($packet->venue_id) {
+                $missing[] = 'online location without campus venue';
+            }
+
+            if (blank($packet->location_details)) {
+                $missing[] = 'online platform or link';
             }
         } else {
             $missing[] = 'venue classification';
         }
 
-        if (blank($event->venue_confirmation_office)) {
-            $missing[] = 'confirming office';
-        }
+        if ($packet->location_type === 'off-campus') {
+            if (blank($packet->venue_confirmation_office)) {
+                $missing[] = 'confirming office';
+            }
 
-        if (! $event->venue_confirmation_date) {
-            $missing[] = 'confirmation date';
-        } elseif ($event->venue_confirmation_date->isFuture()) {
-            $missing[] = 'valid confirmation date';
-        }
+            if (! $packet->venue_confirmation_date) {
+                $missing[] = 'confirmation date';
+            } elseif ($packet->venue_confirmation_date->isFuture()) {
+                $missing[] = 'valid confirmation date';
+            }
 
-        if (! $event->venue_confirmation_document_path || ! Storage::exists($event->venue_confirmation_document_path)) {
-            $missing[] = 'venue confirmation evidence';
+            if (! $packet->venue_confirmation_document_path || ! Storage::exists($packet->venue_confirmation_document_path)) {
+                $missing[] = 'venue confirmation evidence';
+            }
         }
 
         return array_values(array_unique($missing));
@@ -65,5 +83,110 @@ class EventProposalSubmissionGuard
         if ($missing !== []) {
             throw new DomainException('Complete the following before submission: '.implode(', ', $missing).'.');
         }
+    }
+
+    /** @return array<string, string> */
+    private function requiredPacketFields(): array
+    {
+        return [
+            'activity_role' => 'activity role',
+            'proposal_category' => 'PPA category',
+            'title' => 'PPA title',
+            'proponent_name' => 'proponent name',
+            'proponent_position' => 'proponent position',
+            'proponent_organization' => 'proponent organization',
+            'proponent_email' => 'proponent email address',
+            'proponent_contact_number' => 'proponent contact number',
+            'implementing_office' => 'implementing office',
+            'source_of_fund' => 'source of fund',
+            'budget_cost' => 'budget cost',
+            'start_date' => 'duration or date',
+            'end_date' => 'duration or date',
+            'location_type' => 'venue classification',
+            'rationale' => 'rationale',
+            'general_objective' => 'general objective',
+            'methodology' => 'methodology',
+            'expected_output' => 'expected output',
+            'beneficiaries' => 'target beneficiaries or participants',
+        ];
+    }
+
+    /** @return list<string> */
+    private function missingStructuredPacketRequirements(object $packet, ?string $proposalCategory): array
+    {
+        $missing = [];
+
+        if (! $this->hasNonBlankList($packet->specific_objectives)) {
+            $missing[] = 'specific objectives';
+        }
+
+        if ($proposalCategory === 'activity') {
+            if (! $this->hasCompleteProgramActivities($packet->program_activities)) {
+                $missing[] = 'program of activities';
+            }
+        } elseif (! $this->hasNonBlankList($packet->major_activities)) {
+            $missing[] = 'major activities';
+        }
+
+        if (! $this->hasCompleteBudgetBreakdown($packet->budget_breakdown)) {
+            $missing[] = 'budget breakdown';
+        }
+
+        return $missing;
+    }
+
+    private function hasNonBlankList(mixed $items): bool
+    {
+        if (! is_array($items) || $items === []) {
+            return false;
+        }
+
+        foreach ($items as $item) {
+            if (! blank($item)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function hasCompleteProgramActivities(mixed $activities): bool
+    {
+        if (! is_array($activities) || $activities === []) {
+            return false;
+        }
+
+        foreach ($activities as $activity) {
+            if (
+                is_array($activity)
+                && ! blank($activity['time'] ?? null)
+                && ! blank($activity['activity'] ?? null)
+                && ! blank($activity['person_in_charge'] ?? null)
+            ) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function hasCompleteBudgetBreakdown(mixed $items): bool
+    {
+        if (! is_array($items) || $items === []) {
+            return false;
+        }
+
+        foreach ($items as $item) {
+            if (
+                is_array($item)
+                && ! blank($item['item'] ?? null)
+                && array_key_exists('amount', $item)
+                && is_numeric($item['amount'])
+            ) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

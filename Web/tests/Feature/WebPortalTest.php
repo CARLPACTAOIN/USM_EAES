@@ -340,6 +340,46 @@ class WebPortalTest extends TestCase
             'proposal_document_path' => $proposalPath,
             'proposal_document_original_name' => $event->proposal_document_original_name ?: 'proposal.pdf',
         ]);
+        $event->canonicalPpaPacket()->updateOrCreate(
+            ['event_id' => $event->id],
+            [
+                'activity_role' => CanonicalPpaPacket::ROLE_ORGANIZER,
+                'proposal_category' => $event->proposal_category ?: 'activity',
+                'title' => $event->title,
+                'proponent_name' => 'Test Proponent',
+                'proponent_position' => 'Secretary',
+                'proponent_organization' => $event->organization?->name ?: 'PSITS',
+                'proponent_email' => 'test.proponent@usm.edu.ph',
+                'proponent_contact_number' => '09170000000',
+                'implementing_office' => $event->organization?->name ?: 'PSITS',
+                'source_of_fund' => 'Organization fund',
+                'budget_cost' => '1500.00',
+                'start_date' => $event->start_date,
+                'end_date' => $event->end_date,
+                'location_type' => $event->location_type,
+                'venue_id' => $event->venue_id,
+                'location_details' => $event->location_details,
+                'venue_confirmation_office' => $event->venue_confirmation_office,
+                'venue_confirmation_date' => $event->venue_confirmation_date,
+                'venue_confirmation_reference_number' => $event->venue_confirmation_reference_number,
+                'venue_confirmation_document_path' => $event->venue_confirmation_document_path,
+                'venue_confirmation_document_original_name' => $event->venue_confirmation_document_original_name,
+                'rationale' => 'A complete packet is required before submission.',
+                'general_objective' => 'Submit a complete generated packet.',
+                'specific_objectives' => ['Prepare packet details', 'Submit the proposal'],
+                'methodology' => 'Coordinate, document, and submit the proposal packet.',
+                'major_activities' => ['Planning workshop', 'Operations review'],
+                'program_activities' => [[
+                    'date' => $event->start_date?->toDateString() ?? today()->toDateString(),
+                    'time' => '08:00 - 12:00',
+                    'activity' => $event->title,
+                    'person_in_charge' => 'Test Proponent',
+                ]],
+                'expected_output' => 'A submitted complete packet.',
+                'beneficiaries' => 'Target participants',
+                'budget_breakdown' => [['item' => 'Overall total', 'amount' => '1500.00']],
+            ]
+        );
 
         return $venue;
     }
@@ -1374,9 +1414,11 @@ class WebPortalTest extends TestCase
             ->set('venueId', $revisionVenue->id)
             ->set('venueConfirmationOffice', $revisionVenue->managing_office)
             ->set('venueConfirmationDate', today()->toDateString())
+            ->set('implementingOffice', 'PSITS')
             ->set('targetParticipants', 'All society members')
             ->set('sourceOfFund', 'Organization fund')
             ->set('budgetCost', '1500')
+            ->set('majorActivities', "Planning workshop\nOperations review")
             ->set('resolutionNumber', 'RES-2026-01')
             ->set('hardcopySubmitted', true)
             ->set('headOrganizationSigned', true)
@@ -2442,6 +2484,248 @@ class WebPortalTest extends TestCase
 
         $event->refresh();
         $this->assertSame('draft', $event->status);
+    }
+
+    public function test_complete_online_packet_submits_without_legacy_softcopy_or_hardcopy(): void
+    {
+        Storage::fake('local');
+
+        $h = $this->createHierarchy();
+        $societyAdmin = $this->createAdmin('Society Admin', $h['org']);
+        $eventDate = today()->addDays(14)->toDateString();
+
+        $this->actingAs($societyAdmin)
+            ->post(route('dashboard.events.create'), [
+                'title' => 'Generated Online PPA',
+                'proposal_category' => 'activity',
+                'activity_role' => CanonicalPpaPacket::ROLE_ORGANIZER,
+                'start_date' => $eventDate,
+                'end_date' => $eventDate,
+                'location_type' => 'online',
+                'location_details' => 'Google Meet room for USM leadership training',
+                'implementing_office' => 'PSITS',
+                'target_participants' => '120 BSIS students',
+                'source_of_fund' => 'Organization fund',
+                'budget_cost' => 1500,
+                'proponent_name' => 'Jane Secretary',
+                'proponent_position' => 'Secretary',
+                'proponent_organization' => 'PSITS',
+                'proponent_email' => 'jane.secretary@usm.edu.ph',
+                'proponent_contact_number' => '09170000000',
+                'rationale' => 'Students need an accessible leadership activity.',
+                'general_objective' => 'Deliver leadership training through one generated packet.',
+                'specific_objectives' => "Orient officers\nValidate online activity logistics",
+                'methodology' => 'Online lecture, breakout discussion, and output review.',
+                'expected_output' => 'Completed online leadership training.',
+                'event_days' => [[
+                    'date' => $eventDate,
+                    'start_time' => '08:00',
+                    'end_time' => '12:00',
+                ]],
+                'evaluation_questions' => $this->customEvaluationQuestions(),
+            ])
+            ->assertRedirect(route('dashboard.events'));
+
+        $event = Event::with('canonicalPpaPacket')->where('title', 'Generated Online PPA')->firstOrFail();
+        $this->assertNull($event->proposal_document_path);
+        $this->assertFalse($event->hardcopy_submitted);
+        $this->assertSame('online', $event->canonicalPpaPacket->location_type);
+
+        $this->actingAs($societyAdmin)
+            ->post(route('dashboard.events.submit', $event))
+            ->assertSessionHas('success');
+
+        $this->assertSame(Event::STATUS_SUBMITTED, $event->fresh()->status);
+    }
+
+    public function test_off_campus_packet_requires_evidence_before_submission(): void
+    {
+        Storage::fake('local');
+
+        $h = $this->createHierarchy();
+        $societyAdmin = $this->createAdmin('Society Admin', $h['org']);
+        $eventDate = today()->addDays(16)->toDateString();
+
+        $payload = [
+            'title' => 'Off Campus PPA Packet',
+            'proposal_category' => 'activity',
+            'activity_role' => CanonicalPpaPacket::ROLE_ORGANIZER,
+            'start_date' => $eventDate,
+            'end_date' => $eventDate,
+            'location_type' => 'off-campus',
+            'location_details' => 'Kabacan Training Center, Poblacion, Kabacan',
+            'venue_confirmation_office' => 'Kabacan Training Center Administration',
+            'venue_confirmation_date' => today()->toDateString(),
+            'implementing_office' => 'PSITS',
+            'target_participants' => '80 BSIS students',
+            'source_of_fund' => 'Organization fund',
+            'budget_cost' => 2500,
+            'proponent_name' => 'Jane Secretary',
+            'proponent_position' => 'Secretary',
+            'proponent_organization' => 'PSITS',
+            'proponent_email' => 'jane.secretary@usm.edu.ph',
+            'proponent_contact_number' => '09170000000',
+            'rationale' => 'Students need supervised off-campus exposure.',
+            'general_objective' => 'Conduct an off-campus learning activity.',
+            'specific_objectives' => "Coordinate venue requirements\nComplete safety reminders",
+            'methodology' => 'Briefing, travel coordination, and guided activity.',
+            'expected_output' => 'Completed off-campus learning activity.',
+            'event_days' => [[
+                'date' => $eventDate,
+                'start_time' => '08:00',
+                'end_time' => '12:00',
+            ]],
+            'evaluation_questions' => $this->customEvaluationQuestions(),
+        ];
+
+        $this->actingAs($societyAdmin)
+            ->post(route('dashboard.events.create'), $payload)
+            ->assertRedirect(route('dashboard.events'));
+
+        $event = Event::where('title', 'Off Campus PPA Packet')->firstOrFail();
+
+        $this->actingAs($societyAdmin)
+            ->post(route('dashboard.events.submit', $event))
+            ->assertSessionHas('error');
+
+        $this->assertSame(Event::STATUS_DRAFT, $event->fresh()->status);
+
+        $this->actingAs($societyAdmin)
+            ->post(route('dashboard.events.create'), array_merge($payload, [
+                'title' => 'Off Campus PPA Packet With Evidence',
+                'venue_confirmation_document' => UploadedFile::fake()->create('confirmation.pdf', 128, 'application/pdf'),
+            ]))
+            ->assertRedirect(route('dashboard.events'));
+
+        $completeEvent = Event::with('canonicalPpaPacket')->where('title', 'Off Campus PPA Packet With Evidence')->firstOrFail();
+        $this->assertSame('confirmation.pdf', $completeEvent->canonicalPpaPacket->venue_confirmation_document_original_name);
+
+        $packetEvidencePath = $completeEvent->canonicalPpaPacket->venue_confirmation_document_path;
+        $packetEvidenceName = $completeEvent->canonicalPpaPacket->venue_confirmation_document_original_name;
+
+        $completeEvent->canonicalPpaPacket->update([
+            'venue_confirmation_document_path' => null,
+            'venue_confirmation_document_original_name' => null,
+        ]);
+
+        $this->actingAs($societyAdmin)
+            ->post(route('dashboard.events.submit', $completeEvent))
+            ->assertSessionHas('error');
+
+        $this->assertSame(Event::STATUS_DRAFT, $completeEvent->fresh()->status);
+
+        $completeEvent->canonicalPpaPacket()->update([
+            'venue_confirmation_document_path' => $packetEvidencePath,
+            'venue_confirmation_document_original_name' => $packetEvidenceName,
+        ]);
+
+        $this->actingAs($societyAdmin)
+            ->post(route('dashboard.events.submit', $completeEvent))
+            ->assertSessionHas('success');
+
+        $this->assertSame(Event::STATUS_SUBMITTED, $completeEvent->fresh()->status);
+    }
+
+    public function test_off_campus_packet_rejects_campus_venue_reference(): void
+    {
+        Storage::fake('local');
+
+        $h = $this->createHierarchy();
+        $societyAdmin = $this->createAdmin('Society Admin', $h['org']);
+        $venue = Venue::create([
+            'name' => 'USM Auditorium',
+            'campus_location' => 'Main Campus',
+            'managing_office' => 'Campus Facilities Office',
+            'is_active' => true,
+        ]);
+        $eventDate = today()->addDays(18)->toDateString();
+
+        $this->actingAs($societyAdmin)
+            ->post(route('dashboard.events.create'), [
+                'title' => 'Invalid Off Campus Venue Packet',
+                'proposal_category' => 'activity',
+                'activity_role' => CanonicalPpaPacket::ROLE_ORGANIZER,
+                'start_date' => $eventDate,
+                'end_date' => $eventDate,
+                'location_type' => 'off-campus',
+                'location_details' => 'Kabacan Training Center, Poblacion, Kabacan',
+                'venue_id' => $venue->id,
+                'implementing_office' => 'PSITS',
+                'target_participants' => '80 BSIS students',
+                'source_of_fund' => 'Organization fund',
+                'budget_cost' => 2500,
+                'proponent_name' => 'Jane Secretary',
+                'proponent_position' => 'Secretary',
+                'proponent_organization' => 'PSITS',
+                'proponent_email' => 'jane.secretary@usm.edu.ph',
+                'proponent_contact_number' => '09170000000',
+                'rationale' => 'Students need supervised off-campus exposure.',
+                'general_objective' => 'Conduct an off-campus learning activity.',
+                'specific_objectives' => 'Coordinate venue requirements',
+                'methodology' => 'Briefing and guided activity.',
+                'expected_output' => 'Completed off-campus learning activity.',
+                'event_days' => [[
+                    'date' => $eventDate,
+                    'start_time' => '08:00',
+                    'end_time' => '12:00',
+                ]],
+                'evaluation_questions' => $this->customEvaluationQuestions(),
+            ])
+            ->assertSessionHas('error');
+
+        $this->assertDatabaseMissing('events', [
+            'title' => 'Invalid Off Campus Venue Packet',
+        ]);
+    }
+
+    public function test_generated_proposal_and_permit_previews_render_from_canonical_packet(): void
+    {
+        $h = $this->createHierarchy();
+        $societyAdmin = $this->createAdmin('Society Admin', $h['org']);
+        $event = Event::factory()->for($h['org'], 'organization')->create([
+            'title' => 'Preview Packet Event',
+            'proposal_category' => 'activity',
+            'status' => Event::STATUS_DRAFT,
+            'start_date' => today()->addDays(12),
+            'end_date' => today()->addDays(12),
+            'location_type' => 'online',
+            'location_details' => 'Zoom room generated from packet',
+        ]);
+        CanonicalPpaPacket::factory()->for($event)->create([
+            'title' => 'Preview Packet Event',
+            'proposal_category' => 'activity',
+            'location_type' => 'online',
+            'location_details' => 'Zoom room generated from packet',
+            'rationale' => 'Preview renders from the canonical source.',
+            'general_objective' => 'Show packet-generated proposal and permit.',
+            'specific_objectives' => ['Render proposal preview', 'Render permit preview'],
+            'methodology' => 'Use the packet instead of an uploaded form.',
+            'program_activities' => [[
+                'date' => today()->addDays(12)->toDateString(),
+                'time' => '08:00 - 12:00',
+                'activity' => 'Generated preview walkthrough',
+                'person_in_charge' => 'Jane Secretary',
+            ]],
+            'expected_output' => 'Rendered packet previews.',
+            'beneficiaries' => 'BSIS students',
+            'budget_breakdown' => [['item' => 'Overall total', 'amount' => '1500.00']],
+        ]);
+
+        $this->actingAs($societyAdmin)
+            ->get(route('dashboard.events.proposal-preview', $event))
+            ->assertOk()
+            ->assertSee('Generated from Canonical PPA Packet')
+            ->assertSee('Preview renders from the canonical source.')
+            ->assertSee('Approval / Signatories')
+            ->assertSee('Head of Organization')
+            ->assertSee('Render proposal preview');
+
+        $this->actingAs($societyAdmin)
+            ->get(route('dashboard.events.permit-preview', $event))
+            ->assertOk()
+            ->assertSee('Student Activity Permit Preview')
+            ->assertSee('Online platform or link')
+            ->assertSee('Zoom room generated from packet');
     }
 
     public function test_participating_events_tab_shows_invited_org_after_parent_submission(): void

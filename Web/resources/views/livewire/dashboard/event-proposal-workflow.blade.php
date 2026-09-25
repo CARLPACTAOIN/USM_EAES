@@ -11,9 +11,14 @@
         </div>
     @endif
 <div class="event-primary-cta" aria-live="polite">
+    @if(!$isParticipatingWorkspace && $event->canonicalPpaPacket)
+        <a class="btn btn-sm btn-secondary" href="{{ route('dashboard.events.proposal-preview', $event) }}" target="_blank" rel="noopener">Proposal preview</a>
+        <a class="btn btn-sm btn-secondary" href="{{ route('dashboard.events.permit-preview', $event) }}" target="_blank" rel="noopener">Permit preview</a>
+    @endif
+
     @if(!$isParticipatingWorkspace && $event->requiresVenueConfirmation())
         <span class="event-workflow-feedback {{ $event->venue_confirmation_document_path ? 'event-workflow-feedback--success' : 'event-workflow-feedback--error' }}">
-            {{ $event->venue_confirmation_document_path ? 'Venue confirmed' : 'Venue confirmation incomplete' }}
+            {{ $event->location_type === 'off-campus' ? ($event->venue_confirmation_document_path ? 'Venue confirmed' : 'Venue confirmation incomplete') : 'Packet venue branch active' }}
             @if($event->permit_version > 0) · Permit v{{ $event->permit_version }} @endif
         </span>
         @if($event->venue_confirmation_document_path)

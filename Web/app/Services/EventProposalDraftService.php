@@ -280,6 +280,14 @@ class EventProposalDraftService
             return ['venue_id' => null, 'location_details' => $data['location_details']];
         }
 
+        if ($data['location_type'] === 'online') {
+            if (filled($data['venue_id'] ?? null)) {
+                throw new DomainException('Online proposals must not reference a campus venue.');
+            }
+
+            return ['venue_id' => null, 'location_details' => $data['location_details']];
+        }
+
         if ($data['location_type'] === 'off-campus') {
             if (filled($data['venue_id'] ?? null)) {
                 throw new DomainException('Off-campus proposals must not reference a campus venue.');
@@ -409,6 +417,8 @@ class EventProposalDraftService
                 'venue_confirmation_office' => $this->blankToNull($data['venue_confirmation_office'] ?? null),
                 'venue_confirmation_date' => $this->blankToNull($data['venue_confirmation_date'] ?? null),
                 'venue_confirmation_reference_number' => $this->blankToNull($data['venue_confirmation_reference_number'] ?? null),
+                'venue_confirmation_document_path' => $this->blankToNull($event->venue_confirmation_document_path),
+                'venue_confirmation_document_original_name' => $this->blankToNull($event->venue_confirmation_document_original_name),
                 'rationale' => $this->blankToNull($packet['rationale'] ?? null),
                 'general_objective' => $this->blankToNull($packet['general_objective'] ?? null),
                 'specific_objectives' => $this->normalizeList($packet['specific_objectives'] ?? []),
@@ -561,6 +571,7 @@ class EventProposalDraftService
             'confirmation_office' => $data['venue_confirmation_office'] ?? null,
             'confirmation_date' => $data['venue_confirmation_date'] ?? null,
             'confirmation_reference_number' => $data['venue_confirmation_reference_number'] ?? null,
+            'confirmation_document_path' => $data['venue_confirmation_document_path'] ?? null,
         ];
     }
 }

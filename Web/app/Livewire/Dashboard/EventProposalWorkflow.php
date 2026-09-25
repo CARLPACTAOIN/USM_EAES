@@ -228,7 +228,7 @@ class EventProposalWorkflow extends Component
 
     private function eventForDisplay(): Event
     {
-        return Event::with(['participationScopes', 'venue', 'permitVersions.approver'])->findOrFail($this->eventId);
+        return Event::with(['canonicalPpaPacket', 'participationScopes', 'venue', 'permitVersions.approver'])->findOrFail($this->eventId);
     }
 
     private function authorizeOsa(): void

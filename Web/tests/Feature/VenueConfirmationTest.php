@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Livewire\Dashboard\VenueCatalog;
 use App\Models\AdminAssignment;
+use App\Models\CanonicalPpaPacket;
 use App\Models\College;
 use App\Models\Event;
 use App\Models\EventDay;
@@ -66,7 +67,7 @@ class VenueConfirmationTest extends TestCase
 
         $this->assertSame(Event::STATUS_DRAFT, $event->status);
         $this->actingAs($organizer)->post(route('dashboard.events.submit', $event))
-            ->assertSessionHas('error', fn (string $message): bool => str_contains($message, 'campus venue name') && str_contains($message, 'venue confirmation evidence'));
+            ->assertSessionHas('error', fn (string $message): bool => str_contains($message, 'campus venue name'));
         $this->assertSame(Event::STATUS_DRAFT, $event->fresh()->status);
     }
 
@@ -161,7 +162,11 @@ class VenueConfirmationTest extends TestCase
         $organizer = $this->admin('Society Admin', $organization);
         $osa = $this->admin('Super Admin (OSA)');
         $venue = Venue::factory()->create();
-        $event = $this->confirmedEvent($organization, $venue);
+        $event = $this->confirmedEvent($organization, $venue, [
+            'venue_id' => null,
+            'location_type' => 'off-campus',
+            'location_details' => 'Kabacan Convention Center, National Highway, Kabacan',
+        ]);
         EventEvaluationForm::createForEvent($event, $organizer, EvaluationQuestions::defaultSchema(), 'Evaluation');
         Storage::delete($event->venue_confirmation_document_path);
 
@@ -356,7 +361,51 @@ class VenueConfirmationTest extends TestCase
     /** @return array<string, mixed> */
     private function proposalData(Organization $organization, ?Venue $venue = null): array
     {
-        return ['organization_id' => $organization->id, 'parent_event_id' => null, 'title' => 'Venue Confirmation Event', 'proposal_category' => 'activity', 'start_date' => today()->addMonth()->toDateString(), 'end_date' => today()->addMonth()->toDateString(), 'location_type' => 'on-campus', 'location_details' => null, 'venue_id' => $venue?->id, 'venue_confirmation_office' => $venue?->managing_office, 'venue_confirmation_date' => $venue ? today()->toDateString() : null, 'venue_confirmation_reference_number' => $venue ? 'VC-100' : null, 'target_demographics' => [], 'budget_allocations' => [], 'resolution_number' => null, 'hardcopy_submitted' => false, 'head_organization_signed' => false, 'adviser_signed' => false, 'event_days' => [['date' => today()->addMonth()->toDateString(), 'start_time' => '08:00', 'end_time' => '12:00']], 'evaluation_questions' => EvaluationQuestions::defaultSchema()];
+        return [
+            'organization_id' => $organization->id,
+            'parent_event_id' => null,
+            'title' => 'Venue Confirmation Event',
+            'proposal_category' => 'activity',
+            'canonical_packet' => [
+                'activity_role' => CanonicalPpaPacket::ROLE_ORGANIZER,
+                'proponent_name' => 'Venue Secretary',
+                'proponent_position' => 'Secretary',
+                'proponent_organization' => $organization->name,
+                'proponent_email' => 'venue.secretary@usm.edu.ph',
+                'proponent_contact_number' => '09170000000',
+                'rationale' => 'Venue confirmation coverage requires a complete packet.',
+                'general_objective' => 'Validate venue confirmation before submission.',
+                'specific_objectives' => ['Prepare the venue request', 'Submit the packet'],
+                'methodology' => 'Coordinate with the venue office and submit the packet.',
+                'expected_output' => 'A complete event packet with venue details.',
+            ],
+            'start_date' => today()->addMonth()->toDateString(),
+            'end_date' => today()->addMonth()->toDateString(),
+            'location_type' => 'on-campus',
+            'location_details' => null,
+            'venue_id' => $venue?->id,
+            'venue_confirmation_office' => $venue?->managing_office,
+            'venue_confirmation_date' => $venue ? today()->toDateString() : null,
+            'venue_confirmation_reference_number' => $venue ? 'VC-100' : null,
+            'target_demographics' => [
+                'implementing_office' => $organization->name,
+                'target_participants' => 'Venue confirmation participants',
+            ],
+            'budget_allocations' => [
+                'source_of_fund' => 'Organization fund',
+                'budget_cost' => 1500,
+            ],
+            'resolution_number' => null,
+            'hardcopy_submitted' => false,
+            'head_organization_signed' => false,
+            'adviser_signed' => false,
+            'event_days' => [[
+                'date' => today()->addMonth()->toDateString(),
+                'start_time' => '08:00',
+                'end_time' => '12:00',
+            ]],
+            'evaluation_questions' => EvaluationQuestions::defaultSchema(),
+        ];
     }
 
     /** @param array<string, mixed> $overrides */
@@ -366,6 +415,41 @@ class VenueConfirmationTest extends TestCase
         Storage::put('venue-confirmations/confirmation.pdf', 'evidence');
         $event = Event::create(array_merge(['organization_id' => $organization->id, 'title' => 'Approved Venue Event', 'proposal_category' => 'activity', 'status' => Event::STATUS_SUBMITTED, 'lifecycle_phase' => 'scheduled', 'event_domain' => 'student_affairs', 'start_date' => today()->addMonth(), 'end_date' => today()->addMonth(), 'location_type' => 'on-campus', 'venue_id' => $venue->id, 'location_details' => $venue->displayName(), 'venue_confirmation_office' => $venue->managing_office, 'venue_confirmation_date' => today(), 'venue_confirmation_reference_number' => 'VC-100', 'venue_confirmation_document_path' => 'venue-confirmations/confirmation.pdf', 'venue_confirmation_document_original_name' => 'confirmation.pdf', 'proposal_document_path' => 'proposal-documents/proposal.pdf', 'proposal_document_original_name' => 'proposal.pdf', 'hardcopy_submitted' => true, 'hardcopy_submitted_at' => now()], $overrides));
         EventDay::create(['event_id' => $event->id, 'day_number' => 1, 'date' => today()->addMonth(), 'start_time' => '08:00', 'end_time' => '12:00']);
+        CanonicalPpaPacket::factory()->for($event)->create([
+            'proposal_category' => 'activity',
+            'title' => $event->title,
+            'proponent_name' => 'Venue Secretary',
+            'proponent_position' => 'Secretary',
+            'proponent_organization' => $organization->name,
+            'proponent_email' => 'venue.secretary@usm.edu.ph',
+            'proponent_contact_number' => '09170000000',
+            'implementing_office' => $organization->name,
+            'source_of_fund' => 'Organization fund',
+            'budget_cost' => 1500,
+            'start_date' => $event->start_date,
+            'end_date' => $event->end_date,
+            'location_type' => $event->location_type,
+            'venue_id' => $event->venue_id,
+            'location_details' => $event->location_details,
+            'venue_confirmation_office' => $event->venue_confirmation_office,
+            'venue_confirmation_date' => $event->venue_confirmation_date,
+            'venue_confirmation_reference_number' => $event->venue_confirmation_reference_number,
+            'venue_confirmation_document_path' => $event->venue_confirmation_document_path,
+            'venue_confirmation_document_original_name' => $event->venue_confirmation_document_original_name,
+            'rationale' => 'Venue approval requires a complete packet.',
+            'general_objective' => 'Approve the venue-confirmed packet.',
+            'specific_objectives' => ['Prepare the venue request', 'Submit the packet'],
+            'methodology' => 'Coordinate with the venue office and submit the packet.',
+            'program_activities' => [[
+                'date' => today()->addMonth()->toDateString(),
+                'time' => '08:00 - 12:00',
+                'activity' => $event->title,
+                'person_in_charge' => 'Venue Secretary',
+            ]],
+            'expected_output' => 'A complete approved packet.',
+            'beneficiaries' => 'Venue confirmation participants',
+            'budget_breakdown' => [['item' => 'Overall total', 'amount' => '1500.00']],
+        ]);
 
         return $event;
     }

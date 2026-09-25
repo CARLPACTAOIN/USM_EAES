@@ -284,14 +284,6 @@
                             <div class="event-actions-cell">
                                 <div class="event-primary-cta">
                                     @if(!$isParticipatingWorkspace && $user->can('create-proposals') && in_array($event->status, ['draft', 'revision_requested'], true))
-                                        @if(!$event->hardcopy_submitted)
-                                            <button type="button"
-                                                    class="btn btn-sm btn-secondary"
-                                                    title="Record hardcopy submission"
-                                                    wire:click="openModal('workflow', '{{ $event->id }}')">
-                                                Hardcopy
-                                            </button>
-                                        @endif
                                         <button type="button"
                                                 class="btn btn-sm btn-primary"
                                                 title="Submit for review"

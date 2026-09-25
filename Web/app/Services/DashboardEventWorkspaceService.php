@@ -147,6 +147,7 @@ class DashboardEventWorkspaceService
     {
         return Event::with([
             'organization',
+            'canonicalPpaPacket',
             'venue',
             'permitVersions.approver',
             'eventDays',

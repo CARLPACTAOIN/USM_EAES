@@ -43,6 +43,8 @@ class CanonicalPpaPacket extends Model
         'venue_confirmation_office',
         'venue_confirmation_date',
         'venue_confirmation_reference_number',
+        'venue_confirmation_document_path',
+        'venue_confirmation_document_original_name',
         'rationale',
         'general_objective',
         'specific_objectives',

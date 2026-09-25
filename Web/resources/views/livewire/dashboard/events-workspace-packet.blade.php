@@ -52,12 +52,16 @@
             @if($event->proposal_document_path)
                 <a href="{{ route('dashboard.events.proposal-document', $event->id) }}" class="ppa-status-item ppa-status-item--ok hover:underline">
                     <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-                    Softcopy
+                    Legacy file
                 </a>
             @else
-                <span class="ppa-status-item ppa-status-item--error">
-                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-                    Softcopy
+                <span class="ppa-status-item {{ $event->canonicalPpaPacket ? 'ppa-status-item--ok' : 'ppa-status-item--warn' }}">
+                    @if($event->canonicalPpaPacket)
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                    @else
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01"/></svg>
+                    @endif
+                    Packet
                 </span>
             @endif
             <span class="ppa-status-item {{ $event->hardcopy_submitted ? 'ppa-status-item--ok' : 'ppa-status-item--warn' }}">
