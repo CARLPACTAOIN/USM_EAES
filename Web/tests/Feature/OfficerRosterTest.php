@@ -3,8 +3,10 @@
 namespace Tests\Feature;
 
 use App\Models\AdminAssignment;
+use App\Models\AuditLog;
 use App\Models\College;
 use App\Models\Department;
+use App\Models\OfficerChangeRequest;
 use App\Models\Organization;
 use App\Models\OrganizationMembership;
 use App\Models\OrganizationOfficer;
@@ -13,6 +15,7 @@ use App\Models\Program;
 use App\Models\SchoolYear;
 use App\Models\University;
 use App\Models\User;
+use App\Services\OfficerRosterService;
 use Database\Seeders\RolePermissionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -660,5 +663,643 @@ class OfficerRosterTest extends TestCase
         $adviser->assignRole('Faculty');
 
         return [$org, $schoolYear, $president, $secretary, $incomingPres, $incomingSec, $adviser];
+    }
+
+    protected function setupSubmittedRoster(): array
+    {
+        [$org, $schoolYear, $president, $secretary, $incomingPres, $incomingSec, $adviser] = $this->setupOrganizationWithOfficers();
+
+        $roster = OrganizationOfficerRoster::create([
+            'organization_id' => $org->id,
+            'school_year_id' => $schoolYear->id,
+            'status' => OrganizationOfficerRoster::STATUS_SUBMITTED,
+            'attestation_text' => 'Official roster for SY 2024-2025 submitted by outgoing president.',
+            'submitted_by' => $president->id,
+            'submitted_at' => now(),
+            'created_by' => $president->id,
+        ]);
+
+        $presOfficer = $roster->officers()->create([
+            'user_id' => $incomingPres->id,
+            'position_key' => OrganizationOfficer::POSITION_PRESIDENT,
+            'position_title' => 'President',
+            'status' => OrganizationOfficer::STATUS_ACTIVE,
+            'effective_start' => now()->toDateString(),
+        ]);
+
+        $secOfficer = $roster->officers()->create([
+            'user_id' => $incomingSec->id,
+            'position_key' => OrganizationOfficer::POSITION_SECRETARY,
+            'position_title' => 'Secretary',
+            'status' => OrganizationOfficer::STATUS_ACTIVE,
+            'effective_start' => now()->toDateString(),
+        ]);
+
+        $advOfficer = $roster->officers()->create([
+            'user_id' => $adviser->id,
+            'position_key' => OrganizationOfficer::POSITION_ADVISER,
+            'position_title' => 'Faculty Adviser',
+            'status' => OrganizationOfficer::STATUS_ACTIVE,
+            'effective_start' => now()->toDateString(),
+        ]);
+
+        return [$org, $schoolYear, $roster, $adviser, $incomingPres, $incomingSec, $president, $presOfficer, $secOfficer, $advOfficer];
+    }
+
+    public function test_adviser_can_verify_submitted_officer_roster_with_remarks(): void
+    {
+        [
+            $org,
+            $schoolYear,
+            $roster,
+            $adviser,
+            $incomingPres,
+            ,
+            ,
+        ] = $this->setupSubmittedRoster();
+
+        $this->actingAs($adviser)
+            ->postJson(route('dashboard.officer-rosters.verify', [
+                'organization' => $org->id,
+                'roster' => $roster->id,
+            ]), [
+                'remarks' => 'Verified after reviewing election minutes and credentials.',
+            ])
+            ->assertOk()
+            ->assertJsonPath('roster.status', OrganizationOfficerRoster::STATUS_VERIFIED)
+            ->assertJsonPath('roster.verified_by', $adviser->id)
+            ->assertJsonPath('roster.verification_remarks', 'Verified after reviewing election minutes and credentials.');
+
+        $roster->refresh();
+        $this->assertSame(OrganizationOfficerRoster::STATUS_VERIFIED, $roster->status);
+        $this->assertSame($adviser->id, $roster->verified_by);
+        $this->assertNotNull($roster->verified_at);
+
+        // Verification activates official governance: incoming president gets primary admin assignment projection
+        $assignment = AdminAssignment::where('organization_id', $org->id)
+            ->where('user_id', $incomingPres->id)
+            ->where('status', AdminAssignment::STATUS_ACTIVE)
+            ->first();
+
+        $this->assertNotNull($assignment);
+        $this->assertTrue($assignment->is_primary_admin);
+        $this->assertSame('Society Admin', $assignment->role_name);
+        $this->assertTrue($incomingPres->fresh()->hasRole('Society Admin'));
+
+        // Incoming president is now recognized as active verified officer
+        $this->assertTrue(app(OfficerRosterService::class)->isOutgoingPresidentOrSecretary($incomingPres, $org));
+
+        // AuditLog recorded
+        $this->assertDatabaseHas('audit_logs', [
+            'target_id' => $roster->id,
+            'admin_id' => $adviser->id,
+            'action' => 'verify-officer-roster',
+        ]);
+    }
+
+    public function test_adviser_can_request_changes_on_submitted_roster_with_remarks(): void
+    {
+        [
+            $org,
+            $schoolYear,
+            $roster,
+            $adviser,
+            $incomingPres,
+            ,
+            $president,
+        ] = $this->setupSubmittedRoster();
+
+        $this->actingAs($adviser)
+            ->postJson(route('dashboard.officer-rosters.request-changes', [
+                'organization' => $org->id,
+                'roster' => $roster->id,
+            ]), [
+                'remarks' => 'Please upload the signed certification letter from the student affairs coordinator.',
+            ])
+            ->assertOk()
+            ->assertJsonPath('roster.status', OrganizationOfficerRoster::STATUS_CHANGES_REQUESTED)
+            ->assertJsonPath('roster.rejection_remarks', 'Please upload the signed certification letter from the student affairs coordinator.');
+
+        $roster->refresh();
+        $this->assertSame(OrganizationOfficerRoster::STATUS_CHANGES_REQUESTED, $roster->status);
+        $this->assertTrue($roster->isEditable());
+
+        // Preparer can now update the draft and resubmit
+        $this->actingAs($president)
+            ->postJson(route('dashboard.officer-rosters.draft', [
+                'organization' => $org->id,
+                'schoolYear' => $schoolYear->id,
+            ]), [
+                'attestation_text' => 'Updated attestation with coordinator certification.',
+            ])
+            ->assertOk()
+            ->assertJsonPath('roster.attestation_text', 'Updated attestation with coordinator certification.');
+
+        // AuditLog recorded
+        $this->assertDatabaseHas('audit_logs', [
+            'target_id' => $roster->id,
+            'admin_id' => $adviser->id,
+            'action' => 'request-changes-officer-roster',
+        ]);
+    }
+
+    public function test_non_adviser_cannot_verify_or_request_changes_on_roster(): void
+    {
+        [
+            $org,
+            ,
+            $roster,
+            ,
+            $incomingPres,
+            ,
+            $president,
+        ] = $this->setupSubmittedRoster();
+
+        // Outgoing president (student) cannot verify
+        $this->actingAs($president)
+            ->postJson(route('dashboard.officer-rosters.verify', [
+                'organization' => $org->id,
+                'roster' => $roster->id,
+            ]), [
+                'remarks' => 'Self verification attempt.',
+            ])
+            ->assertForbidden();
+
+        // Incoming president (student) cannot request changes
+        $this->actingAs($incomingPres)
+            ->postJson(route('dashboard.officer-rosters.request-changes', [
+                'organization' => $org->id,
+                'roster' => $roster->id,
+            ]), [
+                'remarks' => 'Unauthorized request changes.',
+            ])
+            ->assertForbidden();
+
+        // Other faculty not affiliated cannot verify
+        $otherFaculty = User::factory()->create([
+            'email' => 'other.faculty@usm.edu.ph',
+            'user_type' => 'faculty_or_staff',
+        ]);
+        $otherFaculty->assignRole('Faculty');
+
+        $this->actingAs($otherFaculty)
+            ->postJson(route('dashboard.officer-rosters.verify', [
+                'organization' => $org->id,
+                'roster' => $roster->id,
+            ]))
+            ->assertForbidden();
+
+        $roster->refresh();
+        $this->assertSame(OrganizationOfficerRoster::STATUS_SUBMITTED, $roster->status);
+    }
+
+    public function test_unverified_roster_activation_is_rejected(): void
+    {
+        [$org, $schoolYear, $president, , $incomingPres] = $this->setupOrganizationWithOfficers();
+
+        // 1. Create a draft roster
+        $draftRoster = OrganizationOfficerRoster::create([
+            'organization_id' => $org->id,
+            'school_year_id' => $schoolYear->id,
+            'status' => OrganizationOfficerRoster::STATUS_DRAFT,
+            'created_by' => $president->id,
+        ]);
+
+        $draftRoster->officers()->create([
+            'user_id' => $incomingPres->id,
+            'position_key' => OrganizationOfficer::POSITION_PRESIDENT,
+            'status' => OrganizationOfficer::STATUS_ACTIVE,
+        ]);
+
+        $adviser = User::factory()->create([
+            'email' => 'adviser.unverified@usm.edu.ph',
+            'user_type' => 'faculty_or_staff',
+        ]);
+        $adviser->assignRole('Faculty');
+
+        $draftRoster->officers()->create([
+            'user_id' => $adviser->id,
+            'position_key' => OrganizationOfficer::POSITION_ADVISER,
+            'status' => OrganizationOfficer::STATUS_ACTIVE,
+        ]);
+
+        // Attempting to verify a draft roster directly is rejected
+        $this->actingAs($adviser)
+            ->postJson(route('dashboard.officer-rosters.verify', [
+                'organization' => $org->id,
+                'roster' => $draftRoster->id,
+            ]))
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['roster']);
+
+        // 2. Incoming president on unverified roster cannot act as verified officer
+        $this->assertFalse(app(OfficerRosterService::class)->isOutgoingPresidentOrSecretary($incomingPres, $org));
+
+        // 3. Attempting to create an officer change request without a verified roster is rejected
+        $this->actingAs($president)
+            ->postJson(route('dashboard.officer-change-requests.store', [
+                'organization' => $org->id,
+            ]), [
+                'old_officer_id' => $draftRoster->officers()->first()->id,
+                'request_type' => 'replacement',
+                'new_user_id' => $incomingPres->id,
+                'reason' => 'Change request on unverified roster.',
+            ])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['roster']);
+    }
+
+    public function test_verified_officer_can_submit_officer_change_request_for_replacement(): void
+    {
+        [
+            $org,
+            $schoolYear,
+            $roster,
+            $adviser,
+            $incomingPres,
+            ,
+            ,
+            $presOfficer,
+        ] = $this->setupSubmittedRoster();
+
+        // Adviser verifies roster first
+        $this->actingAs($adviser)
+            ->postJson(route('dashboard.officer-rosters.verify', [
+                'organization' => $org->id,
+                'roster' => $roster->id,
+            ]))
+            ->assertOk();
+
+        // Create replacement student member
+        $replacementStudent = User::factory()->create([
+            'email' => 's.replacement.pres@usm.edu.ph',
+            'user_type' => 'student',
+            'organization_id' => $org->id,
+        ]);
+        $replacementStudent->assignRole('Student');
+
+        OrganizationMembership::create([
+            'user_id' => $replacementStudent->id,
+            'organization_id' => $org->id,
+            'membership_type' => 'primary_academic',
+            'status' => OrganizationMembership::STATUS_ACTIVE,
+            'school_year_id' => $schoolYear->id,
+        ]);
+
+        $file = UploadedFile::fake()->create('endorsement.pdf', 100, 'application/pdf');
+
+        $this->actingAs($incomingPres)
+            ->post(route('dashboard.officer-change-requests.store', [
+                'organization' => $org->id,
+            ]), [
+                'old_officer_id' => $presOfficer->id,
+                'request_type' => 'replacement',
+                'new_user_id' => $replacementStudent->id,
+                'reason' => 'Officer transferring to another campus, special election completed.',
+                'evidence_file' => $file,
+            ])
+            ->assertOk()
+            ->assertJsonPath('request.status', OfficerChangeRequest::STATUS_PENDING)
+            ->assertJsonPath('request.request_type', 'replacement')
+            ->assertJsonPath('request.new_user_id', $replacementStudent->id);
+
+        $changeRequest = OfficerChangeRequest::where('organization_id', $org->id)->firstOrFail();
+        $this->assertSame(OfficerChangeRequest::STATUS_PENDING, $changeRequest->status);
+        $this->assertSame($presOfficer->id, $changeRequest->old_officer_id);
+        $this->assertSame($replacementStudent->id, $changeRequest->new_user_id);
+        $this->assertNotNull($changeRequest->evidence_file_path);
+        Storage::disk('local')->assertExists($changeRequest->evidence_file_path);
+
+        $this->assertDatabaseHas('audit_logs', [
+            'target_id' => $changeRequest->id,
+            'admin_id' => $incomingPres->id,
+            'action' => 'create-officer-change-request',
+        ]);
+    }
+
+    public function test_officer_change_request_rejects_non_member_student_replacement(): void
+    {
+        [
+            $org,
+            ,
+            $roster,
+            $adviser,
+            $incomingPres,
+            ,
+            ,
+            $presOfficer,
+        ] = $this->setupSubmittedRoster();
+
+        $this->actingAs($adviser)
+            ->postJson(route('dashboard.officer-rosters.verify', [
+                'organization' => $org->id,
+                'roster' => $roster->id,
+            ]))
+            ->assertOk();
+
+        // Student from another org (not a member of $org)
+        $nonMember = User::factory()->create([
+            'email' => 's.outsider@usm.edu.ph',
+            'user_type' => 'student',
+        ]);
+        $nonMember->assignRole('Student');
+
+        $this->actingAs($incomingPres)
+            ->postJson(route('dashboard.officer-change-requests.store', [
+                'organization' => $org->id,
+            ]), [
+                'old_officer_id' => $presOfficer->id,
+                'request_type' => 'replacement',
+                'new_user_id' => $nonMember->id,
+                'reason' => 'Attempting to appoint external non-member.',
+            ])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['new_user_id']);
+    }
+
+    public function test_adviser_can_approve_replacement_change_request_preserving_history(): void
+    {
+        [
+            $org,
+            $schoolYear,
+            $roster,
+            $adviser,
+            $incomingPres,
+            ,
+            ,
+            $presOfficer,
+        ] = $this->setupSubmittedRoster();
+
+        $this->actingAs($adviser)
+            ->postJson(route('dashboard.officer-rosters.verify', [
+                'organization' => $org->id,
+                'roster' => $roster->id,
+            ]))
+            ->assertOk();
+
+        $replacementStudent = User::factory()->create([
+            'email' => 's.approved.replacement@usm.edu.ph',
+            'user_type' => 'student',
+            'organization_id' => $org->id,
+        ]);
+        $replacementStudent->assignRole('Student');
+
+        OrganizationMembership::create([
+            'user_id' => $replacementStudent->id,
+            'organization_id' => $org->id,
+            'membership_type' => 'primary_academic',
+            'status' => OrganizationMembership::STATUS_ACTIVE,
+            'school_year_id' => $schoolYear->id,
+        ]);
+
+        $changeRequest = OfficerChangeRequest::create([
+            'organization_id' => $org->id,
+            'officer_roster_id' => $roster->id,
+            'old_officer_id' => $presOfficer->id,
+            'new_user_id' => $replacementStudent->id,
+            'request_type' => OfficerChangeRequest::TYPE_REPLACEMENT,
+            'position_key' => OrganizationOfficer::POSITION_PRESIDENT,
+            'position_title' => 'President',
+            'status' => OfficerChangeRequest::STATUS_PENDING,
+            'reason' => 'Officer resignation and succession election.',
+            'requested_by' => $incomingPres->id,
+            'requested_at' => now(),
+        ]);
+
+        $this->actingAs($adviser)
+            ->postJson(route('dashboard.officer-change-requests.approve', [
+                'organization' => $org->id,
+                'changeRequest' => $changeRequest->id,
+            ]), [
+                'remarks' => 'Replacement approved by adviser.',
+            ])
+            ->assertOk()
+            ->assertJsonPath('request.status', OfficerChangeRequest::STATUS_APPROVED)
+            ->assertJsonPath('request.decision_remarks', 'Replacement approved by adviser.');
+
+        $changeRequest->refresh();
+        $this->assertSame(OfficerChangeRequest::STATUS_APPROVED, $changeRequest->status);
+        $this->assertSame($adviser->id, $changeRequest->decided_by);
+
+        // Historical preservation check:
+        // 1. Old officer record MUST STILL EXIST in the database (not deleted)
+        $presOfficer->refresh();
+        $this->assertSame(OrganizationOfficer::STATUS_REPLACED, $presOfficer->status);
+        $this->assertNotNull($presOfficer->effective_end);
+        $this->assertNotNull($presOfficer->replacement_officer_id);
+
+        // 2. New officer record created
+        $newOfficer = OrganizationOfficer::find($changeRequest->created_officer_id);
+        $this->assertNotNull($newOfficer);
+        $this->assertSame($replacementStudent->id, $newOfficer->user_id);
+        $this->assertSame(OrganizationOfficer::STATUS_ACTIVE, $newOfficer->status);
+        $this->assertSame($presOfficer->replacement_officer_id, $newOfficer->id);
+
+        // 3. New president receives primary admin assignment projection
+        $assignment = AdminAssignment::where('organization_id', $org->id)
+            ->where('user_id', $replacementStudent->id)
+            ->where('status', AdminAssignment::STATUS_ACTIVE)
+            ->first();
+
+        $this->assertNotNull($assignment);
+        $this->assertTrue($assignment->is_primary_admin);
+
+        // 4. AuditLog recorded
+        $this->assertDatabaseHas('audit_logs', [
+            'target_id' => $changeRequest->id,
+            'admin_id' => $adviser->id,
+            'action' => 'approve-officer-change-request',
+        ]);
+    }
+
+    public function test_adviser_can_approve_resignation_and_revocation_preserving_history(): void
+    {
+        [
+            $org,
+            ,
+            $roster,
+            $adviser,
+            ,
+            $incomingSec,
+            ,
+            ,
+            $secOfficer,
+        ] = $this->setupSubmittedRoster();
+
+        $this->actingAs($adviser)
+            ->postJson(route('dashboard.officer-rosters.verify', [
+                'organization' => $org->id,
+                'roster' => $roster->id,
+            ]))
+            ->assertOk();
+
+        // 1. Resignation without immediate replacement -> prior officer marked expired
+        $resignationRequest = OfficerChangeRequest::create([
+            'organization_id' => $org->id,
+            'officer_roster_id' => $roster->id,
+            'old_officer_id' => $secOfficer->id,
+            'new_user_id' => null,
+            'request_type' => OfficerChangeRequest::TYPE_RESIGNATION,
+            'position_key' => OrganizationOfficer::POSITION_SECRETARY,
+            'position_title' => 'Secretary',
+            'status' => OfficerChangeRequest::STATUS_PENDING,
+            'reason' => 'Voluntary resignation due to personal circumstances.',
+            'requested_by' => $incomingSec->id,
+            'requested_at' => now(),
+        ]);
+
+        $this->actingAs($adviser)
+            ->postJson(route('dashboard.officer-change-requests.approve', [
+                'organization' => $org->id,
+                'changeRequest' => $resignationRequest->id,
+            ]), [
+                'remarks' => 'Resignation accepted.',
+            ])
+            ->assertOk();
+
+        $secOfficer->refresh();
+        $this->assertSame(OrganizationOfficer::STATUS_EXPIRED, $secOfficer->status);
+        $this->assertNotNull($secOfficer->effective_end);
+
+        // 2. Revocation -> prior officer marked revoked
+        $revocationRequest = OfficerChangeRequest::create([
+            'organization_id' => $org->id,
+            'officer_roster_id' => $roster->id,
+            'old_officer_id' => $secOfficer->id,
+            'new_user_id' => null,
+            'request_type' => OfficerChangeRequest::TYPE_REVOCATION,
+            'position_key' => OrganizationOfficer::POSITION_SECRETARY,
+            'position_title' => 'Secretary',
+            'status' => OfficerChangeRequest::STATUS_PENDING,
+            'reason' => 'Revocation of privileges.',
+            'requested_by' => $adviser->id,
+            'requested_at' => now(),
+        ]);
+
+        // Reactivate temporarily to test revocation
+        $secOfficer->update(['status' => OrganizationOfficer::STATUS_ACTIVE]);
+
+        $this->actingAs($adviser)
+            ->postJson(route('dashboard.officer-change-requests.approve', [
+                'organization' => $org->id,
+                'changeRequest' => $revocationRequest->id,
+            ]), [
+                'remarks' => 'Revocation confirmed.',
+            ])
+            ->assertOk();
+
+        $secOfficer->refresh();
+        $this->assertSame(OrganizationOfficer::STATUS_REVOKED, $secOfficer->status);
+        $this->assertNotNull($secOfficer->effective_end);
+    }
+
+    public function test_adviser_can_reject_change_request_with_remarks(): void
+    {
+        [
+            $org,
+            ,
+            $roster,
+            $adviser,
+            $incomingPres,
+            ,
+            ,
+            $presOfficer,
+        ] = $this->setupSubmittedRoster();
+
+        $this->actingAs($adviser)
+            ->postJson(route('dashboard.officer-rosters.verify', [
+                'organization' => $org->id,
+                'roster' => $roster->id,
+            ]))
+            ->assertOk();
+
+        $changeRequest = OfficerChangeRequest::create([
+            'organization_id' => $org->id,
+            'officer_roster_id' => $roster->id,
+            'old_officer_id' => $presOfficer->id,
+            'request_type' => OfficerChangeRequest::TYPE_REVOCATION,
+            'position_key' => OrganizationOfficer::POSITION_PRESIDENT,
+            'position_title' => 'President',
+            'status' => OfficerChangeRequest::STATUS_PENDING,
+            'reason' => 'Disputed revocation request.',
+            'requested_by' => $incomingPres->id,
+            'requested_at' => now(),
+        ]);
+
+        $this->actingAs($adviser)
+            ->postJson(route('dashboard.officer-change-requests.reject', [
+                'organization' => $org->id,
+                'changeRequest' => $changeRequest->id,
+            ]), [
+                'remarks' => 'Disapproved: dispute unresolved and lacks due process.',
+            ])
+            ->assertOk()
+            ->assertJsonPath('request.status', OfficerChangeRequest::STATUS_REJECTED)
+            ->assertJsonPath('request.decision_remarks', 'Disapproved: dispute unresolved and lacks due process.');
+
+        $changeRequest->refresh();
+        $this->assertSame(OfficerChangeRequest::STATUS_REJECTED, $changeRequest->status);
+
+        // Old officer status remains unchanged (active)
+        $presOfficer->refresh();
+        $this->assertSame(OrganizationOfficer::STATUS_ACTIVE, $presOfficer->status);
+
+        // AuditLog recorded
+        $this->assertDatabaseHas('audit_logs', [
+            'target_id' => $changeRequest->id,
+            'admin_id' => $adviser->id,
+            'action' => 'reject-officer-change-request',
+        ]);
+    }
+
+    public function test_unauthorized_user_cannot_approve_or_reject_change_request(): void
+    {
+        [
+            $org,
+            ,
+            $roster,
+            $adviser,
+            $incomingPres,
+            ,
+            ,
+            $presOfficer,
+        ] = $this->setupSubmittedRoster();
+
+        $this->actingAs($adviser)
+            ->postJson(route('dashboard.officer-rosters.verify', [
+                'organization' => $org->id,
+                'roster' => $roster->id,
+            ]))
+            ->assertOk();
+
+        $changeRequest = OfficerChangeRequest::create([
+            'organization_id' => $org->id,
+            'officer_roster_id' => $roster->id,
+            'old_officer_id' => $presOfficer->id,
+            'request_type' => OfficerChangeRequest::TYPE_RESIGNATION,
+            'position_key' => OrganizationOfficer::POSITION_PRESIDENT,
+            'status' => OfficerChangeRequest::STATUS_PENDING,
+            'reason' => 'Pending resignation.',
+            'requested_by' => $incomingPres->id,
+            'requested_at' => now(),
+        ]);
+
+        // Student president cannot self-approve
+        $this->actingAs($incomingPres)
+            ->postJson(route('dashboard.officer-change-requests.approve', [
+                'organization' => $org->id,
+                'changeRequest' => $changeRequest->id,
+            ]))
+            ->assertForbidden();
+
+        // Student president cannot reject
+        $this->actingAs($incomingPres)
+            ->postJson(route('dashboard.officer-change-requests.reject', [
+                'organization' => $org->id,
+                'changeRequest' => $changeRequest->id,
+            ]), [
+                'remarks' => 'Rejecting.',
+            ])
+            ->assertForbidden();
     }
 }

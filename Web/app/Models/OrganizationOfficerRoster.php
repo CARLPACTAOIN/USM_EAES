@@ -71,6 +71,11 @@ class OrganizationOfficerRoster extends Model
         return $this->hasMany(OrganizationOfficer::class, 'officer_roster_id');
     }
 
+    public function changeRequests(): HasMany
+    {
+        return $this->hasMany(OfficerChangeRequest::class, 'officer_roster_id');
+    }
+
     public function submittedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'submitted_by');

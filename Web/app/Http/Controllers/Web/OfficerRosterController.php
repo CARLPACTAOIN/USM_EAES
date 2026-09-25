@@ -3,8 +3,14 @@
 namespace App\Http\Controllers\Web;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\ApproveOfficerChangeRequestRequest;
+use App\Http\Requests\CreateOfficerChangeRequestRequest;
+use App\Http\Requests\RejectOfficerChangeRequestRequest;
+use App\Http\Requests\RequestChangesOfficerRosterRequest;
 use App\Http\Requests\SaveOfficerRosterDraftRequest;
 use App\Http\Requests\SubmitOfficerRosterRequest;
+use App\Http\Requests\VerifyOfficerRosterRequest;
+use App\Models\OfficerChangeRequest;
 use App\Models\Organization;
 use App\Models\OrganizationMembership;
 use App\Models\OrganizationOfficer;
@@ -49,6 +55,8 @@ class OfficerRosterController extends Controller
                 'is_transition_open' => $schoolYear->isTransitionOpen(),
             ],
             'can_prepare' => $service->canPrepareRoster($request->user(), $organization),
+            'can_verify' => $roster ? $service->canVerifyRoster($request->user(), $roster) : false,
+            'can_request_change' => $service->canRequestOfficerChange($request->user(), $organization),
             'roster' => $roster ? $this->serializeRoster($roster) : null,
         ]);
     }
@@ -90,6 +98,109 @@ class OfficerRosterController extends Controller
         return response()->json([
             'message' => 'Officer roster submitted successfully.',
             'roster' => $this->serializeRoster($roster),
+        ]);
+    }
+
+    public function verify(
+        VerifyOfficerRosterRequest $request,
+        Organization $organization,
+        OrganizationOfficerRoster $roster,
+        OfficerRosterService $service
+    ): JsonResponse {
+        $verifiedRoster = $service->verifyRoster(
+            $roster,
+            $request->user(),
+            $request->input('remarks')
+        );
+
+        return response()->json([
+            'message' => 'Officer roster verified successfully.',
+            'roster' => $this->serializeRoster($verifiedRoster),
+        ]);
+    }
+
+    public function requestChanges(
+        RequestChangesOfficerRosterRequest $request,
+        Organization $organization,
+        OrganizationOfficerRoster $roster,
+        OfficerRosterService $service
+    ): JsonResponse {
+        $updatedRoster = $service->requestChanges(
+            $roster,
+            $request->user(),
+            $request->input('remarks')
+        );
+
+        return response()->json([
+            'message' => 'Changes requested on officer roster successfully.',
+            'roster' => $this->serializeRoster($updatedRoster),
+        ]);
+    }
+
+    public function listChangeRequests(Request $request, Organization $organization): JsonResponse
+    {
+        $changeRequests = OfficerChangeRequest::query()
+            ->where('organization_id', $organization->id)
+            ->with(['oldOfficer.user', 'newUser', 'createdOfficer.user', 'requestedBy', 'decidedBy'])
+            ->latest('requested_at')
+            ->get();
+
+        return response()->json([
+            'requests' => $changeRequests->map(fn (OfficerChangeRequest $cr): array => $this->serializeChangeRequest($cr)),
+        ]);
+    }
+
+    public function createChangeRequest(
+        CreateOfficerChangeRequestRequest $request,
+        Organization $organization,
+        OfficerRosterService $service
+    ): JsonResponse {
+        $changeRequest = $service->createChangeRequest(
+            $organization,
+            $request->validated(),
+            $request->user(),
+            $request->file('evidence_file')
+        );
+
+        return response()->json([
+            'message' => 'Officer change request submitted successfully.',
+            'request' => $this->serializeChangeRequest($changeRequest),
+        ]);
+    }
+
+    public function approveChangeRequest(
+        ApproveOfficerChangeRequestRequest $request,
+        Organization $organization,
+        OfficerChangeRequest $changeRequest,
+        OfficerRosterService $service
+    ): JsonResponse {
+        $approvedRequest = $service->approveChangeRequest(
+            $changeRequest,
+            $request->user(),
+            $request->input('remarks')
+        );
+
+        return response()->json([
+            'message' => 'Officer change request approved successfully.',
+            'request' => $this->serializeChangeRequest($approvedRequest),
+        ]);
+    }
+
+    public function rejectChangeRequest(
+        RejectOfficerChangeRequestRequest $request,
+        Organization $organization,
+        OfficerChangeRequest $changeRequest,
+        OfficerRosterService $service
+    ): JsonResponse {
+        $rejectedRequest = $service->rejectChangeRequest(
+            $changeRequest,
+            $request->user(),
+            $request->input('remarks')
+        );
+
+        return response()->json([
+            'message' => 'Officer change request rejected successfully.',
+            'request' => $this->serializeChangeRequest($rejectedRequest),
         ]);
     }
 
@@ -161,6 +272,45 @@ class OfficerRosterController extends Controller
                 'effective_start' => $officer->effective_start?->toDateString(),
                 'effective_end' => $officer->effective_end?->toDateString(),
             ]),
+        ];
+    }
+
+    private function serializeChangeRequest(OfficerChangeRequest $cr): array
+    {
+        return [
+            'id' => $cr->id,
+            'organization_id' => $cr->organization_id,
+            'officer_roster_id' => $cr->officer_roster_id,
+            'old_officer_id' => $cr->old_officer_id,
+            'old_officer' => $cr->oldOfficer ? [
+                'id' => $cr->oldOfficer->id,
+                'user_id' => $cr->oldOfficer->user_id,
+                'user_name' => $cr->oldOfficer->user?->name,
+                'position_key' => $cr->oldOfficer->position_key,
+                'position_title' => $cr->oldOfficer->position_title,
+                'status' => $cr->oldOfficer->status,
+            ] : null,
+            'new_user_id' => $cr->new_user_id,
+            'new_user' => $cr->newUser ? [
+                'id' => $cr->newUser->id,
+                'name' => $cr->newUser->name,
+                'email' => $cr->newUser->email,
+            ] : null,
+            'created_officer_id' => $cr->created_officer_id,
+            'request_type' => $cr->request_type,
+            'position_key' => $cr->position_key,
+            'position_title' => $cr->position_title,
+            'status' => $cr->status,
+            'reason' => $cr->reason,
+            'evidence_file_path' => $cr->evidence_file_path,
+            'evidence_file_name' => $cr->evidence_file_name,
+            'requested_by' => $cr->requested_by,
+            'requested_by_name' => $cr->requestedBy?->name,
+            'requested_at' => $cr->requested_at?->toIso8601String(),
+            'decided_by' => $cr->decided_by,
+            'decided_by_name' => $cr->decidedBy?->name,
+            'decided_at' => $cr->decided_at?->toIso8601String(),
+            'decision_remarks' => $cr->decision_remarks,
         ];
     }
 }

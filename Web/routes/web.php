@@ -75,6 +75,8 @@ Route::middleware(['auth'])->group(function () {
             Route::post('/events/{event}/revision', [DashboardController::class, 'requestEventRevision'])->name('dashboard.events.revision');
             Route::post('/events/{event}/reject', [DashboardController::class, 'rejectEvent'])->name('dashboard.events.reject');
             Route::post('/events/{event}/venue-amendment', [DashboardController::class, 'startVenueAmendment'])->name('dashboard.events.venue-amendment');
+            Route::get('/events/{event}/proposal-preview', [DashboardController::class, 'proposalPreview'])->name('dashboard.events.proposal-preview');
+            Route::get('/events/{event}/permit-preview', [DashboardController::class, 'permitPreview'])->name('dashboard.events.permit-preview');
             Route::post('/events/{event}/link', [DashboardController::class, 'linkEvent'])->name('dashboard.events.link');
             Route::post('/events/{event}/hardcopy', [DashboardController::class, 'markHardcopy'])->name('dashboard.events.hardcopy');
             Route::post('/events/{event}/attendance-policy', [DashboardController::class, 'updateEventAttendancePolicy'])->name('dashboard.events.attendance-policy');
@@ -137,6 +139,12 @@ Route::middleware(['auth'])->group(function () {
             Route::get('/organizations/{organization}/officer-roster/eligible-advisers', [OfficerRosterController::class, 'eligibleAdvisers'])->name('dashboard.officer-rosters.eligible-advisers');
             Route::post('/organizations/{organization}/officer-rosters/{schoolYear}/draft', [OfficerRosterController::class, 'saveDraft'])->name('dashboard.officer-rosters.draft');
             Route::post('/organizations/{organization}/officer-rosters/{schoolYear}/submit', [OfficerRosterController::class, 'submit'])->name('dashboard.officer-rosters.submit');
+            Route::post('/organizations/{organization}/officer-rosters/{roster}/verify', [OfficerRosterController::class, 'verify'])->name('dashboard.officer-rosters.verify');
+            Route::post('/organizations/{organization}/officer-rosters/{roster}/request-changes', [OfficerRosterController::class, 'requestChanges'])->name('dashboard.officer-rosters.request-changes');
+            Route::get('/organizations/{organization}/officer-change-requests', [OfficerRosterController::class, 'listChangeRequests'])->name('dashboard.officer-change-requests.index');
+            Route::post('/organizations/{organization}/officer-change-requests', [OfficerRosterController::class, 'createChangeRequest'])->name('dashboard.officer-change-requests.store');
+            Route::post('/organizations/{organization}/officer-change-requests/{changeRequest}/approve', [OfficerRosterController::class, 'approveChangeRequest'])->name('dashboard.officer-change-requests.approve');
+            Route::post('/organizations/{organization}/officer-change-requests/{changeRequest}/reject', [OfficerRosterController::class, 'rejectChangeRequest'])->name('dashboard.officer-change-requests.reject');
         });
 });
 

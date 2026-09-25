@@ -77,4 +77,9 @@ class Organization extends Model
     {
         return $this->hasMany(OrganizationOfficerRoster::class);
     }
+
+    public function officerChangeRequests()
+    {
+        return $this->hasMany(OfficerChangeRequest::class);
+    }
 }
