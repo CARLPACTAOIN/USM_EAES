@@ -18,6 +18,8 @@ use Illuminate\Validation\ValidationException;
 
 class OfficerRosterService
 {
+    public function __construct(private readonly OfficerAuthorityProjectionService $authorityProjections) {}
+
     /**
      * Determine if a user is authorized to prepare/draft/submit an officer roster.
      */
@@ -561,58 +563,7 @@ class OfficerRosterService
      */
     public function projectOfficerAuthority(OrganizationOfficerRoster $roster, User $adviser): void
     {
-        $president = $roster->officers()
-            ->where('position_key', OrganizationOfficer::POSITION_PRESIDENT)
-            ->where('status', OrganizationOfficer::STATUS_ACTIVE)
-            ->latest()
-            ->first();
-
-        if (! $president) {
-            return;
-        }
-
-        $presidentUser = User::find($president->user_id);
-        if (! $presidentUser) {
-            return;
-        }
-
-        $org = $roster->organization;
-        $roleName = match ($org->type) {
-            'usg' => 'USG Admin',
-            'lsg' => 'LSG Admin',
-            'academic_unit' => 'Academic Unit Admin',
-            'administrative_office' => 'Office Event Admin',
-            'hr_unit' => 'HR Admin',
-            default => 'Society Admin',
-        };
-
-        $schoolYearLabel = $roster->schoolYear?->label ?? (now()->year.'-'.(now()->year + 1));
-
-        // Expire previous active primary assignments for this organization
-        AdminAssignment::query()
-            ->where('organization_id', $org->id)
-            ->where('status', AdminAssignment::STATUS_ACTIVE)
-            ->where('is_primary_admin', true)
-            ->update([
-                'status' => AdminAssignment::STATUS_EXPIRED,
-            ]);
-
-        AdminAssignment::create([
-            'user_id' => $presidentUser->id,
-            'role_name' => $roleName,
-            'organization_id' => $org->id,
-            'college_id' => $org->college_id,
-            'academic_year' => $schoolYearLabel,
-            'term_start' => now()->toDateString(),
-            'term_end' => now()->addYear()->toDateString(),
-            'position_title' => $president->position_title ?: 'President',
-            'status' => AdminAssignment::STATUS_ACTIVE,
-            'is_primary_admin' => true,
-            'approved_by' => $adviser->id,
-            'approved_at' => now(),
-        ]);
-
-        app(AdminAssignmentService::class)->syncUserProjection($presidentUser);
+        $this->authorityProjections->synchronize($roster, $adviser);
     }
 
     /**
@@ -872,7 +823,10 @@ class OfficerRosterService
 
             $oldOfficer->save();
 
-            if ($changeRequest->new_user_id && $changeRequest->position_key === OrganizationOfficer::POSITION_PRESIDENT) {
+            if (in_array($changeRequest->position_key, [
+                OrganizationOfficer::POSITION_PRESIDENT,
+                OrganizationOfficer::POSITION_SECRETARY,
+            ], true)) {
                 $this->projectOfficerAuthority($changeRequest->roster, $adviser);
             }
 

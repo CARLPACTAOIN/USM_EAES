@@ -147,6 +147,22 @@
             </div>
         </div>
 
+        @if(($authorityContexts ?? collect())->count() > 1)
+            <form method="POST" action="{{ route('authority-context.store') }}" class="space-y-2 border-b border-white/10 p-3">
+                @csrf
+                <label for="sidebar-authority-context" class="block px-1 text-xs font-semibold uppercase tracking-wider text-(--color-sidebar-text)">Active authority</label>
+                <select id="sidebar-authority-context" name="assignment_id" class="w-full rounded-md border border-white/15 bg-white/10 px-3 py-2 text-xs text-white focus:border-white/40 focus:outline-none focus:ring-2 focus:ring-white/20" required>
+                    <option value="" class="text-slate-900">Select organization</option>
+                    @foreach($authorityContexts as $assignment)
+                        <option value="{{ $assignment->id }}" class="text-slate-900" @selected($currentAdminScope?->assignment?->id === $assignment->id)>
+                            {{ $assignment->organization?->acronym ?? $assignment->organization?->name ?? $assignment->role_name }} · {{ $assignment->position_title ?? $assignment->role_name }}
+                        </option>
+                    @endforeach
+                </select>
+                <button type="submit" class="w-full rounded-md bg-white/10 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-white/15 focus:outline-none focus:ring-2 focus:ring-white/30">Use this context</button>
+            </form>
+        @endif
+
         <nav class="p-3 space-y-1">
             @if($isAdmin)
                 {{-- Admin Navigation --}}

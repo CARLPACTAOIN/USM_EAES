@@ -2,35 +2,33 @@
 
 namespace App\Http\Middleware;
 
-use Closure;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
 use App\Models\Event;
 use App\Models\Organization;
 use App\Services\AdminScopeService;
 use App\Support\ScannerAccess;
+use Closure;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+use Symfony\Component\HttpFoundation\Response;
 
 class TenantScopeMiddleware
 {
+    public function __construct(private readonly AdminScopeService $adminScopes) {}
+
     /**
      * Handle an incoming request.
-     *
-     * @param  \Illuminate\Http\Request  $request
-     * @param  \Closure  $next
-     * @param  string  $permission
-     * @return mixed
      */
-    public function handle(Request $request, Closure $next, string $permission)
+    public function handle(Request $request, Closure $next, string $permission): Response
     {
         $user = Auth::user();
 
-        if (!$user) {
+        if (! $user) {
             abort(401, 'Unauthenticated.');
         }
 
         // 1. Spatie Permission Check
         $hasPermission = ScannerAccess::grantsPermission($user, $permission, $user->currentAccessToken());
-        if (!$hasPermission) {
+        if (! $hasPermission) {
             abort(403, 'Unauthorized action.');
         }
 
@@ -68,7 +66,7 @@ class TenantScopeMiddleware
         // Enforce boundaries based on roles if a target organization is specified
         if ($targetOrganizationId) {
             $targetOrg = Organization::find($targetOrganizationId);
-            if (!$targetOrg) {
+            if (! $targetOrg) {
                 abort(404, 'Target organization not found.');
             }
 
@@ -84,8 +82,12 @@ class TenantScopeMiddleware
                 return $next($request);
             }
 
-            $scope = app(AdminScopeService::class)->forUser($user);
-            if (!$scope || !$scope->canAccessOrganization($targetOrg)) {
+            $scope = $this->adminScopes->forUser($user);
+            if (! $scope || ! $scope->canAccessOrganization($targetOrg)) {
+                if ($this->adminScopes->requiresAuthorityContext($user)) {
+                    abort(403, 'Select an active authority context before accessing organization data.');
+                }
+
                 abort(403, 'Access denied. Restricted to your assigned admin boundary.');
             }
         }

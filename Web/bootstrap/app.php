@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\EnsureAuthorityContext;
 use App\Http\Middleware\SecurityHeaders;
 use App\Http\Middleware\TenantScopeMiddleware;
 use Illuminate\Foundation\Application;
@@ -26,6 +27,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->append(SecurityHeaders::class);
 
         $middleware->alias([
+            'authority.context' => EnsureAuthorityContext::class,
             'tenant.scope' => TenantScopeMiddleware::class,
             'role' => RoleMiddleware::class,
             'permission' => PermissionMiddleware::class,

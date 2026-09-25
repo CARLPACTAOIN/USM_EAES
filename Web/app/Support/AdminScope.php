@@ -14,10 +14,11 @@ class AdminScope
         public readonly string $roleName,
         public readonly ?string $organizationId,
         public readonly ?string $collegeId,
+        public readonly ?string $departmentId,
+        public readonly ?string $schoolYearId,
         public readonly ?Organization $organization,
         public readonly ?College $college,
-    ) {
-    }
+    ) {}
 
     public function isSuperAdmin(): bool
     {
@@ -61,12 +62,16 @@ class AdminScope
 
     public function canAccessOrganization(?Organization $organization): bool
     {
-        if (!$organization) {
+        if (! $organization) {
             return false;
         }
 
         if ($this->isSuperAdmin()) {
             return true;
+        }
+
+        if (filled($this->schoolYearId) && filled($this->organizationId)) {
+            return $organization->id === $this->organizationId;
         }
 
         if ($this->isUsgAdmin()) {

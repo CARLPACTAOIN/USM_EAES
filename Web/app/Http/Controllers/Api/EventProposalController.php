@@ -46,23 +46,10 @@ class EventProposalController extends Controller
         if ($scope->isSuperAdmin()) {
             // OSA reviews submitted proposals and history; drafts stay organizer-private.
             $query->where('status', '!=', 'draft');
-        } elseif ($scope->isUsgAdmin()) {
-            // USG Admin sees USG events or their specific organization events
-            $query->whereHas('organization', function ($q) use ($scope) {
-                $q->where('type', 'usg')->orWhere('id', $scope->organizationId);
-            });
-        } elseif ($scope->isLsgAdmin()) {
-            // LSG Admin sees events within their college boundary
-            if ($scope->collegeId) {
-                $query->whereHas('organization', function ($q) use ($scope) {
-                    $q->where('college_id', $scope->collegeId);
-                });
-            } else {
-                return response()->json(['success' => false, 'message' => 'Admin assignment college scope not found.'], 400);
-            }
-        } else {
-            // Society admins see only their assignment organization events.
+        } elseif ($scope->organizationId) {
             $query->where('organization_id', $scope->organizationId);
+        } else {
+            return response()->json(['success' => false, 'message' => 'Admin assignment organization scope not found.'], 400);
         }
 
         $events = $query->latest()->get();

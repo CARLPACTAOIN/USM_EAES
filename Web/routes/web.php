@@ -6,6 +6,7 @@ use App\Http\Controllers\Web\AdminAccessController;
 use App\Http\Controllers\Web\AiInsightsController;
 use App\Http\Controllers\Web\AnalyticsOverviewController;
 use App\Http\Controllers\Web\AuthController;
+use App\Http\Controllers\Web\AuthorityContextController;
 use App\Http\Controllers\Web\DashboardController;
 use App\Http\Controllers\Web\DepartmentController;
 use App\Http\Controllers\Web\EventAnalyticsController;
@@ -40,6 +41,8 @@ Route::get('/auth/google/callback', [GoogleAuthController::class, 'handleGoogleC
 Route::middleware(['auth'])->group(function () {
 
     Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
+    Route::get('/authority-context', [AuthorityContextController::class, 'index'])->name('authority-context.index');
+    Route::post('/authority-context', [AuthorityContextController::class, 'store'])->name('authority-context.store')->block();
 
     // ─── Student Portal ─────────────────────────────────────
     Route::middleware(['role:Student'])->prefix('portal')->group(function () {
@@ -52,7 +55,7 @@ Route::middleware(['auth'])->group(function () {
     });
 
     // ─── Admin Dashboard ────────────────────────────────────
-    Route::middleware(['role:Super Admin (OSA)|USG Admin|LSG Admin|Society Admin|Academic Unit Admin|Office Event Admin|HR Admin|Faculty'])
+    Route::middleware(['role:Super Admin (OSA)|USG Admin|LSG Admin|Society Admin|Academic Unit Admin|Office Event Admin|HR Admin|Faculty', 'authority.context'])
         ->prefix('dashboard')
         ->group(function () {
             Route::get('/', [DashboardController::class, 'index'])->name('dashboard');

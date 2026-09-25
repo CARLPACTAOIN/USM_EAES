@@ -100,6 +100,7 @@ class AppServiceProvider extends ServiceProvider
                 'needs_action_count' => 0,
             ];
             $currentAdminScope = null;
+            $authorityContexts = collect();
 
             if (auth()->check()
                 && Schema::hasTable('notifications')
@@ -110,12 +111,15 @@ class AppServiceProvider extends ServiceProvider
             }
 
             if (auth()->check() && Schema::hasTable('admin_assignments')) {
-                $currentAdminScope = app(AdminScopeService::class)->forUser(auth()->user());
+                $adminScopes = app(AdminScopeService::class);
+                $currentAdminScope = $adminScopes->forUser(auth()->user());
+                $authorityContexts = $adminScopes->availableAssignmentsFor(auth()->user());
             }
 
             $view->with([
                 'notificationSummary' => $summary,
                 'currentAdminScope' => $currentAdminScope,
+                'authorityContexts' => $authorityContexts,
             ]);
         });
     }

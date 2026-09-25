@@ -5,24 +5,33 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class AdminAssignment extends Model
 {
     use HasFactory, HasUuids;
 
     public const STATUS_ACTIVE = 'active';
+
     public const STATUS_EXPIRED = 'expired';
+
     public const STATUS_REVOKED = 'revoked';
+
+    public const SOURCE_VERIFIED_OFFICER = 'verified_officer';
 
     protected $fillable = [
         'user_id',
         'role_name',
         'organization_id',
         'college_id',
+        'department_id',
+        'school_year_id',
         'academic_year',
         'term_start',
         'term_end',
         'position_title',
+        'source_type',
+        'source_id',
         'status',
         'is_primary_admin',
         'approved_by',
@@ -53,6 +62,16 @@ class AdminAssignment extends Model
     public function college()
     {
         return $this->belongsTo(College::class);
+    }
+
+    public function department(): BelongsTo
+    {
+        return $this->belongsTo(Department::class);
+    }
+
+    public function schoolYear(): BelongsTo
+    {
+        return $this->belongsTo(SchoolYear::class);
     }
 
     public function approver()

@@ -20,8 +20,7 @@ class PendingStudentLinkController extends Controller
     public function __construct(
         private readonly AdminScopeService $adminScopes,
         private readonly ParticipationScopeService $participationScopes
-    ) {
-    }
+    ) {}
 
     /**
      * List unresolved QR records visible to the authenticated admin.
@@ -68,7 +67,7 @@ class PendingStudentLinkController extends Controller
         }
 
         $student = User::findOrFail($request->input('student_id'));
-        if (!$this->canResolveStudentForPendingLink($pendingStudentLink, $student, $user)) {
+        if (! $this->canResolveStudentForPendingLink($pendingStudentLink, $student, $user)) {
             abort(403, 'Student is outside the pending link organization boundary.');
         }
 
@@ -162,8 +161,9 @@ class PendingStudentLinkController extends Controller
     {
         $scope = $this->adminScopes->forUser($user);
 
-        if (!$scope) {
+        if (! $scope) {
             $query->whereRaw('1 = 0');
+
             return;
         }
 
@@ -171,17 +171,9 @@ class PendingStudentLinkController extends Controller
             return;
         }
 
-        if ($scope->isUsgAdmin()) {
-            $query->whereHas('organization', function ($orgQuery) use ($scope): void {
-                $orgQuery->where('type', 'usg')->orWhere('id', $scope->organizationId);
-            });
-            return;
-        }
+        if (! $scope->organizationId) {
+            $query->whereRaw('1 = 0');
 
-        if ($scope->isLsgAdmin()) {
-            $query->whereHas('organization', function ($orgQuery) use ($scope): void {
-                $orgQuery->where('college_id', $scope->collegeId);
-            });
             return;
         }
 
@@ -213,7 +205,7 @@ class PendingStudentLinkController extends Controller
             return true;
         }
 
-        if (!$pendingStudentLink->event_participation_scope_id && $student->organization_id === $pendingStudentLink->organization_id) {
+        if (! $pendingStudentLink->event_participation_scope_id && $student->organization_id === $pendingStudentLink->organization_id) {
             return true;
         }
 
