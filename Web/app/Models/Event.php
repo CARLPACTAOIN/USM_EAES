@@ -104,6 +104,11 @@ class Event extends Model
             ->latestOfMany('version_number');
     }
 
+    public function canonicalPpaPacket(): HasOne
+    {
+        return $this->hasOne(CanonicalPpaPacket::class);
+    }
+
     public function requiresVenueConfirmation(): bool
     {
         return $this->event_domain !== 'hr';

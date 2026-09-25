@@ -17,7 +17,7 @@
                     {{ $editing ? 'Revise Event Proposal' : 'New Event Proposal' }}
                 </h2>
                 <p id="{{ $editing ? 'edit-event-modal-description-'.$eventId : 'create-event-modal-description' }}" class="proposal-modal-subtitle">
-                    {{ $editing ? 'Update the returned proposal before resubmitting to OSA.' : 'Submit the digital record with the official softcopy and OSA hardcopy status.' }}
+                    {{ $editing ? 'Update the returned canonical packet before resubmitting to OSA.' : 'Build one canonical packet for proposal and permit details.' }}
                 </p>
             </div>
         </div>
@@ -82,6 +82,16 @@
                     @error('proposalCategory') <p class="form-error" role="alert">{{ $message }}</p> @enderror
                 </div>
                 <div>
+                    <label for="livewire-activity-role" class="form-label">Activity Role <span class="text-(--color-destructive)">*</span></label>
+                    <select id="livewire-activity-role" name="activity_role" class="form-input form-select @error('activityRole') form-input-error @enderror" required wire:model="activityRole">
+                        @foreach(['organizer' => 'Organizer', 'co-organizer' => 'Co-Organizer', 'participant' => 'Participant'] as $value => $label)
+                            <option value="{{ $value }}" @selected($activityRole === $value)>{{ $label }}</option>
+                        @endforeach
+                    </select>
+                    <p class="form-helper">Used by the Student Activity Permit route.</p>
+                    @error('activityRole') <p class="form-error" role="alert">{{ $message }}</p> @enderror
+                </div>
+                <div>
                     <label for="livewire-parent-event-id" class="form-label">Parent Permit</label>
                     <select id="livewire-parent-event-id" name="parent_event_id" class="form-input form-select @error('parentEventId') form-input-error @enderror" wire:model="parentEventId">
                         <option value="">None</option>
@@ -95,6 +105,82 @@
             </div>
         </fieldset>
 
+        <fieldset class="proposal-modal-section">
+            <legend class="proposal-section-title">
+                <span class="proposal-section-step">2</span>
+                Canonical packet details
+            </legend>
+
+            <div class="proposal-grid">
+                <div>
+                    <label for="livewire-proponent-name" class="form-label">Proponent Name</label>
+                    <input type="text" id="livewire-proponent-name" name="proponent_name" class="form-input @error('proponentName') form-input-error @enderror"
+                           maxlength="255" value="{{ $proponentName }}" wire:model="proponentName">
+                    @error('proponentName') <p class="form-error" role="alert">{{ $message }}</p> @enderror
+                </div>
+                <div>
+                    <label for="livewire-proponent-position" class="form-label">Proponent Position</label>
+                    <input type="text" id="livewire-proponent-position" name="proponent_position" class="form-input @error('proponentPosition') form-input-error @enderror"
+                           maxlength="255" placeholder="e.g. Secretary" value="{{ $proponentPosition }}" wire:model="proponentPosition">
+                    @error('proponentPosition') <p class="form-error" role="alert">{{ $message }}</p> @enderror
+                </div>
+                <div>
+                    <label for="livewire-proponent-organization" class="form-label">Proponent Organization</label>
+                    <input type="text" id="livewire-proponent-organization" name="proponent_organization" class="form-input @error('proponentOrganization') form-input-error @enderror"
+                           maxlength="255" value="{{ $proponentOrganization }}" wire:model="proponentOrganization">
+                    @error('proponentOrganization') <p class="form-error" role="alert">{{ $message }}</p> @enderror
+                </div>
+                <div>
+                    <label for="livewire-proponent-email" class="form-label">Proponent Email</label>
+                    <input type="email" id="livewire-proponent-email" name="proponent_email" class="form-input @error('proponentEmail') form-input-error @enderror"
+                           maxlength="255" value="{{ $proponentEmail }}" wire:model="proponentEmail">
+                    @error('proponentEmail') <p class="form-error" role="alert">{{ $message }}</p> @enderror
+                </div>
+                <div class="proposal-grid-full">
+                    <label for="livewire-proponent-contact" class="form-label">Proponent Contact Number</label>
+                    <input type="text" id="livewire-proponent-contact" name="proponent_contact_number" class="form-input @error('proponentContactNumber') form-input-error @enderror"
+                           maxlength="50" value="{{ $proponentContactNumber }}" wire:model="proponentContactNumber">
+                    @error('proponentContactNumber') <p class="form-error" role="alert">{{ $message }}</p> @enderror
+                </div>
+                <div class="proposal-grid-full">
+                    <label for="livewire-rationale" class="form-label">Rationale / Significance</label>
+                    <textarea id="livewire-rationale" name="rationale" rows="3" class="form-input @error('rationale') form-input-error @enderror"
+                              wire:model="rationale">{{ $rationale }}</textarea>
+                    @error('rationale') <p class="form-error" role="alert">{{ $message }}</p> @enderror
+                </div>
+                <div class="proposal-grid-full">
+                    <label for="livewire-general-objective" class="form-label">General Objective</label>
+                    <textarea id="livewire-general-objective" name="general_objective" rows="2" class="form-input @error('generalObjective') form-input-error @enderror"
+                              wire:model="generalObjective">{{ $generalObjective }}</textarea>
+                    @error('generalObjective') <p class="form-error" role="alert">{{ $message }}</p> @enderror
+                </div>
+                <div>
+                    <label for="livewire-specific-objectives" class="form-label">Specific Objectives</label>
+                    <textarea id="livewire-specific-objectives" name="specific_objectives" rows="4" class="form-input @error('specificObjectives') form-input-error @enderror"
+                              placeholder="One objective per line" wire:model="specificObjectives">{{ $specificObjectives }}</textarea>
+                    @error('specificObjectives') <p class="form-error" role="alert">{{ $message }}</p> @enderror
+                </div>
+                <div>
+                    <label for="livewire-major-activities" class="form-label">Major Activities</label>
+                    <textarea id="livewire-major-activities" name="major_activities" rows="4" class="form-input @error('majorActivities') form-input-error @enderror"
+                              placeholder="One major activity per line" wire:model="majorActivities">{{ $majorActivities }}</textarea>
+                    @error('majorActivities') <p class="form-error" role="alert">{{ $message }}</p> @enderror
+                </div>
+                <div class="proposal-grid-full">
+                    <label for="livewire-methodology" class="form-label">Methodology / Mechanics and Guidelines</label>
+                    <textarea id="livewire-methodology" name="methodology" rows="3" class="form-input @error('methodology') form-input-error @enderror"
+                              wire:model="methodology">{{ $methodology }}</textarea>
+                    @error('methodology') <p class="form-error" role="alert">{{ $message }}</p> @enderror
+                </div>
+                <div class="proposal-grid-full">
+                    <label for="livewire-expected-output" class="form-label">Expected Output</label>
+                    <textarea id="livewire-expected-output" name="expected_output" rows="3" class="form-input @error('expectedOutput') form-input-error @enderror"
+                              wire:model="expectedOutput">{{ $expectedOutput }}</textarea>
+                    @error('expectedOutput') <p class="form-error" role="alert">{{ $message }}</p> @enderror
+                </div>
+            </div>
+        </fieldset>
+
         <fieldset class="proposal-modal-section"
                   x-data="eventScheduleEditor(
                       $wire.entangle('eventDays'),
@@ -104,7 +190,7 @@
                       @js($errors->getMessages())
                   )">
             <legend class="proposal-section-title">
-                <span class="proposal-section-step">2</span>
+                <span class="proposal-section-step">3</span>
                 Schedule and attendance
             </legend>
 
@@ -366,7 +452,7 @@
 
         <fieldset class="proposal-modal-section">
             <legend class="proposal-section-title">
-                <span class="proposal-section-step">3</span>
+                <span class="proposal-section-step">4</span>
                 Venue confirmation
             </legend>
 
@@ -424,7 +510,7 @@
 
         <fieldset class="proposal-modal-section">
             <legend class="proposal-section-title">
-                <span class="proposal-section-step">4</span>
+                <span class="proposal-section-step">5</span>
                 Offices, participants, and budget
             </legend>
 
@@ -466,7 +552,7 @@
 
         <fieldset class="proposal-modal-section">
             <legend class="proposal-section-title">
-                <span class="proposal-section-step">5</span>
+                <span class="proposal-section-step">6</span>
                 Official PPA packet
             </legend>
 
@@ -505,7 +591,7 @@
 
         <fieldset class="proposal-modal-section">
             <legend class="proposal-section-title">
-                <span class="proposal-section-step">6</span>
+                <span class="proposal-section-step">7</span>
                 OSA hardcopy status
             </legend>
 
@@ -536,7 +622,7 @@
 
         <fieldset class="proposal-modal-section">
             <legend class="proposal-section-title">
-                <span class="proposal-section-step">7</span>
+                <span class="proposal-section-step">8</span>
                 Evaluation form
             </legend>
             @php($evaluationEditorOpen = $errors->has('evaluationQuestions') || $errors->has('evaluationQuestions.*.label') || $errors->has('evaluationQuestions.*.description'))

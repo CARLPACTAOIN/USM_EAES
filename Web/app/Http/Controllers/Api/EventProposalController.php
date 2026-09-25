@@ -35,7 +35,7 @@ class EventProposalController extends Controller
     public function index(Request $request): JsonResponse
     {
         $user = $request->user();
-        $query = Event::with(['organization', 'eventDays.sessions', 'venue']);
+        $query = Event::with(['canonicalPpaPacket', 'organization', 'eventDays.sessions', 'venue']);
         $scope = $this->adminScopes->forUser($user);
 
         if (! $scope) {
@@ -84,6 +84,20 @@ class EventProposalController extends Controller
             'organization_id' => 'nullable|uuid|exists:organizations,id',
             'title' => 'required|string|max:255',
             'proposal_category' => 'required|in:program,project,activity',
+            'activity_role' => 'nullable|in:organizer,co-organizer,participant',
+            'canonical_packet' => 'nullable|array',
+            'canonical_packet.activity_role' => 'nullable|in:organizer,co-organizer,participant',
+            'canonical_packet.proponent_name' => 'nullable|string|max:255',
+            'canonical_packet.proponent_position' => 'nullable|string|max:255',
+            'canonical_packet.proponent_organization' => 'nullable|string|max:255',
+            'canonical_packet.proponent_email' => 'nullable|email|max:255',
+            'canonical_packet.proponent_contact_number' => 'nullable|string|max:50',
+            'canonical_packet.rationale' => 'nullable|string|max:5000',
+            'canonical_packet.general_objective' => 'nullable|string|max:2000',
+            'canonical_packet.specific_objectives' => 'nullable',
+            'canonical_packet.methodology' => 'nullable|string|max:5000',
+            'canonical_packet.major_activities' => 'nullable',
+            'canonical_packet.expected_output' => 'nullable|string|max:5000',
             'start_date' => 'required|date',
             'end_date' => 'required|date|after_or_equal:start_date',
             'location_type' => 'required|in:on-campus,off-campus',
@@ -196,6 +210,20 @@ class EventProposalController extends Controller
         $validator = Validator::make($request->all(), [
             'title' => 'required|string|max:255',
             'proposal_category' => 'required|in:program,project,activity',
+            'activity_role' => 'nullable|in:organizer,co-organizer,participant',
+            'canonical_packet' => 'nullable|array',
+            'canonical_packet.activity_role' => 'nullable|in:organizer,co-organizer,participant',
+            'canonical_packet.proponent_name' => 'nullable|string|max:255',
+            'canonical_packet.proponent_position' => 'nullable|string|max:255',
+            'canonical_packet.proponent_organization' => 'nullable|string|max:255',
+            'canonical_packet.proponent_email' => 'nullable|email|max:255',
+            'canonical_packet.proponent_contact_number' => 'nullable|string|max:50',
+            'canonical_packet.rationale' => 'nullable|string|max:5000',
+            'canonical_packet.general_objective' => 'nullable|string|max:2000',
+            'canonical_packet.specific_objectives' => 'nullable',
+            'canonical_packet.methodology' => 'nullable|string|max:5000',
+            'canonical_packet.major_activities' => 'nullable',
+            'canonical_packet.expected_output' => 'nullable|string|max:5000',
             'start_date' => 'required|date',
             'end_date' => 'required|date|after_or_equal:start_date',
             'location_type' => 'required|in:on-campus,off-campus',
@@ -286,6 +314,10 @@ class EventProposalController extends Controller
             'parent_event_id' => $request->filled('parent_event_id') ? $request->string('parent_event_id')->toString() : null,
             'title' => $request->string('title')->toString(),
             'proposal_category' => $request->string('proposal_category')->toString(),
+            'canonical_packet' => array_merge(
+                ['activity_role' => $request->input('activity_role', 'organizer')],
+                (array) $request->input('canonical_packet', [])
+            ),
             'start_date' => $request->input('start_date'),
             'end_date' => $request->input('end_date'),
             'location_type' => $request->string('location_type')->toString(),
@@ -462,7 +494,7 @@ class EventProposalController extends Controller
     /** @return array<string, mixed> */
     private function eventPayload(Event $event): array
     {
-        $event->loadMissing(['organization', 'eventDays.sessions', 'venue']);
+        $event->loadMissing(['canonicalPpaPacket', 'organization', 'eventDays.sessions', 'venue']);
         $attributes = $event->toArray();
         unset($attributes['proposal_document_path'], $attributes['venue_confirmation_document_path']);
 
@@ -483,6 +515,7 @@ class EventProposalController extends Controller
             ],
             'permit_version' => $event->permit_version,
             'amendment_pending' => filled($event->pending_venue_amendment_reason),
+            'canonical_ppa_packet' => $event->canonicalPpaPacket?->makeHidden(['created_at', 'updated_at'])->toArray(),
         ];
     }
 

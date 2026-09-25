@@ -45,6 +45,8 @@ class EventProposalCreate extends Component
 
     public string $proposalCategory = '';
 
+    public string $activityRole = 'organizer';
+
     public string $parentEventId = '';
 
     public string $startDate = '';
@@ -77,6 +79,28 @@ class EventProposalCreate extends Component
 
     public string $resolutionNumber = '';
 
+    public string $proponentName = '';
+
+    public string $proponentPosition = '';
+
+    public string $proponentOrganization = '';
+
+    public string $proponentEmail = '';
+
+    public string $proponentContactNumber = '';
+
+    public string $rationale = '';
+
+    public string $generalObjective = '';
+
+    public string $specificObjectives = '';
+
+    public string $methodology = '';
+
+    public string $majorActivities = '';
+
+    public string $expectedOutput = '';
+
     public $proposalDocument = null;
 
     public bool $hardcopySubmitted = false;
@@ -103,7 +127,7 @@ class EventProposalCreate extends Component
         $this->editing = filled($eventId);
 
         if ($this->editing) {
-            $event = Event::with(['eventDays.sessions', 'evaluationFormVersion', 'organization'])->findOrFail($eventId);
+            $event = Event::with(['canonicalPpaPacket', 'eventDays.sessions', 'evaluationFormVersion', 'organization'])->findOrFail($eventId);
             $this->authorizeEditableEvent($event);
             $this->hydrateFromEvent($event);
             $this->currentProposalDocumentName = $event->proposal_document_original_name;
@@ -118,6 +142,7 @@ class EventProposalCreate extends Component
 
         $this->eventDays = [$this->blankEventDay()];
         $this->evaluationQuestions = $this->defaultEvaluationQuestions();
+        $this->hydrateProponentDefaults();
     }
 
     public function updatedStartDate(string $value): void
@@ -338,6 +363,7 @@ class EventProposalCreate extends Component
             'organizerId' => [auth()->user()?->hasRole('Super Admin (OSA)') ? 'required' : 'nullable', 'uuid', 'exists:organizations,id'],
             'title' => ['required', 'string', 'max:255'],
             'proposalCategory' => ['required', 'string', 'in:program,project,activity'],
+            'activityRole' => ['required', 'string', 'in:organizer,co-organizer,participant'],
             'parentEventId' => ['nullable', 'uuid', 'exists:events,id'],
             'startDate' => ['required', 'date'],
             'endDate' => ['required', 'date', 'after_or_equal:startDate'],
@@ -354,6 +380,17 @@ class EventProposalCreate extends Component
             'sourceOfFund' => ['nullable', 'string', 'max:255'],
             'budgetCost' => ['nullable', 'numeric', 'min:0'],
             'resolutionNumber' => ['nullable', 'string', 'max:100'],
+            'proponentName' => ['nullable', 'string', 'max:255'],
+            'proponentPosition' => ['nullable', 'string', 'max:255'],
+            'proponentOrganization' => ['nullable', 'string', 'max:255'],
+            'proponentEmail' => ['nullable', 'email', 'max:255'],
+            'proponentContactNumber' => ['nullable', 'string', 'max:50'],
+            'rationale' => ['nullable', 'string', 'max:5000'],
+            'generalObjective' => ['nullable', 'string', 'max:2000'],
+            'specificObjectives' => ['nullable', 'string', 'max:5000'],
+            'methodology' => ['nullable', 'string', 'max:5000'],
+            'majorActivities' => ['nullable', 'string', 'max:5000'],
+            'expectedOutput' => ['nullable', 'string', 'max:5000'],
             'proposalDocument' => ['nullable', 'file', 'mimes:pdf,doc,docx', 'max:10240'],
             'hardcopySubmitted' => ['boolean'],
             'headOrganizationSigned' => ['boolean'],
@@ -392,6 +429,20 @@ class EventProposalCreate extends Component
             'parent_event_id' => $this->parentEventId !== '' ? $this->parentEventId : null,
             'title' => $this->title,
             'proposal_category' => $this->proposalCategory,
+            'canonical_packet' => [
+                'activity_role' => $this->activityRole,
+                'proponent_name' => $this->blankToNull($this->proponentName),
+                'proponent_position' => $this->blankToNull($this->proponentPosition),
+                'proponent_organization' => $this->blankToNull($this->proponentOrganization),
+                'proponent_email' => $this->blankToNull($this->proponentEmail),
+                'proponent_contact_number' => $this->blankToNull($this->proponentContactNumber),
+                'rationale' => $this->blankToNull($this->rationale),
+                'general_objective' => $this->blankToNull($this->generalObjective),
+                'specific_objectives' => $this->specificObjectives,
+                'methodology' => $this->blankToNull($this->methodology),
+                'major_activities' => $this->majorActivities,
+                'expected_output' => $this->blankToNull($this->expectedOutput),
+            ],
             'start_date' => $this->startDate,
             'end_date' => $this->endDate,
             'location_type' => $this->locationType,
@@ -477,10 +528,12 @@ class EventProposalCreate extends Component
     {
         $target = $event->target_demographics ?? [];
         $budget = $event->budget_allocations ?? [];
+        $packet = $event->canonicalPpaPacket;
 
         $this->organizerId = (string) $event->organization_id;
         $this->title = (string) $event->title;
         $this->proposalCategory = (string) $event->proposal_category;
+        $this->activityRole = (string) ($packet?->activity_role ?: 'organizer');
         $this->parentEventId = (string) ($event->parent_event_id ?? '');
         $this->startDate = $event->start_date?->toDateString() ?? '';
         $this->endDate = $event->end_date?->toDateString() ?? '';
@@ -498,6 +551,17 @@ class EventProposalCreate extends Component
             ? (string) $budget['budget_cost']
             : '';
         $this->resolutionNumber = (string) ($event->resolution_number ?? '');
+        $this->proponentName = (string) ($packet?->proponent_name ?? '');
+        $this->proponentPosition = (string) ($packet?->proponent_position ?? '');
+        $this->proponentOrganization = (string) ($packet?->proponent_organization ?? '');
+        $this->proponentEmail = (string) ($packet?->proponent_email ?? '');
+        $this->proponentContactNumber = (string) ($packet?->proponent_contact_number ?? '');
+        $this->rationale = (string) ($packet?->rationale ?? '');
+        $this->generalObjective = (string) ($packet?->general_objective ?? '');
+        $this->specificObjectives = implode(PHP_EOL, $packet?->specific_objectives ?? []);
+        $this->methodology = (string) ($packet?->methodology ?? '');
+        $this->majorActivities = implode(PHP_EOL, $packet?->major_activities ?? []);
+        $this->expectedOutput = (string) ($packet?->expected_output ?? '');
         $this->hardcopySubmitted = (bool) $event->hardcopy_submitted;
         $this->headOrganizationSigned = (bool) $event->head_organization_signed;
         $this->adviserSigned = (bool) $event->adviser_signed;
@@ -561,6 +625,20 @@ class EventProposalCreate extends Component
             ->get();
     }
 
+    private function hydrateProponentDefaults(): void
+    {
+        $user = auth()->user();
+        $scope = $this->adminScope();
+
+        $this->proponentName = (string) ($user?->name ?? '');
+        $this->proponentEmail = (string) ($user?->email ?? '');
+
+        if ($scope?->organizationId) {
+            $organization = Organization::find($scope->organizationId);
+            $this->proponentOrganization = (string) ($organization?->name ?? '');
+        }
+    }
+
     private function adminScope(): ?AdminScope
     {
         $user = auth()->user();
@@ -575,6 +653,7 @@ class EventProposalCreate extends Component
         return [
             'organizerId' => 'organizer',
             'proposalCategory' => 'PPA category',
+            'activityRole' => 'activity role',
             'parentEventId' => 'parent permit',
             'startDate' => 'start date',
             'endDate' => 'end date',
@@ -592,6 +671,15 @@ class EventProposalCreate extends Component
             'budgetCost' => 'budget cost',
             'resolutionNumber' => 'resolution number',
             'proposalDocument' => 'official PPA proposal softcopy',
+            'proponentName' => 'proponent name',
+            'proponentPosition' => 'proponent position',
+            'proponentOrganization' => 'proponent organization',
+            'proponentEmail' => 'proponent email',
+            'proponentContactNumber' => 'proponent contact number',
+            'generalObjective' => 'general objective',
+            'specificObjectives' => 'specific objectives',
+            'majorActivities' => 'major activities',
+            'expectedOutput' => 'expected output',
             'hardcopySubmitted' => 'hardcopy submitted',
             'headOrganizationSigned' => 'head signed',
             'sameTimeForAllDays' => 'same time for all days',
@@ -634,6 +722,7 @@ class EventProposalCreate extends Component
         $this->organizerId = (string) data_get($old, 'organization_id', '');
         $this->title = (string) data_get($old, 'title', '');
         $this->proposalCategory = (string) data_get($old, 'proposal_category', '');
+        $this->activityRole = (string) data_get($old, 'activity_role', 'organizer');
         $this->parentEventId = (string) data_get($old, 'parent_event_id', '');
         $this->startDate = (string) data_get($old, 'start_date', '');
         $this->endDate = (string) data_get($old, 'end_date', '');
@@ -649,6 +738,17 @@ class EventProposalCreate extends Component
         $this->sourceOfFund = (string) data_get($old, 'source_of_fund', '');
         $this->budgetCost = (string) data_get($old, 'budget_cost', '');
         $this->resolutionNumber = (string) data_get($old, 'resolution_number', '');
+        $this->proponentName = (string) data_get($old, 'proponent_name', '');
+        $this->proponentPosition = (string) data_get($old, 'proponent_position', '');
+        $this->proponentOrganization = (string) data_get($old, 'proponent_organization', '');
+        $this->proponentEmail = (string) data_get($old, 'proponent_email', '');
+        $this->proponentContactNumber = (string) data_get($old, 'proponent_contact_number', '');
+        $this->rationale = (string) data_get($old, 'rationale', '');
+        $this->generalObjective = (string) data_get($old, 'general_objective', '');
+        $this->specificObjectives = (string) data_get($old, 'specific_objectives', '');
+        $this->methodology = (string) data_get($old, 'methodology', '');
+        $this->majorActivities = (string) data_get($old, 'major_activities', '');
+        $this->expectedOutput = (string) data_get($old, 'expected_output', '');
         $this->hardcopySubmitted = $this->oldBoolean($old, 'hardcopy_submitted');
         $this->headOrganizationSigned = $this->oldBoolean($old, 'head_organization_signed');
         $this->adviserSigned = $this->oldBoolean($old, 'adviser_signed');
@@ -816,6 +916,8 @@ class EventProposalCreate extends Component
             'Confirmation evidence attached' => filled($this->venueConfirmationDocument) || filled($this->currentVenueConfirmationDocumentName),
             'Official PPA softcopy attached' => filled($this->proposalDocument) || filled($this->currentProposalDocumentName),
             'Hardcopy submission confirmed' => $this->hardcopySubmitted,
+            'Activity role selected' => filled($this->activityRole),
+            'Objectives drafted' => filled($this->generalObjective) || filled($this->specificObjectives),
         ];
     }
 
