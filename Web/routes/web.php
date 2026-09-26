@@ -18,6 +18,7 @@ use App\Http\Controllers\Web\PortalController;
 use App\Http\Controllers\Web\ProposalProcessTemplateController;
 use App\Http\Controllers\Web\SchoolYearController;
 use App\Http\Controllers\Web\VenueController;
+use App\Http\Controllers\Web\WorkflowTaskController;
 use App\Models\AdminAssignment;
 use App\Models\College;
 use App\Models\Department;
@@ -56,7 +57,7 @@ Route::middleware(['auth'])->group(function () {
     });
 
     // ─── Admin Dashboard ────────────────────────────────────
-    Route::middleware(['role:Super Admin (OSA)|USG Admin|LSG Admin|Society Admin|Academic Unit Admin|Office Event Admin|HR Admin|Faculty', 'authority.context'])
+    Route::middleware(['role:Super Admin (OSA)|USG Admin|LSG Admin|Society Admin|Academic Unit Admin|Office Event Admin|HR Admin|Faculty|Chief Security', 'authority.context'])
         ->prefix('dashboard')
         ->group(function () {
             Route::get('/', [DashboardController::class, 'index'])->name('dashboard');
@@ -68,6 +69,9 @@ Route::middleware(['auth'])->group(function () {
             Route::get('/notifications', [NotificationController::class, 'index'])->name('dashboard.notifications');
             Route::post('/notifications/{notification}/read', [NotificationController::class, 'markRead'])->name('dashboard.notifications.read');
             Route::post('/notifications/read-all', [NotificationController::class, 'readAll'])->name('dashboard.notifications.read-all');
+            Route::get('/workflow-tasks', [WorkflowTaskController::class, 'index'])->name('dashboard.workflow-tasks.index');
+            Route::get('/workflow-tasks/{task}', [WorkflowTaskController::class, 'show'])->name('dashboard.workflow-tasks.show');
+            Route::post('/workflow-tasks/{task}/reassign', [WorkflowTaskController::class, 'reassign'])->name('dashboard.workflow-tasks.reassign');
 
             // Events / PPA
             Route::get('/events', [DashboardController::class, 'events'])->name('dashboard.events');

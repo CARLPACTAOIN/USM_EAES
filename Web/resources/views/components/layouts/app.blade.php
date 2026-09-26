@@ -182,6 +182,12 @@
                     @livewire('dashboard.notification-sidebar-badge', ['type' => 'needs_action'], key('sidebar-notification-needs-action'))
                 </a>
 
+                <a href="{{ route('dashboard.workflow-tasks.index') }}"
+                   class="sidebar-link relative {{ request()->routeIs('dashboard.workflow-tasks*') ? 'sidebar-link-active' : '' }}">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 6.75h11.25M9 12h11.25M9 17.25h11.25M4.5 6.75l1.5 1.5 2.25-3M4.5 12l1.5 1.5 2.25-3M4.5 17.25l1.5 1.5 2.25-3"/></svg>
+                    <span class="flex-1">Workflow Tasks</span>
+                </a>
+
                 @if(auth()->user()?->can('create-proposals'))
                 <a href="{{ route('dashboard.venue-availability') }}"
                    class="sidebar-link relative {{ request()->routeIs('dashboard.venue-availability*') ? 'sidebar-link-active' : '' }}">

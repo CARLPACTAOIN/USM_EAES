@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class ProposalWorkflowTask extends Model
 {
@@ -87,5 +88,11 @@ class ProposalWorkflowTask extends Model
     public function decidedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'decided_by');
+    }
+
+    public function assignmentHistory(): HasMany
+    {
+        return $this->hasMany(WorkflowTaskAssignmentHistory::class, 'workflow_task_id')
+            ->latest('reassigned_at');
     }
 }
