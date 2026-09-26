@@ -729,13 +729,6 @@ class ParticipationScopeService
             return $this->userBelongsToScope($student, $scope);
         }
 
-        $event = $pendingStudentLink->event ?: Event::find($pendingStudentLink->event_id);
-        if ($event) {
-            $organizerScope = $this->ensureOrganizerScope($event);
-
-            return $this->userBelongsToScope($student, $organizerScope);
-        }
-
         if ($pendingStudentLink->organization_id) {
             if ($student->organization_id === $pendingStudentLink->organization_id) {
                 return true;
@@ -745,6 +738,13 @@ class ParticipationScopeService
                 ->where('organization_id', $pendingStudentLink->organization_id)
                 ->where('status', 'active')
                 ->exists();
+        }
+
+        $event = $pendingStudentLink->event ?: Event::find($pendingStudentLink->event_id);
+        if ($event) {
+            $organizerScope = $this->ensureOrganizerScope($event);
+
+            return $this->userBelongsToScope($student, $organizerScope);
         }
 
         if ($admin && app(AdminScopeService::class)->forUser($admin)?->isSuperAdmin()) {
