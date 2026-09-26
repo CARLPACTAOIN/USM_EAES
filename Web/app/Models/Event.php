@@ -187,4 +187,14 @@ class Event extends Model
     {
         return $this->hasMany(EvaluationFormVersion::class);
     }
+
+    public function workflowRun(): HasOne
+    {
+        return $this->hasOne(ProposalWorkflowRun::class);
+    }
+
+    public function workflowRuns(): HasMany
+    {
+        return $this->hasMany(ProposalWorkflowRun::class);
+    }
 }

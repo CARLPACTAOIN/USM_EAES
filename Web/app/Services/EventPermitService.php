@@ -20,6 +20,7 @@ class EventPermitService
         private readonly ScannerSessionService $scannerSessions,
         private readonly AdminScopeService $adminScopes,
         private readonly EventNotificationService $notifications,
+        private readonly ProposalWorkflowService $proposalWorkflows,
     ) {}
 
     public function submit(Event $event, User $actor): Event
@@ -40,6 +41,7 @@ class EventPermitService
                 'submitted_at' => now(),
                 'review_remarks' => null,
             ]);
+            $this->proposalWorkflows->bindFirstSubmission($event, $actor);
             $this->audit($event, $actor, $event->pending_venue_amendment_reason ? 'venue-amendment-submitted' : 'event-proposal-submitted');
             if ($event->pending_venue_amendment_reason) {
                 $this->notifications->notifyPermitWorkflow($event, 'venue-amendment-submitted');
