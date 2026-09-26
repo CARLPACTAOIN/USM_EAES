@@ -69,12 +69,13 @@ class EventProposalDraftService
         $snapshots = $govContext['snapshots'];
 
         try {
-            return DB::transaction(function () use ($actor, $confirmationDocument, $confirmationPath, $data, $documentPath, $govContext, $isHrEvent, $proposalDocument, $snapshots, $venueData): Event {
+            return DB::transaction(function () use ($actor, $confirmationDocument, $confirmationPath, $data, $documentPath, $govContext, $isHrEvent, $organization, $proposalDocument, $snapshots, $venueData): Event {
                 $hardcopySubmitted = $isHrEvent ? false : $data['hardcopy_submitted'];
 
                 $event = Event::create([
                     'organization_id' => $data['organization_id'],
                     'school_year_id' => $govContext['school_year_id'],
+                    'department_id' => $data['department_id'] ?? $organization->department_id,
                     'parent_event_id' => $data['parent_event_id'],
                     'title' => $data['title'],
                     'event_domain' => $isHrEvent ? 'hr' : 'student_affairs',

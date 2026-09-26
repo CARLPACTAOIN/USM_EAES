@@ -118,17 +118,15 @@ class DashboardController extends Controller
             'event_participation_scope_id' => 'nullable|uuid|exists:event_participation_scopes,id',
         ]);
 
-        $participationScope = null;
-        if (filled($validated['event_participation_scope_id'] ?? null)) {
-            $participationScope = EventParticipationScope::findOrFail($validated['event_participation_scope_id']);
-            abort_unless($participationScope->event_id === $event->id, 404);
-            $this->authorizeScannerScopeAccess($request->user(), $participationScope);
+        $participationScope = filled($validated['event_participation_scope_id'] ?? null)
+            ? EventParticipationScope::findOrFail($validated['event_participation_scope_id'])
+            : $this->participationScopes->ensureOrganizerScope($event);
 
-            if ($this->participationScopes->runtimeGuard($participationScope)) {
-                return response()->json(['data' => []]);
-            }
-        } else {
-            $this->authorizeScannerAssignmentAccess($event, $request->user());
+        abort_unless($participationScope->event_id === $event->id, 404);
+        $this->authorizeScannerScopeAccess($request->user(), $participationScope);
+
+        if ($this->participationScopes->runtimeGuard($participationScope)) {
+            return response()->json(['data' => []]);
         }
 
         $candidates = $this->scannerAssignments->eligibleUsers(
@@ -712,9 +710,12 @@ class DashboardController extends Controller
             'college_id' => 'nullable|uuid|exists:colleges,id',
             'college_ids' => 'nullable|array',
             'college_ids.*' => 'uuid|exists:colleges,id',
+            'department_id' => 'nullable|uuid|exists:departments,id',
+            'department_ids' => 'nullable|array',
+            'department_ids.*' => 'uuid|exists:departments,id',
             'program_id' => 'nullable|uuid|exists:programs,id',
             'participant_name_snapshot' => 'nullable|string|max:255',
-            'participant_type' => 'nullable|string|in:college,organization,society,program,non_academic_org,academic_unit,administrative_office,custom_roster,hr_unit',
+            'participant_type' => 'nullable|string|in:college,department,organization,society,program,non_academic_org,academic_unit,administrative_office,custom_roster,hr_unit',
             'ppa_required' => 'nullable|boolean',
             'capture_mode' => 'required|in:self_scanning,parent_scanning,delegated_scanning,central_gate',
             'analytics_rollup_enabled' => 'nullable|boolean',
@@ -730,8 +731,14 @@ class DashboardController extends Controller
             ->filter()
             ->unique()
             ->values();
+        $departmentIds = collect($validated['department_ids'] ?? [])
+            ->when(filled($validated['department_id'] ?? null), fn ($ids) => $ids->push($validated['department_id']))
+            ->filter()
+            ->unique()
+            ->values();
 
         $audienceMode = $validated['audience_mode'] ?? match (true) {
+            $departmentIds->isNotEmpty() && $organizationIds->isEmpty() && $collegeIds->isEmpty() => 'department',
             $collegeIds->isNotEmpty() && $organizationIds->isEmpty() => 'college',
             default => 'organization',
         };
@@ -748,6 +755,12 @@ class DashboardController extends Controller
                 ->withInput();
         }
 
+        if ($audienceMode === 'department' && $departmentIds->isEmpty()) {
+            return redirect()->back()
+                ->withErrors(['department_ids' => 'Select at least one Department audience.'])
+                ->withInput();
+        }
+
         $ppaRequired = $request->boolean('ppa_required', true);
         $analyticsRollupEnabled = $request->boolean('analytics_rollup_enabled', true);
         $captureMode = $validated['capture_mode'];
@@ -761,6 +774,7 @@ class DashboardController extends Controller
             analyticsRollupEnabled: $analyticsRollupEnabled,
             programId: $validated['program_id'] ?? null,
             participantNameSnapshot: $validated['participant_name_snapshot'] ?? null,
+            departmentIds: $departmentIds->all(),
         );
         $createdCount = $result['created_count'];
         $skippedOrganizer = $result['skipped_organizer_count'];

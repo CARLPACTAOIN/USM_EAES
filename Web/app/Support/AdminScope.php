@@ -4,6 +4,7 @@ namespace App\Support;
 
 use App\Models\AdminAssignment;
 use App\Models\College;
+use App\Models\Department;
 use App\Models\Event;
 use App\Models\Organization;
 
@@ -82,11 +83,48 @@ class AdminScope
             return filled($this->collegeId) && $organization->college_id === $this->collegeId;
         }
 
+        if ($this->isAcademicUnitAdmin()) {
+            return filled($this->departmentId) && $organization->department_id === $this->departmentId;
+        }
+
         return filled($this->organizationId) && $organization->id === $this->organizationId;
+    }
+
+    public function canAccessDepartment(?Department $department): bool
+    {
+        if (! $department) {
+            return false;
+        }
+
+        if ($this->isSuperAdmin()) {
+            return true;
+        }
+
+        if ($this->isAcademicUnitAdmin()) {
+            return filled($this->departmentId) && $department->id === $this->departmentId;
+        }
+
+        if ($this->isLsgAdmin()) {
+            return filled($this->collegeId) && $department->college_id === $this->collegeId;
+        }
+
+        return false;
     }
 
     public function canAccessEvent(Event $event): bool
     {
+        if ($this->isSuperAdmin()) {
+            return true;
+        }
+
+        if (filled($this->schoolYearId) && filled($event->school_year_id) && $this->schoolYearId !== $event->school_year_id) {
+            return false;
+        }
+
+        if (filled($this->departmentId) && filled($event->department_id) && $this->departmentId !== $event->department_id) {
+            return false;
+        }
+
         $event->loadMissing('organization');
 
         return $this->canAccessOrganization($event->organization);

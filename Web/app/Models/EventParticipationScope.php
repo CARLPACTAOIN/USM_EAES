@@ -38,12 +38,14 @@ class EventParticipationScope extends Model
 
     protected $fillable = [
         'event_id',
+        'school_year_id',
         'parent_scope_id',
         'linked_event_id',
         'participation_role',
         'participant_type',
         'organization_id',
         'college_id',
+        'department_id',
         'program_id',
         'participant_name_snapshot',
         'ppa_required',
@@ -88,6 +90,11 @@ class EventParticipationScope extends Model
         return $this->belongsTo(Event::class);
     }
 
+    public function schoolYear()
+    {
+        return $this->belongsTo(SchoolYear::class);
+    }
+
     public function parentScope()
     {
         return $this->belongsTo(self::class, 'parent_scope_id');
@@ -111,6 +118,11 @@ class EventParticipationScope extends Model
     public function college()
     {
         return $this->belongsTo(College::class);
+    }
+
+    public function department()
+    {
+        return $this->belongsTo(Department::class);
     }
 
     public function program()
@@ -185,6 +197,7 @@ class EventParticipationScope extends Model
     {
         return $this->participant_name_snapshot
             ?: $this->organization?->acronym
+            ?: $this->department?->code
             ?: $this->college?->code
             ?: $this->program?->code
             ?: 'Participant scope';

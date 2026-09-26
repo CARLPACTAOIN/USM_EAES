@@ -11,11 +11,14 @@ class EventScannerAssignment extends Model
     use HasFactory, HasUuids;
 
     public const STATUS_ACTIVE = 'active';
+
     public const STATUS_REVOKED = 'revoked';
+
     public const STATUS_EXPIRED = 'expired';
 
     protected $fillable = [
         'event_id',
+        'school_year_id',
         'event_participation_scope_id',
         'audience_scope_type',
         'scanner_user_id',
@@ -41,6 +44,11 @@ class EventScannerAssignment extends Model
     public function event()
     {
         return $this->belongsTo(Event::class);
+    }
+
+    public function schoolYear()
+    {
+        return $this->belongsTo(SchoolYear::class);
     }
 
     public function participationScope()
@@ -83,7 +91,7 @@ class EventScannerAssignment extends Model
             return false;
         }
 
-        return !$this->expires_at || $this->expires_at->isFuture();
+        return ! $this->expires_at || $this->expires_at->isFuture();
     }
 
     public function markRevoked(User $revokedBy, ?string $reason = null): void

@@ -3,6 +3,7 @@
 namespace App\Livewire\Dashboard;
 
 use App\Models\College;
+use App\Models\Department;
 use App\Models\Event;
 use App\Models\EventParticipationScope;
 use App\Models\Organization;
@@ -36,9 +37,13 @@ class EventParticipantScopes extends Component
 
     public array $selectedCollegeIds = [];
 
+    public array $selectedDepartmentIds = [];
+
     public array $selectedOrganizationIds = [];
 
     public string $collegeQuery = '';
+
+    public string $departmentQuery = '';
 
     public string $organizationQuery = '';
 
@@ -62,7 +67,7 @@ class EventParticipantScopes extends Component
 
     public function setAudienceMode(string $mode): void
     {
-        abort_unless(in_array($mode, ['all', 'college', 'organization'], true), 422);
+        abort_unless(in_array($mode, ['all', 'college', 'department', 'organization'], true), 422);
 
         $this->audienceMode = $mode;
         $this->resetFeedback();
@@ -70,6 +75,10 @@ class EventParticipantScopes extends Component
 
         if ($mode !== 'college') {
             $this->selectedCollegeIds = [];
+        }
+
+        if ($mode !== 'department') {
+            $this->selectedDepartmentIds = [];
         }
 
         if ($mode !== 'organization') {
@@ -88,6 +97,8 @@ class EventParticipantScopes extends Component
             'audienceMode' => 'audience mode',
             'selectedCollegeIds' => 'College audience',
             'selectedCollegeIds.*' => 'College audience',
+            'selectedDepartmentIds' => 'department audience',
+            'selectedDepartmentIds.*' => 'department audience',
             'selectedOrganizationIds' => 'organization audience',
             'selectedOrganizationIds.*' => 'organization audience',
             'captureMode' => 'capture mode',
@@ -98,6 +109,7 @@ class EventParticipantScopes extends Component
             audienceMode: $this->audienceMode,
             organizationIds: $this->selectedOrganizationIds,
             collegeIds: $this->selectedCollegeIds,
+            departmentIds: $this->selectedDepartmentIds,
             captureMode: $this->captureMode,
             ppaRequired: $this->ppaRequired,
             analyticsRollupEnabled: $this->analyticsRollupEnabled,
@@ -118,8 +130,9 @@ class EventParticipantScopes extends Component
 
             $this->notice = $message;
             $this->selectedCollegeIds = [];
+            $this->selectedDepartmentIds = [];
             $this->selectedOrganizationIds = [];
-            $this->syncReviewRemarks($event->fresh(['participationScopes.organization', 'participationScopes.college', 'participationScopes.delegatedOrganization']));
+            $this->syncReviewRemarks($event->fresh(['participationScopes.organization', 'participationScopes.college', 'participationScopes.department', 'participationScopes.delegatedOrganization']));
             $this->dispatchUpdates();
 
             return;
@@ -332,6 +345,7 @@ class EventParticipantScopes extends Component
             'scopeActionState' => $this->scopeActionState($eventScopes),
             'canAddScopes' => $this->canAddScopes($event),
             'collegeOptions' => $this->collegeOptions(),
+            'departmentOptions' => $this->departmentOptions(),
             'organizationOptions' => $this->organizationOptions(),
             'selectionCount' => $this->selectionCount(),
             'user' => auth()->user(),
@@ -344,6 +358,7 @@ class EventParticipantScopes extends Component
             'organization',
             'participationScopes.organization',
             'participationScopes.college',
+            'participationScopes.department',
             'participationScopes.delegatedOrganization',
         ])->findOrFail($this->eventId);
 
@@ -355,7 +370,7 @@ class EventParticipantScopes extends Component
     private function scopeForAction(string $scopeId): EventParticipationScope
     {
         $event = $this->eventForDisplay();
-        $scope = EventParticipationScope::with(['event.organization', 'organization', 'delegatedOrganization'])
+        $scope = EventParticipationScope::with(['event.organization', 'organization', 'department', 'delegatedOrganization'])
             ->findOrFail($scopeId);
 
         abort_unless($scope->event_id === $event->id, 404);
@@ -467,7 +482,7 @@ class EventParticipantScopes extends Component
     private function addScopeRules(): array
     {
         $rules = [
-            'audienceMode' => ['required', 'string', 'in:all,college,organization'],
+            'audienceMode' => ['required', 'string', 'in:all,college,department,organization'],
             'captureMode' => ['required', 'string', 'in:self_scanning,parent_scanning,delegated_scanning,central_gate'],
             'ppaRequired' => ['boolean'],
             'analyticsRollupEnabled' => ['boolean'],
@@ -476,6 +491,11 @@ class EventParticipantScopes extends Component
         if ($this->audienceMode === 'organization') {
             $rules['selectedOrganizationIds'] = ['required', 'array', 'min:1'];
             $rules['selectedOrganizationIds.*'] = ['uuid', 'exists:organizations,id'];
+        }
+
+        if ($this->audienceMode === 'department') {
+            $rules['selectedDepartmentIds'] = ['required', 'array', 'min:1'];
+            $rules['selectedDepartmentIds.*'] = ['uuid', 'exists:departments,id'];
         }
 
         if ($this->audienceMode === 'college') {
@@ -489,6 +509,16 @@ class EventParticipantScopes extends Component
     private function collegeOptions(): Collection
     {
         return College::query()
+            ->orderBy('name')
+            ->get()
+            ->values();
+    }
+
+    private function departmentOptions(): Collection
+    {
+        return Department::query()
+            ->with('college')
+            ->where('status', 'active')
             ->orderBy('name')
             ->get()
             ->values();
@@ -509,6 +539,7 @@ class EventParticipantScopes extends Component
         return match ($this->audienceMode) {
             'all' => College::count(),
             'college' => count($this->selectedCollegeIds),
+            'department' => count($this->selectedDepartmentIds),
             default => count($this->selectedOrganizationIds),
         };
     }
@@ -547,6 +578,8 @@ class EventParticipantScopes extends Component
     {
         $this->resetErrorBag('selectedCollegeIds');
         $this->resetErrorBag('selectedCollegeIds.*');
+        $this->resetErrorBag('selectedDepartmentIds');
+        $this->resetErrorBag('selectedDepartmentIds.*');
         $this->resetErrorBag('selectedOrganizationIds');
         $this->resetErrorBag('selectedOrganizationIds.*');
     }

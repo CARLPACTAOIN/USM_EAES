@@ -30,6 +30,7 @@ class Event extends Model
     protected $fillable = [
         'organization_id',
         'school_year_id',
+        'department_id',
         'parent_event_id',
         'title',
         'proposal_category',
@@ -97,6 +98,11 @@ class Event extends Model
     public function schoolYear(): BelongsTo
     {
         return $this->belongsTo(SchoolYear::class);
+    }
+
+    public function department(): BelongsTo
+    {
+        return $this->belongsTo(Department::class);
     }
 
     public function proponent(): BelongsTo

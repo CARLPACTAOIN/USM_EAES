@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\College;
+use App\Models\Department;
 use App\Models\Event;
 use App\Models\EventParticipationScope;
 use App\Models\Organization;
@@ -27,10 +28,12 @@ class ParticipationScopeService
         $organization = $event->organization;
         $isHrDomain = $event->event_domain === 'hr' || $organization?->type === 'hr_unit';
 
-        return $event->participationScopes()->firstOrCreate([
+        $organizerScope = $event->participationScopes()->firstOrCreate([
             'participation_role' => EventParticipationScope::ROLE_ORGANIZER,
             'status' => EventParticipationScope::STATUS_ACTIVE,
         ], [
+            'school_year_id' => $event->school_year_id,
+            'department_id' => $event->department_id ?: $organization?->department_id,
             'participant_type' => $this->participantTypeForOrganization($organization),
             'organization_id' => $organization?->id,
             'college_id' => $organization?->college_id,
@@ -46,11 +49,27 @@ class ParticipationScopeService
             'capture_mode' => in_array($organization?->type, ['usg', 'lsg', 'hr_unit'], true) ? 'central_gate' : 'self_scanning',
             'analytics_rollup_enabled' => true,
         ]);
+
+        $updates = [];
+        if ($organizerScope->school_year_id === null && $event->school_year_id !== null) {
+            $updates['school_year_id'] = $event->school_year_id;
+        }
+        $targetDeptId = $event->department_id ?: $organization?->department_id;
+        if ($organizerScope->department_id === null && $targetDeptId !== null) {
+            $updates['department_id'] = $targetDeptId;
+        }
+        if (! empty($updates)) {
+            $organizerScope->update($updates);
+        }
+
+        return $organizerScope;
     }
 
     /**
      * @param  list<string>  $organizationIds
+     * @param  list<string>  $organizationIds
      * @param  list<string>  $collegeIds
+     * @param  list<string>  $departmentIds
      * @return array{created_count: int, skipped_organizer_count: int, skipped_existing_count: int}
      */
     public function createParticipantScopes(
@@ -63,9 +82,11 @@ class ParticipationScopeService
         bool $analyticsRollupEnabled,
         ?string $programId = null,
         ?string $participantNameSnapshot = null,
+        array $departmentIds = [],
     ): array {
         $organizationIds = collect($organizationIds)->filter()->unique()->values();
         $collegeIds = collect($collegeIds)->filter()->unique()->values();
+        $departmentIds = collect($departmentIds)->filter()->unique()->values();
 
         if ($audienceMode === 'all') {
             $collegeIds = College::query()->orderBy('name')->pluck('id')->values();
@@ -80,6 +101,7 @@ class ParticipationScopeService
             $audienceMode,
             $captureMode,
             $collegeIds,
+            $departmentIds,
             $event,
             $organizationIds,
             $ppaRequired,
@@ -121,12 +143,58 @@ class ParticipationScopeService
                             'status' => EventParticipationScope::STATUS_ACTIVE,
                         ], [
                             'parent_scope_id' => $parentScope->id,
+                            'school_year_id' => $event->school_year_id,
                             'participant_type' => $this->participantTypeForOrganization($organization),
                             'college_id' => $organization->college_id,
+                            'department_id' => $organization->department_id,
                             'program_id' => $programId,
                             'participant_name_snapshot' => $organizationIds->count() === 1 && $participantNameSnapshot
                                 ? $participantNameSnapshot
                                 : $this->participantName($organization, 'Participant scope'),
+                            'ppa_required' => $ppaRequired,
+                            'ppa_status' => $ppaRequired ? EventParticipationScope::PPA_DRAFT : EventParticipationScope::PPA_NOT_REQUIRED,
+                            'capture_mode' => $captureMode,
+                            'analytics_rollup_enabled' => $analyticsRollupEnabled,
+                        ]);
+
+                        if (! $participantScope->wasRecentlyCreated) {
+                            $skippedExistingCount++;
+
+                            return;
+                        }
+
+                        $createdScopes->push($participantScope);
+                    });
+
+                return;
+            }
+
+            if ($audienceMode === 'department') {
+                Department::query()
+                    ->whereIn('id', $departmentIds)
+                    ->orderBy('name')
+                    ->get()
+                    ->each(function (Department $department) use (
+                        $analyticsRollupEnabled,
+                        $captureMode,
+                        $event,
+                        $parentScope,
+                        $ppaRequired,
+                        &$createdScopes,
+                        &$skippedExistingCount,
+                    ): void {
+                        $participantScope = $event->participationScopes()->firstOrCreate([
+                            'participation_role' => EventParticipationScope::ROLE_PARTICIPANT,
+                            'participant_type' => 'department',
+                            'organization_id' => null,
+                            'department_id' => $department->id,
+                            'status' => EventParticipationScope::STATUS_ACTIVE,
+                        ], [
+                            'parent_scope_id' => $parentScope->id,
+                            'school_year_id' => $event->school_year_id,
+                            'college_id' => $department->college_id,
+                            'program_id' => null,
+                            'participant_name_snapshot' => trim(($department->code ? "{$department->code} - " : '').$department->name),
                             'ppa_required' => $ppaRequired,
                             'ppa_status' => $ppaRequired ? EventParticipationScope::PPA_DRAFT : EventParticipationScope::PPA_NOT_REQUIRED,
                             'capture_mode' => $captureMode,
@@ -166,6 +234,8 @@ class ParticipationScopeService
                         'status' => EventParticipationScope::STATUS_ACTIVE,
                     ], [
                         'parent_scope_id' => $parentScope->id,
+                        'school_year_id' => $event->school_year_id,
+                        'department_id' => null,
                         'program_id' => null,
                         'participant_name_snapshot' => trim(($college->code ? "{$college->code} - " : '').$college->name),
                         'ppa_required' => $ppaRequired,
@@ -213,8 +283,10 @@ class ParticipationScopeService
                 ], [
                     'parent_scope_id' => $parentScope->id,
                     'linked_event_id' => $linkedEvent->id,
+                    'school_year_id' => $parentEvent->school_year_id ?: $linkedEvent->school_year_id,
                     'participant_type' => $this->participantTypeForOrganization($organization),
                     'college_id' => $organization->college_id,
+                    'department_id' => $linkedEvent->department_id ?: $organization->department_id,
                     'participant_name_snapshot' => $this->participantName($organization, 'Participant'),
                     'ppa_required' => true,
                     'ppa_status' => $this->ppaStatusFromEventStatus($linkedEvent->status),
@@ -307,6 +379,11 @@ class ParticipationScopeService
 
         $scope->loadMissing(['event.organization', 'organization', 'delegatedOrganization']);
 
+        $scopeSchoolYearId = $scope->school_year_id ?: $scope->event?->school_year_id;
+        if (filled($scopeSchoolYearId) && $adminScope->schoolYearId !== $scopeSchoolYearId) {
+            return false;
+        }
+
         if ($scope->capture_mode === 'delegated_scanning' && $scope->delegatedOrganization) {
             return $adminScope->canAccessOrganization($scope->delegatedOrganization);
         }
@@ -317,6 +394,18 @@ class ParticipationScopeService
 
         if ($scope->organization) {
             return $adminScope->canAccessOrganization($scope->organization);
+        }
+
+        if ($scope->participant_type === 'department' && $scope->department_id) {
+            if ($adminScope->departmentId && $adminScope->departmentId === $scope->department_id) {
+                return true;
+            }
+
+            if ($scope->college_id && $adminScope->isLsgAdmin()) {
+                return $adminScope->collegeId === $scope->college_id;
+            }
+
+            return false;
         }
 
         if ($scope->college_id && $adminScope->isLsgAdmin()) {
@@ -339,12 +428,27 @@ class ParticipationScopeService
 
         $scope->loadMissing(['event.organization', 'organization']);
 
+        $scopeSchoolYearId = $scope->school_year_id ?: $scope->event?->school_year_id;
+        if (filled($scopeSchoolYearId) && $adminScope->schoolYearId !== $scopeSchoolYearId) {
+            return false;
+        }
+
         if ($scope->analytics_rollup_enabled && $adminScope->canAccessEvent($scope->event)) {
             return true;
         }
 
         if ($scope->organization && $adminScope->canAccessOrganization($scope->organization)) {
             return true;
+        }
+
+        if ($scope->participant_type === 'department' && $scope->department_id) {
+            if ($adminScope->departmentId && $adminScope->departmentId === $scope->department_id) {
+                return true;
+            }
+
+            if ($scope->college_id && $adminScope->isLsgAdmin()) {
+                return $adminScope->collegeId === $scope->college_id;
+            }
         }
 
         return $scope->college_id && $adminScope->isLsgAdmin() && $adminScope->collegeId === $scope->college_id;
@@ -371,9 +475,29 @@ class ParticipationScopeService
 
         $query = User::role('Student');
         $organization = $scope->organization;
+        $scopeSchoolYearId = $scope->school_year_id ?: $scope->event?->school_year_id;
 
         if ($scope->participant_type === 'program' && $scope->program_id) {
             return $query->where('program_id', $scope->program_id);
+        }
+
+        if ($scope->participant_type === 'department' && $scope->department_id) {
+            return $query->where(function ($query) use ($scope, $scopeSchoolYearId): void {
+                $query->where('department_id', $scope->department_id)
+                    ->orWhereIn('id', function ($membershipQuery) use ($scope, $scopeSchoolYearId): void {
+                        $membershipQuery->select('user_id')
+                            ->from('organization_memberships')
+                            ->where('department_id', $scope->department_id)
+                            ->where('status', 'active');
+
+                        if ($scopeSchoolYearId) {
+                            $membershipQuery->where(function ($sq) use ($scopeSchoolYearId): void {
+                                $sq->whereNull('school_year_id')
+                                    ->orWhere('school_year_id', $scopeSchoolYearId);
+                            });
+                        }
+                    });
+            });
         }
 
         if ($scope->participant_type === 'college' || ($organization?->type === 'lsg' && $scope->participation_role === EventParticipationScope::ROLE_ORGANIZER)) {
@@ -381,13 +505,20 @@ class ParticipationScopeService
                 return $query->whereRaw('1 = 0');
             }
 
-            return $query->where(function ($query) use ($scope): void {
+            return $query->where(function ($query) use ($scope, $scopeSchoolYearId): void {
                 $query->where('college_id', $scope->college_id)
-                    ->orWhereIn('id', function ($membershipQuery) use ($scope): void {
+                    ->orWhereIn('id', function ($membershipQuery) use ($scope, $scopeSchoolYearId): void {
                         $membershipQuery->select('user_id')
                             ->from('organization_memberships')
                             ->where('college_id', $scope->college_id)
                             ->where('status', 'active');
+
+                        if ($scopeSchoolYearId) {
+                            $membershipQuery->where(function ($sq) use ($scopeSchoolYearId): void {
+                                $sq->whereNull('school_year_id')
+                                    ->orWhere('school_year_id', $scopeSchoolYearId);
+                            });
+                        }
                     });
             });
         }
@@ -397,13 +528,20 @@ class ParticipationScopeService
         }
 
         if ($scope->organization_id) {
-            return $query->where(function ($query) use ($scope): void {
+            return $query->where(function ($query) use ($scope, $scopeSchoolYearId): void {
                 $query->where('organization_id', $scope->organization_id)
-                    ->orWhereIn('id', function ($membershipQuery) use ($scope): void {
+                    ->orWhereIn('id', function ($membershipQuery) use ($scope, $scopeSchoolYearId): void {
                         $membershipQuery->select('user_id')
                             ->from('organization_memberships')
                             ->where('organization_id', $scope->organization_id)
                             ->where('status', 'active');
+
+                        if ($scopeSchoolYearId) {
+                            $membershipQuery->where(function ($sq) use ($scopeSchoolYearId): void {
+                                $sq->whereNull('school_year_id')
+                                    ->orWhere('school_year_id', $scopeSchoolYearId);
+                            });
+                        }
                     });
             });
         }
@@ -413,6 +551,19 @@ class ParticipationScopeService
 
     public function userBelongsToScope(User $user, EventParticipationScope $scope): bool
     {
+        if ($scope->capture_mode === 'delegated_scanning' && $scope->delegated_to_organization_id) {
+            $scopeSchoolYearId = $scope->school_year_id ?: $scope->event?->school_year_id;
+            if ($user->organization_id === $scope->delegated_to_organization_id) {
+                return true;
+            }
+
+            return $user->activeOrganizationMemberships()
+                ->where('organization_id', $scope->delegated_to_organization_id)
+                ->where('status', 'active')
+                ->when($scopeSchoolYearId, fn ($query) => $query->where(fn ($sq) => $sq->whereNull('school_year_id')->orWhere('school_year_id', $scopeSchoolYearId)))
+                ->exists();
+        }
+
         return $this->audienceQuery($scope, requireRuntimeApproval: false)
             ->whereKey($user->id)
             ->exists();
@@ -434,11 +585,13 @@ class ParticipationScopeService
             return null;
         }
 
-        $scope->loadMissing(['organization', 'college', 'program']);
+        $scope->loadMissing(['organization', 'college', 'department', 'program', 'schoolYear']);
 
         return [
             'id' => $scope->id,
             'name' => $scope->displayName(),
+            'school_year_id' => $scope->school_year_id,
+            'department_id' => $scope->department_id,
             'participation_role' => $scope->participation_role,
             'participant_type' => $scope->participant_type,
             'capture_mode' => $scope->capture_mode,
@@ -450,6 +603,11 @@ class ParticipationScopeService
                 'name' => $scope->organization->name,
                 'acronym' => $scope->organization->acronym,
                 'type' => $scope->organization->type,
+            ] : null,
+            'department' => $scope->department ? [
+                'id' => $scope->department->id,
+                'name' => $scope->department->name,
+                'code' => $scope->department->code,
             ] : null,
         ];
     }

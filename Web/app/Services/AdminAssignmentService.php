@@ -6,7 +6,9 @@ use App\Models\AdminApplication;
 use App\Models\AdminAssignment;
 use App\Models\AuditLog;
 use App\Models\College;
+use App\Models\Department;
 use App\Models\Organization;
+use App\Models\SchoolYear;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -124,7 +126,8 @@ class AdminAssignmentService
         ?string $termEnd,
         ?string $positionTitle,
         User $approvedBy,
-        bool $isPrimaryAdmin = true
+        bool $isPrimaryAdmin = true,
+        ?Department $department = null
     ): AdminAssignment {
         $this->assertAdminRole($roleName);
 
@@ -138,17 +141,23 @@ class AdminAssignmentService
             $termEnd,
             $positionTitle,
             $approvedBy,
-            $isPrimaryAdmin
+            $isPrimaryAdmin,
+            $department
         ) {
             if ($isPrimaryAdmin) {
                 $this->assertPrimarySlotAvailable($roleName, $organization, $college, $academicYear);
             }
+
+            $schoolYear = SchoolYear::firstWhere('label', $academicYear)
+                ?? SchoolYear::active();
 
             $assignment = AdminAssignment::create([
                 'user_id' => $user->id,
                 'role_name' => $roleName,
                 'organization_id' => $organization?->id,
                 'college_id' => $college?->id ?: $organization?->college_id,
+                'department_id' => $department?->id ?: ($organization?->department_id ?: $user->department_id),
+                'school_year_id' => $schoolYear?->id,
                 'academic_year' => $academicYear,
                 'term_start' => $termStart,
                 'term_end' => $termEnd,

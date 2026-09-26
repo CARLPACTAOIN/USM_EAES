@@ -172,8 +172,10 @@
              x-data="participantAudienceBuilder({
                 audienceMode: $wire.entangle('audienceMode'),
                 selectedCollegeIds: $wire.entangle('selectedCollegeIds'),
+                selectedDepartmentIds: $wire.entangle('selectedDepartmentIds'),
                 selectedOrganizationIds: $wire.entangle('selectedOrganizationIds'),
                 collegeQuery: $wire.entangle('collegeQuery'),
+                departmentQuery: $wire.entangle('departmentQuery'),
                 organizationQuery: $wire.entangle('organizationQuery'),
                 captureMode: $wire.entangle('captureMode'),
                 ppaRequired: $wire.entangle('ppaRequired'),
@@ -182,6 +184,13 @@
                     'id' => $college->id,
                     'code' => $college->code,
                     'name' => $college->name,
+                ])->values()),
+                departments: @js($departmentOptions->map(fn ($department) => [
+                    'id' => $department->id,
+                    'code' => $department->code,
+                    'name' => $department->name,
+                    'college_code' => $department->college?->code,
+                    'college_name' => $department->college?->name,
                 ])->values()),
                 organizations: @js($organizationOptions->map(fn ($organization) => [
                     'id' => $organization->id,
@@ -224,6 +233,13 @@
                     College
                 </button>
                 <button type="button"
+                        class="participant-audience-segment {{ $audienceMode === 'department' ? 'is-active' : '' }}"
+                        x-bind:class="{ 'is-active': audienceMode === 'department' }"
+                        x-bind:aria-pressed="audienceMode === 'department' ? 'true' : 'false'"
+                        x-on:click="setAudienceMode('department')">
+                    Department
+                </button>
+                <button type="button"
                         class="participant-audience-segment {{ $audienceMode === 'organization' ? 'is-active' : '' }}"
                         x-bind:class="{ 'is-active': audienceMode === 'organization' }"
                         x-bind:aria-pressed="audienceMode === 'organization' ? 'true' : 'false'"
@@ -260,6 +276,30 @@
                             </label>
                         </template>
                         <p x-show="filteredColleges().length === 0" x-cloak class="rounded-lg border border-dashed border-(--color-border) bg-(--color-surface-muted) p-3 text-xs text-(--color-text-tertiary)">No Colleges match the search.</p>
+                    </div>
+            </div>
+
+            <div class="participant-audience-panel" x-show="audienceMode === 'department'" x-cloak>
+                    <label for="scope-dept-search-{{ $event->id }}" class="text-xs font-semibold text-(--color-text-secondary)">Find Departments</label>
+                    <input id="scope-dept-search-{{ $event->id }}"
+                           type="search"
+                           class="form-input text-sm mt-1"
+                           placeholder="Search Department code, name, or College"
+                           x-model.debounce.150ms="departmentQuery">
+                    @error('selectedDepartmentIds') <p class="form-error mt-2" role="alert">{{ $message }}</p> @enderror
+                    <div class="participant-audience-list mt-3">
+                        <template x-for="department in filteredDepartments()" :key="department.id">
+                            <label class="participant-audience-option">
+                                <input type="checkbox"
+                                       x-bind:value="department.id"
+                                       x-model="selectedDepartmentIds">
+                                <span>
+                                    <strong x-text="department.code"></strong>
+                                    <small x-text="department.name + (department.college_code ? ' - ' + department.college_code : '')"></small>
+                                </span>
+                            </label>
+                        </template>
+                        <p x-show="filteredDepartments().length === 0" x-cloak class="rounded-lg border border-dashed border-(--color-border) bg-(--color-surface-muted) p-3 text-xs text-(--color-text-tertiary)">No departments match the search.</p>
                     </div>
             </div>
 

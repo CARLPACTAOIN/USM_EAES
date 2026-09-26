@@ -40,6 +40,19 @@ class ScannerAssignmentService
             ]);
         }
 
+        if (! $assignedBy->hasRole('Super Admin (OSA)') && ! $assignedBy->can('assign-scanners-own')) {
+            throw ValidationException::withMessages([
+                'assigned_by' => 'User does not have permission to assign scanners.',
+            ]);
+        }
+
+        $adminScope = $this->adminScopes->forUser($assignedBy);
+        if (! $adminScope) {
+            throw ValidationException::withMessages([
+                'event_participation_scope_id' => 'Manager does not hold an active authority projection.',
+            ]);
+        }
+
         if (! $this->participationScopes->canManageScope($assignedBy, $participationScope)) {
             throw ValidationException::withMessages([
                 'event_participation_scope_id' => 'You cannot assign scanners for this attendance scope.',
@@ -64,6 +77,7 @@ class ScannerAssignmentService
         return DB::transaction(function () use ($event, $scannerUser, $assignedBy, $label, $maxDevices, $notes, $participationScope): EventScannerAssignment {
             $assignment = EventScannerAssignment::create([
                 'event_id' => $event->id,
+                'school_year_id' => $participationScope->school_year_id ?: $event->school_year_id,
                 'event_participation_scope_id' => $participationScope->id,
                 'audience_scope_type' => $participationScope->participant_type,
                 'scanner_user_id' => $scannerUser->id,
@@ -208,8 +222,10 @@ class ScannerAssignmentService
                         ->whereNotNull('qr_code_value')
                         ->where(function (Builder $scopeQuery): void {
                             $scopeQuery->whereNotNull('organization_id')
+                                ->orWhereNotNull('department_id')
                                 ->orWhereHas('activeOrganizationMemberships', function (Builder $membershipQuery): void {
-                                    $membershipQuery->whereNotNull('organization_id');
+                                    $membershipQuery->whereNotNull('organization_id')
+                                        ->orWhereNotNull('department_id');
                                 });
                         });
                 })->orWhereHas('employeeRosterEntry', function (Builder $employeeQuery): void {
@@ -242,6 +258,28 @@ class ScannerAssignmentService
 
     private function applyParticipationScope(Builder $query, EventParticipationScope $participationScope): void
     {
+        if ($participationScope->capture_mode === 'delegated_scanning' && $participationScope->delegated_to_organization_id) {
+            $delegatedOrgId = $participationScope->delegated_to_organization_id;
+            $scopeSchoolYearId = $participationScope->school_year_id ?: $participationScope->event?->school_year_id;
+
+            $query->where(function (Builder $query) use ($delegatedOrgId, $scopeSchoolYearId): void {
+                $query->where('organization_id', $delegatedOrgId)
+                    ->orWhereHas('activeOrganizationMemberships', function (Builder $membershipQuery) use ($delegatedOrgId, $scopeSchoolYearId): void {
+                        $membershipQuery->where('organization_id', $delegatedOrgId)
+                            ->where('status', 'active');
+
+                        if ($scopeSchoolYearId) {
+                            $membershipQuery->where(function ($sq) use ($scopeSchoolYearId): void {
+                                $sq->whereNull('school_year_id')
+                                    ->orWhere('school_year_id', $scopeSchoolYearId);
+                            });
+                        }
+                    });
+            });
+
+            return;
+        }
+
         $audienceQuery = $this->participationScopes
             ->audienceQuery($participationScope, requireRuntimeApproval: false)
             ->select('users.id');
@@ -287,7 +325,40 @@ class ScannerAssignmentService
             $query->where(function (Builder $query) use ($scope): void {
                 $query->where('college_id', $scope->collegeId)
                     ->orWhereHas('activeOrganizationMemberships', function (Builder $membershipQuery) use ($scope): void {
-                        $membershipQuery->where('college_id', $scope->collegeId);
+                        $membershipQuery->where('college_id', $scope->collegeId)
+                            ->where('status', 'active');
+
+                        if ($scope->schoolYearId) {
+                            $membershipQuery->where(function ($sq) use ($scope): void {
+                                $sq->whereNull('school_year_id')
+                                    ->orWhere('school_year_id', $scope->schoolYearId);
+                            });
+                        }
+                    });
+            });
+
+            return;
+        }
+
+        if ($scope->isAcademicUnitAdmin() || ($scope->departmentId && ! $scope->organizationId)) {
+            if (! $scope->departmentId) {
+                $query->whereRaw('1 = 0');
+
+                return;
+            }
+
+            $query->where(function (Builder $query) use ($scope): void {
+                $query->where('department_id', $scope->departmentId)
+                    ->orWhereHas('activeOrganizationMemberships', function (Builder $membershipQuery) use ($scope): void {
+                        $membershipQuery->where('department_id', $scope->departmentId)
+                            ->where('status', 'active');
+
+                        if ($scope->schoolYearId) {
+                            $membershipQuery->where(function ($sq) use ($scope): void {
+                                $sq->whereNull('school_year_id')
+                                    ->orWhere('school_year_id', $scope->schoolYearId);
+                            });
+                        }
                     });
             });
 
@@ -309,7 +380,15 @@ class ScannerAssignmentService
         $query->where(function (Builder $query) use ($scope): void {
             $query->where('organization_id', $scope->organizationId)
                 ->orWhereHas('activeOrganizationMemberships', function (Builder $membershipQuery) use ($scope): void {
-                    $membershipQuery->where('organization_id', $scope->organizationId);
+                    $membershipQuery->where('organization_id', $scope->organizationId)
+                        ->where('status', 'active');
+
+                    if ($scope->schoolYearId) {
+                        $membershipQuery->where(function ($sq) use ($scope): void {
+                            $sq->whereNull('school_year_id')
+                                ->orWhere('school_year_id', $scope->schoolYearId);
+                        });
+                    }
                 });
         });
     }
@@ -363,11 +442,15 @@ class ScannerAssignmentService
             return true;
         }
 
+        if (filled($user->department_id) && filled($user->college_id) && filled($user->program_id)) {
+            return true;
+        }
+
         $memberships = $user->relationLoaded('activeOrganizationMemberships')
             ? $user->activeOrganizationMemberships
             : $user->activeOrganizationMemberships()->get();
 
-        return $memberships->contains(fn ($membership) => filled($membership->organization_id)
+        return $memberships->contains(fn ($membership) => (filled($membership->organization_id) || filled($membership->department_id))
             && (filled($user->college_id) || filled($membership->college_id))
             && (filled($user->program_id) || filled($membership->program_id)));
     }
@@ -386,6 +469,10 @@ class ScannerAssignmentService
 
         if ($membershipLabel !== '') {
             return $membershipLabel;
+        }
+
+        if ($user->department) {
+            return $user->department->code ?: $user->department->name;
         }
 
         return $user->employeeRosterEntry?->office_department ?: 'No scope';

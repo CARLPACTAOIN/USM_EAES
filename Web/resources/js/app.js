@@ -580,16 +580,19 @@ Alpine.data('organizationForm', (config) => ({
 Alpine.data('participantAudienceBuilder', (config) => ({
     audienceMode: config.audienceMode,
     selectedCollegeIds: config.selectedCollegeIds,
+    selectedDepartmentIds: config.selectedDepartmentIds,
     selectedOrganizationIds: config.selectedOrganizationIds,
     collegeQuery: config.collegeQuery,
+    departmentQuery: config.departmentQuery,
     organizationQuery: config.organizationQuery,
     captureMode: config.captureMode,
     ppaRequired: config.ppaRequired,
     analyticsRollupEnabled: config.analyticsRollupEnabled,
     colleges: config.colleges || [],
+    departments: config.departments || [],
     organizations: config.organizations || [],
     setAudienceMode(mode) {
-        if (!['all', 'college', 'organization'].includes(mode)) {
+        if (!['all', 'college', 'department', 'organization'].includes(mode)) {
             return;
         }
 
@@ -598,6 +601,11 @@ Alpine.data('participantAudienceBuilder', (config) => ({
         if (mode !== 'college') {
             this.selectedCollegeIds = [];
             this.collegeQuery = '';
+        }
+
+        if (mode !== 'department') {
+            this.selectedDepartmentIds = [];
+            this.departmentQuery = '';
         }
 
         if (mode !== 'organization') {
@@ -617,6 +625,9 @@ Alpine.data('participantAudienceBuilder', (config) => ({
     filteredColleges() {
         return this.colleges.filter((college) => this.optionMatches(college, this.collegeQuery, ['code', 'name']));
     },
+    filteredDepartments() {
+        return this.departments.filter((department) => this.optionMatches(department, this.departmentQuery, ['code', 'name', 'college_code', 'college_name']));
+    },
     filteredOrganizations() {
         return this.organizations.filter((organization) => this.optionMatches(organization, this.organizationQuery, ['acronym', 'name', 'college_code', 'college_name']));
     },
@@ -627,6 +638,10 @@ Alpine.data('participantAudienceBuilder', (config) => ({
 
         if (this.audienceMode === 'college') {
             return this.selectedCollegeIds.length;
+        }
+
+        if (this.audienceMode === 'department') {
+            return this.selectedDepartmentIds.length;
         }
 
         return this.selectedOrganizationIds.length;

@@ -150,11 +150,11 @@
 | `admin_applications` | Off-PRD | Legacy table remains physically present although routes/controllers/UI are removed. Revised PRD cleanly removes this pre-deployment authority model rather than preserving it for production history. |
 | `admin_assignments` Authority Projection | Partial | The table now supports `school_year_id`, Department scope, and source metadata; verified President/Secretary records transactionally create or update exact-organization projections; replacements/revocations remove stale authority; OSA grant/replace overrides project into active assignments with `source_type=osa_override`; and active context selection drives tenant enforcement while Spatie remains the permission bundle. Source normalization for bootstrap/HR authority remains outstanding. |
 | `osa_authority_overrides` | Done | UUID table, model, factory, OSA-only advanced Admin Access surface, grant/replace/lock/revoke action validation, reason requirement, actor metadata, assignment projection, and audit logging implemented. |
-| `events` | Partial | Custom PPA columns, lifecycle phase, and event domain exist. Revised PRD adds `school_year_id` and historical hierarchy/authority context. |
+| `events` | Partial | Custom PPA columns, lifecycle phase, event domain, `school_year_id`, `department_id`, and immutable proposal governance snapshot context exist. Revised PRD adds full canonical packet reuse. |
 | `event_days` | Done | UUID schema defined and migrated |
 | `event_day_sessions` | Done | UUID configurable same-day session table added under `event_days`, with ordered non-overlapping session rows and required-for-attendance metadata |
-| `event_participation_scopes` | Partial | UUID organizer/participant scope, PPA status, capture mode, delegated owner, analytics roll-up, and participant late-cutoff behavior exist. Revised PRD adds School Year and Department scope and requires corrected hierarchy/membership/PPA resolver behavior. |
-| `event_scanner_assignments` | Done | UUID scanner assignment table separates admin intent from runtime sessions, with event/scope/user/assigned-by, audience type, status, revocation, expiry, max devices, notes, and last activation fields |
+| `event_participation_scopes` | Done | UUID organizer/participant scope, `school_year_id`, `department_id`, partial unique index `eps_active_participant_dept_unique`, Department scope builder, PPA status, capture mode, delegated owner, analytics roll-up, participant late-cutoff, and School-Year-aware manager authority validation implemented. |
+| `event_scanner_assignments` | Done | UUID scanner assignment table separates admin intent from runtime sessions, with `school_year_id`, event/scope/user/assigned-by, audience type, status, revocation, expiry, max devices, notes, last activation fields, and strict manager Authority Projection School Year gating |
 | `scanner_sessions` | Done | UUID scanner-session table added with event/scope/user/token, assignment link, label, device binding, status, expiry, revocation, and last-seen fields |
 | `raw_scans` | Done | Nullable student, QR, dedup_key, scanner-session/user audit, participation scope, captured-by organization/admin scope, event-day/session ids, server received, and processed markers migrated with UUID |
 | `attendance_records` | Done | EILO official attendance status, compatibility status mirror, participation scope, event-day/session identity, per-session completion status, validity, and override columns migrated with UUID |
@@ -189,6 +189,15 @@
 ---
 
 ## Sprint Notes
+
+- **2026-09-26 (School-Year-aware Participation Scopes and Scanner Assignments - Issue #29):**
+  - Carried `school_year_id` and `department_id` into `events` and `event_participation_scopes`, and added `school_year_id` to `event_scanner_assignments`.
+  - Added partial unique index `eps_active_participant_dept_unique` on `event_participation_scopes (event_id, department_id)` for active department scopes.
+  - Updated `ParticipationScopeService` and `EventParticipantScopes` Livewire component/view to support Department audience scopes alongside College, Organization, and All modes.
+  - Enforced manager active Authority Projection requirement covering the exact organization, scope, and School Year in `ScannerAssignmentService` and `ParticipationScopeService::canManageScope`.
+  - Added explicit scanner delegation support allowing delegated organization managers with matching School Year projections to assign scanners.
+  - Scoped scanner candidate listing to eligible institutional accounts within the scope's organization/department in the active School Year.
+  - Added comprehensive feature tests in `tests/Feature/SchoolYearAwareScannerAssignmentTest.php` covering School Year binding, cross-tenant denial, delegation, department scopes, candidate filtering, and web routes (7 tests, 23 assertions passing).
 
 - **2026-09-26 (Proposal Process Template Management - Issue #37):**
   - Added OSA-only Workflow Templates dashboard entry and management page for creating template drafts, editing ordered steps, prerequisites, assignment metadata, and applicability rules.
