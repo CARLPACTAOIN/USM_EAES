@@ -60,6 +60,20 @@
 - Keep UI work aligned with `PRD_V1.md` and the current project direction.
 - The UI/UX skill improves design quality and decision support, but it does not override product scope or PRD requirements.
 
+## Agent skills
+
+### Issue tracker
+
+Issues are tracked in GitHub Issues for `CARLPACTAOIN/USM_EAES` using the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+This repo uses the default five-label triage vocabulary. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+This repo uses single-context domain docs: root `CONTEXT.md` and root `docs/adr/`. See `docs/agents/domain.md`.
+
 ## EAES Technical Defaults (from PRD)
 
 When implementing backend work unless the PRD or an approved deviation says otherwise:

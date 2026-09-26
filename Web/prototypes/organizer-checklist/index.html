@@ -1,0 +1,959 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Prototype: Organizer Proposal Checklist</title>
+  <!--
+    PROTOTYPE ONLY: Three organizer proposal checklist variants, switchable via ?variant=A/B/C.
+    Current preferred direction: Variant A with Variant C's compact numbered progress rail embedded in the left checklist.
+    This file is a throwaway artifact for Wayfinder issue #5, not production Laravel UI.
+  -->
+  <style>
+    :root {
+      --bg: #f6f7f9;
+      --surface: #ffffff;
+      --surface-muted: #f0f4f7;
+      --ink: #172026;
+      --muted: #61717d;
+      --border: #d9e0e6;
+      --blue: #1d5fd0;
+      --blue-soft: #e8f0ff;
+      --green: #147d52;
+      --green-soft: #e7f6ef;
+      --amber: #996515;
+      --amber-soft: #fff4d7;
+      --red: #b42318;
+      --red-soft: #fee9e7;
+      --teal: #0f766e;
+      --violet: #6d28d9;
+      --shadow: 0 18px 45px rgba(23, 32, 38, 0.12);
+      color-scheme: light;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+    }
+
+    button,
+    input,
+    select,
+    textarea {
+      font: inherit;
+    }
+
+    .shell {
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: 260px minmax(0, 1fr);
+    }
+
+    .sidebar {
+      background: #10202f;
+      color: #eaf1f8;
+      padding: 24px 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .brand {
+      display: grid;
+      gap: 3px;
+    }
+
+    .brand strong {
+      font-size: 18px;
+      line-height: 1.2;
+    }
+
+    .brand span,
+    .sidebar .muted {
+      color: #b8c6d3;
+      font-size: 12px;
+    }
+
+    .nav {
+      display: grid;
+      gap: 6px;
+    }
+
+    .nav a {
+      color: #dce8f3;
+      text-decoration: none;
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 14px;
+    }
+
+    .nav a.active {
+      background: #20364a;
+      color: #ffffff;
+    }
+
+    .main {
+      padding: 24px;
+      display: grid;
+      gap: 18px;
+      align-content: start;
+      padding-bottom: 104px;
+    }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: center;
+    }
+
+    .title-stack {
+      display: grid;
+      gap: 4px;
+    }
+
+    .kicker {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0;
+    }
+
+    h1,
+    h2,
+    h3,
+    p {
+      margin: 0;
+    }
+
+    h1 {
+      font-size: clamp(24px, 3vw, 34px);
+      line-height: 1.1;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      font-size: 18px;
+      line-height: 1.25;
+    }
+
+    h3 {
+      font-size: 15px;
+      line-height: 1.3;
+    }
+
+    .btn,
+    .icon-btn {
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--ink);
+      min-height: 38px;
+      border-radius: 8px;
+      padding: 8px 12px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      cursor: pointer;
+      text-decoration: none;
+      font-weight: 700;
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    .btn.primary {
+      background: var(--blue);
+      border-color: var(--blue);
+      color: #ffffff;
+    }
+
+    .btn.success {
+      background: var(--green);
+      border-color: var(--green);
+      color: #ffffff;
+    }
+
+    .btn.danger {
+      background: var(--red);
+      border-color: var(--red);
+      color: #ffffff;
+    }
+
+    .btn:disabled {
+      cursor: not-allowed;
+      opacity: 0.52;
+    }
+
+    .toolbar {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .surface {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      box-shadow: 0 1px 2px rgba(23, 32, 38, 0.04);
+    }
+
+    .summary-row {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .metric {
+      padding: 14px;
+    }
+
+    .metric span {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .metric strong {
+      display: block;
+      margin-top: 6px;
+      font-size: 21px;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      width: fit-content;
+      border-radius: 999px;
+      padding: 4px 9px;
+      font-size: 12px;
+      font-weight: 800;
+      border: 1px solid transparent;
+    }
+
+    .badge.blue {
+      color: var(--blue);
+      background: var(--blue-soft);
+      border-color: #c9dcff;
+    }
+
+    .badge.green {
+      color: var(--green);
+      background: var(--green-soft);
+      border-color: #bfe8d2;
+    }
+
+    .badge.amber {
+      color: var(--amber);
+      background: var(--amber-soft);
+      border-color: #f3d897;
+    }
+
+    .badge.red {
+      color: var(--red);
+      background: var(--red-soft);
+      border-color: #ffc9c3;
+    }
+
+    .badge.neutral {
+      color: #4b5563;
+      background: #eef2f7;
+      border-color: #d6dee8;
+    }
+
+    .variant {
+      display: none;
+    }
+
+    .variant.active {
+      display: block;
+    }
+
+    .workspace-split {
+      display: grid;
+      grid-template-columns: minmax(260px, 0.85fr) minmax(0, 1.45fr);
+      gap: 14px;
+      align-items: start;
+    }
+
+    .panel {
+      padding: 16px;
+      display: grid;
+      gap: 14px;
+    }
+
+    .step-list {
+      display: grid;
+      gap: 8px;
+    }
+
+    .step-row {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      display: grid;
+      grid-template-columns: 42px minmax(0, 1fr);
+      gap: 12px;
+      background: #ffffff;
+      position: relative;
+    }
+
+    .rail-list .step-row:not(:last-child)::after {
+      content: "";
+      position: absolute;
+      left: 32px;
+      top: 54px;
+      bottom: -18px;
+      width: 4px;
+      background: #d8dee7;
+      border-radius: 999px;
+      z-index: 0;
+    }
+
+    .step-row.active {
+      border-color: #9fc1ff;
+      background: #f7faff;
+    }
+
+    .step-row.returned {
+      border-color: #ffc2bb;
+      background: #fff8f7;
+    }
+
+    .step-index {
+      width: 36px;
+      height: 36px;
+      border-radius: 999px;
+      background: #eef2f7;
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      font-size: 15px;
+      font-weight: 900;
+      position: relative;
+      z-index: 1;
+    }
+
+    .step-row.active .step-index {
+      background: var(--blue);
+      color: #ffffff;
+    }
+
+    .step-row.returned .step-index {
+      background: var(--red);
+      color: #ffffff;
+    }
+
+    .step-row.done .step-index {
+      background: var(--green);
+      color: #ffffff;
+    }
+
+    .step-copy {
+      display: grid;
+      gap: 5px;
+      min-width: 0;
+    }
+
+    .step-copy p,
+    .muted-text {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .detail-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .detail-item {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      background: #fbfcfd;
+      display: grid;
+      gap: 4px;
+    }
+
+    .detail-item span {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .action-strip {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      border: 1px solid #c9dcff;
+      background: var(--blue-soft);
+      border-radius: 8px;
+      padding: 14px;
+    }
+
+    .revision-note {
+      border-left: 4px solid var(--red);
+      background: var(--red-soft);
+      padding: 12px;
+      border-radius: 6px;
+      display: grid;
+      gap: 4px;
+    }
+
+    .kanban {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(180px, 1fr));
+      gap: 12px;
+      overflow-x: auto;
+      padding-bottom: 4px;
+    }
+
+    .lane {
+      min-width: 180px;
+      display: grid;
+      gap: 10px;
+      align-content: start;
+      padding: 12px;
+    }
+
+    .lane header {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .lane-card {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #ffffff;
+      padding: 12px;
+      display: grid;
+      gap: 8px;
+    }
+
+    .lane-card.returned {
+      border-color: #ffc2bb;
+      background: #fff8f7;
+    }
+
+    .review-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1.25fr) minmax(260px, 0.75fr);
+      gap: 14px;
+      align-items: start;
+    }
+
+    .timeline {
+      display: grid;
+      gap: 0;
+    }
+
+    .timeline-row {
+      display: grid;
+      grid-template-columns: 34px minmax(0, 1fr);
+      gap: 10px;
+      position: relative;
+      padding-bottom: 16px;
+    }
+
+    .timeline-row:not(:last-child)::before {
+      content: "";
+      position: absolute;
+      left: 16px;
+      top: 34px;
+      bottom: 0;
+      width: 2px;
+      background: var(--border);
+    }
+
+    .timeline-dot {
+      width: 34px;
+      height: 34px;
+      border-radius: 999px;
+      background: #ffffff;
+      border: 2px solid var(--border);
+      display: grid;
+      place-items: center;
+      font-weight: 900;
+      color: var(--muted);
+      z-index: 1;
+    }
+
+    .timeline-dot.done {
+      border-color: var(--green);
+      background: var(--green);
+      color: #ffffff;
+    }
+
+    .timeline-dot.active {
+      border-color: var(--blue);
+      background: var(--blue);
+      color: #ffffff;
+    }
+
+    .timeline-dot.returned {
+      border-color: var(--red);
+      background: var(--red);
+      color: #ffffff;
+    }
+
+    .timeline-body {
+      display: grid;
+      gap: 8px;
+      padding: 12px;
+    }
+
+    .permit-preview {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #fbfcfd;
+      padding: 14px;
+      display: grid;
+      gap: 10px;
+    }
+
+    .approval-block {
+      border-top: 1px solid var(--border);
+      padding-top: 10px;
+      display: grid;
+      gap: 4px;
+    }
+
+    .state-panel {
+      position: fixed;
+      right: 18px;
+      bottom: 82px;
+      width: min(360px, calc(100vw - 36px));
+      max-height: 38vh;
+      overflow: auto;
+      background: #101820;
+      color: #e7eef5;
+      border-radius: 8px;
+      padding: 12px;
+      box-shadow: var(--shadow);
+      font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+      font-size: 12px;
+      line-height: 1.45;
+      z-index: 20;
+    }
+
+    .state-panel strong {
+      display: block;
+      margin-bottom: 8px;
+      color: #ffffff;
+      font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+      font-size: 12px;
+      letter-spacing: 0;
+      text-transform: uppercase;
+    }
+
+    .variant-switcher {
+      position: fixed;
+      left: 50%;
+      bottom: 18px;
+      transform: translateX(-50%);
+      background: #101820;
+      color: #ffffff;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 999px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px;
+      box-shadow: var(--shadow);
+      z-index: 30;
+    }
+
+    .variant-switcher button {
+      width: 34px;
+      height: 34px;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      background: rgba(255, 255, 255, 0.08);
+      color: #ffffff;
+      cursor: pointer;
+      font-size: 18px;
+      line-height: 1;
+    }
+
+    .variant-label {
+      min-width: 180px;
+      text-align: center;
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    @media (max-width: 980px) {
+      .shell {
+        grid-template-columns: 1fr;
+      }
+
+      .sidebar {
+        display: none;
+      }
+
+      .main {
+        padding: 16px;
+        padding-bottom: 124px;
+      }
+
+      .workspace-split,
+      .review-layout {
+        grid-template-columns: 1fr;
+      }
+
+      .summary-row {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 640px) {
+      .topbar {
+        align-items: stretch;
+        flex-direction: column;
+      }
+
+      .toolbar {
+        justify-content: stretch;
+      }
+
+      .toolbar .btn {
+        flex: 1;
+      }
+
+      .summary-row,
+      .detail-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .state-panel {
+        display: none;
+      }
+
+      .variant-label {
+        min-width: 136px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar" aria-label="Dashboard navigation">
+      <div class="brand">
+        <strong>USM EAES</strong>
+        <span>Organizer dashboard prototype</span>
+      </div>
+      <nav class="nav" aria-label="Primary">
+        <a href="#">Overview</a>
+        <a class="active" href="#">Event proposals</a>
+        <a href="#">Attendance rules</a>
+        <a href="#">Scanner access</a>
+        <a href="#">Analytics</a>
+      </nav>
+      <p class="muted">Throwaway prototype for Wayfinder issue #5.</p>
+    </aside>
+
+    <main class="main">
+      <section class="topbar">
+        <div class="title-stack">
+          <p class="kicker">Proposal workspace</p>
+          <h1>PSITS General Assembly 2026</h1>
+          <p class="muted-text">Organizer checklist view attached to one proposal workflow run.</p>
+        </div>
+        <div class="toolbar" aria-label="Proposal actions">
+          <button class="btn">Edit packet</button>
+          <button class="btn primary">Resubmit</button>
+        </div>
+      </section>
+
+      <section class="summary-row" aria-label="Proposal summary">
+        <div class="metric surface"><span>Proposal status</span><strong>Revision requested</strong></div>
+        <div class="metric surface"><span>Workflow progress</span><strong>3 / 6 steps</strong></div>
+        <div class="metric surface"><span>Current owner</span><strong>Organizer</strong></div>
+        <div class="metric surface"><span>Template version</span><strong>SA-2026.04</strong></div>
+      </section>
+
+      <section id="variant-a" class="variant" aria-labelledby="variant-a-title">
+        <div class="workspace-split">
+          <aside class="panel surface">
+            <div>
+              <p class="kicker">Variant A</p>
+              <h2 id="variant-a-title">Two-pane action center + compact rail</h2>
+              <p class="muted-text">Chosen direction: one clear next action, with the compact progress rail embedded in this checklist.</p>
+            </div>
+            <div class="step-list rail-list" aria-label="Checklist steps with progress rail">
+              <article class="step-row done">
+                <span class="step-index">1</span>
+                <div class="step-copy">
+                  <h3>Proposal packet</h3>
+                  <span class="badge green">Approved</span>
+                  <p>Title, schedule, audience, budget, and evaluation form accepted.</p>
+                </div>
+              </article>
+              <article class="step-row returned">
+                <span class="step-index">2</span>
+                <div class="step-copy">
+                  <h3>Venue confirmation</h3>
+                  <span class="badge red">Revision requested</span>
+                  <p>Replace evidence file with confirmation from the venue office.</p>
+                </div>
+              </article>
+              <article class="step-row active">
+                <span class="step-index">3</span>
+                <div class="step-copy">
+                  <h3>Organization adviser review</h3>
+                  <span class="badge blue">Next after resubmission</span>
+                  <p>Will reopen automatically when the returned venue task is fixed.</p>
+                </div>
+              </article>
+              <article class="step-row">
+                <span class="step-index">4</span>
+                <div class="step-copy">
+                  <h3>OSA final approval</h3>
+                  <span class="badge neutral">Blocked</span>
+                  <p>Requires every prior task to be approved or marked not required.</p>
+                </div>
+              </article>
+            </div>
+          </aside>
+
+          <section class="panel surface">
+            <div class="action-strip">
+              <div>
+                <p class="kicker">Needs organizer action</p>
+                <h2>Replace the venue confirmation evidence</h2>
+              </div>
+              <button class="btn primary">Open packet editor</button>
+            </div>
+
+            <div class="revision-note">
+              <strong>OSA remarks</strong>
+              <p>The uploaded file is an inquiry screenshot. Please attach the signed venue office confirmation or official email thread with date and reference number.</p>
+            </div>
+
+            <div class="detail-grid">
+              <div class="detail-item"><span>Step owner</span><strong>Organizer</strong></div>
+              <div class="detail-item"><span>Returned by</span><strong>OSA Director</strong></div>
+              <div class="detail-item"><span>Decision time</span><strong>Sep 23, 2026 7:52 PM</strong></div>
+              <div class="detail-item"><span>Resubmission gate</span><strong>Evidence + reference number</strong></div>
+            </div>
+
+            <div>
+              <h3>Submission gates</h3>
+              <p class="muted-text">Draft saves remain available. Resubmission is blocked until venue evidence, official PPA softcopy, and the event evaluation snapshot are complete.</p>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section id="variant-b" class="variant" aria-labelledby="variant-b-title">
+        <div class="panel surface">
+          <div>
+            <p class="kicker">Variant B</p>
+            <h2 id="variant-b-title">Workflow board</h2>
+            <p class="muted-text">Best when organizers compare work by owner and want to see what is blocked, returned, or waiting.</p>
+          </div>
+          <div class="kanban" aria-label="Workflow board">
+            <section class="lane surface">
+              <header><h3>Organizer</h3><span class="badge red">1 action</span></header>
+              <article class="lane-card returned">
+                <span class="badge red">Revision requested</span>
+                <h3>Venue confirmation</h3>
+                <p class="muted-text">Upload official confirmation evidence and add the venue office reference number.</p>
+                <button class="btn primary">Fix step</button>
+              </article>
+            </section>
+            <section class="lane surface">
+              <header><h3>Approvers</h3><span class="badge amber">Waiting</span></header>
+              <article class="lane-card">
+                <span class="badge neutral">Blocked</span>
+                <h3>Organization adviser review</h3>
+                <p class="muted-text">Opens after organizer resubmits the returned venue step.</p>
+              </article>
+              <article class="lane-card">
+                <span class="badge green">Approved</span>
+                <h3>Organization head review</h3>
+                <p class="muted-text">Approved by Maria Santos on Sep 22, 2026.</p>
+              </article>
+            </section>
+            <section class="lane surface">
+              <header><h3>OSA</h3><span class="badge neutral">Blocked</span></header>
+              <article class="lane-card">
+                <span class="badge neutral">Blocked</span>
+                <h3>OSA final approval</h3>
+                <p class="muted-text">Requires all required approvals or not-required decisions.</p>
+              </article>
+            </section>
+            <section class="lane surface">
+              <header><h3>Permit</h3><span class="badge neutral">Locked</span></header>
+              <article class="lane-card">
+                <span class="badge neutral">Unavailable</span>
+                <h3>Digital Permit</h3>
+                <p class="muted-text">Unlocks after OSA final approval and approval trail completion.</p>
+              </article>
+            </section>
+          </div>
+        </div>
+      </section>
+
+      <section id="variant-c" class="variant" aria-labelledby="variant-c-title">
+        <div class="review-layout">
+          <section class="panel surface">
+            <div>
+              <p class="kicker">Variant C</p>
+              <h2 id="variant-c-title">Permit-centered timeline</h2>
+              <p class="muted-text">Best when the final permit is the anchor and approvals are shown as evidence blocks.</p>
+            </div>
+            <div class="timeline" aria-label="Approval timeline">
+              <article class="timeline-row">
+                <span class="timeline-dot done">1</span>
+                <div class="timeline-body surface">
+                  <span class="badge green">Approved</span>
+                  <h3>Proposal packet accepted</h3>
+                  <p class="muted-text">Organizer proposal fields, schedule, budget, and evaluation form snapshot passed the gate.</p>
+                </div>
+              </article>
+              <article class="timeline-row">
+                <span class="timeline-dot returned">2</span>
+                <div class="timeline-body surface">
+                  <span class="badge red">Returned</span>
+                  <h3>Venue evidence needs correction</h3>
+                  <p class="muted-text">OSA returned this item with remarks. The organizer can resubmit without starting a new workflow run.</p>
+                  <button class="btn primary">Update evidence</button>
+                </div>
+              </article>
+              <article class="timeline-row">
+                <span class="timeline-dot active">3</span>
+                <div class="timeline-body surface">
+                  <span class="badge neutral">Blocked</span>
+                  <h3>Adviser and OSA review</h3>
+                  <p class="muted-text">The next approval tasks remain blocked until the returned item is resubmitted.</p>
+                </div>
+              </article>
+            </div>
+          </section>
+
+          <aside class="panel surface">
+            <div class="permit-preview">
+              <p class="kicker">Digital Permit preview</p>
+              <h2>Locked until final approval</h2>
+              <p class="muted-text">The permit should show approval metadata blocks, not signature images.</p>
+              <div class="approval-block">
+                <span class="badge green">Approved</span>
+                <strong>Organization Head</strong>
+                <p class="muted-text">Maria Santos, Sep 22, 2026 4:18 PM</p>
+              </div>
+              <div class="approval-block">
+                <span class="badge red">Revision requested</span>
+                <strong>OSA Venue Gate</strong>
+                <p class="muted-text">Needs official confirmation evidence.</p>
+              </div>
+              <button class="btn" disabled>Download permit</button>
+            </div>
+          </aside>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <aside class="state-panel" aria-label="Prototype state">
+    <strong>Rendered state</strong>
+    <pre id="state-output"></pre>
+  </aside>
+
+  <div class="variant-switcher" aria-label="Prototype variant switcher">
+    <button type="button" id="prev-variant" aria-label="Previous variant">&lsaquo;</button>
+    <span id="variant-label" class="variant-label"></span>
+    <button type="button" id="next-variant" aria-label="Next variant">&rsaquo;</button>
+  </div>
+
+  <script>
+    const variants = [
+      { key: "A", name: "Chosen action center + rail", id: "variant-a" },
+      { key: "B", name: "Workflow board", id: "variant-b" },
+      { key: "C", name: "Permit timeline", id: "variant-c" }
+    ];
+
+    const prototypeState = {
+      proposalStatus: "revision_requested",
+      workflowRun: "SA-2026.04",
+      currentOwner: "organizer",
+      organizerAction: "replace_venue_confirmation_evidence",
+      submitGate: "blocked_until_required_packet_fields_complete",
+      returnedTask: {
+        step: "Venue confirmation",
+        decision: "revision_requested",
+        remarksRequired: true,
+        preservesWorkflowRun: true
+      },
+      finalPermit: {
+        available: false,
+        reason: "required approvals incomplete"
+      }
+    };
+
+    function currentVariantIndex() {
+      const params = new URLSearchParams(window.location.search);
+      const key = (params.get("variant") || "A").toUpperCase();
+      const index = variants.findIndex((variant) => variant.key === key);
+      return index >= 0 ? index : 0;
+    }
+
+    function setVariant(nextIndex) {
+      const variant = variants[(nextIndex + variants.length) % variants.length];
+      const params = new URLSearchParams(window.location.search);
+      params.set("variant", variant.key);
+      const nextUrl = `${window.location.pathname}?${params.toString()}`;
+      window.history.replaceState({}, "", nextUrl);
+      render();
+    }
+
+    function render() {
+      const index = currentVariantIndex();
+      const variant = variants[index];
+      variants.forEach((entry) => {
+        document.getElementById(entry.id).classList.toggle("active", entry.key === variant.key);
+      });
+      document.getElementById("variant-label").textContent = `${variant.key} (${variant.name})`;
+      document.getElementById("state-output").textContent = JSON.stringify({
+        variant: variant.key,
+        variantName: variant.name,
+        ...prototypeState
+      }, null, 2);
+    }
+
+    document.getElementById("prev-variant").addEventListener("click", () => setVariant(currentVariantIndex() - 1));
+    document.getElementById("next-variant").addEventListener("click", () => setVariant(currentVariantIndex() + 1));
+
+    document.addEventListener("keydown", (event) => {
+      const target = event.target;
+      const isEditing = target.matches("input, textarea, select, [contenteditable='true']");
+      if (isEditing) {
+        return;
+      }
+      if (event.key === "ArrowLeft") {
+        setVariant(currentVariantIndex() - 1);
+      }
+      if (event.key === "ArrowRight") {
+        setVariant(currentVariantIndex() + 1);
+      }
+    });
+
+    render();
+  </script>
+</body>
+</html>
