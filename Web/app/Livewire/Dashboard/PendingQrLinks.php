@@ -71,6 +71,7 @@ class PendingQrLinks extends Component
 
         if ($pendingLink->status !== 'pending') {
             $this->errorNotice = 'Only pending QR links can be resolved.';
+
             return;
         }
 
@@ -97,7 +98,7 @@ class PendingQrLinks extends Component
         }
 
         $student = User::findOrFail($payload['student_id']);
-        if (!$this->canResolveStudentForPendingLink($pendingLink, $student, auth()->user())) {
+        if (! $this->canResolveStudentForPendingLink($pendingLink, $student, auth()->user())) {
             abort(403, 'Student is outside the pending link organization boundary.');
         }
 
@@ -146,6 +147,7 @@ class PendingQrLinks extends Component
 
         if ($pendingLink->status !== 'pending') {
             $this->errorNotice = 'Only pending QR links can be flagged.';
+
             return;
         }
 
@@ -203,7 +205,7 @@ class PendingQrLinks extends Component
         $query = PendingStudentLink::with(['event', 'participationScope.organization', 'organization', 'rawScan'])
             ->where('status', 'pending')
             ->when($search !== '', function ($query) use ($search) {
-                $needle = '%' . mb_strtolower($search) . '%';
+                $needle = '%'.mb_strtolower($search).'%';
                 $query->where(function ($inner) use ($needle) {
                     $inner->whereRaw('LOWER(qr_code_value) LIKE ?', [$needle])
                         ->orWhereHas('event', fn ($eventQuery) => $eventQuery->whereRaw('LOWER(title) LIKE ?', [$needle]))
@@ -231,8 +233,9 @@ class PendingQrLinks extends Component
     {
         $scope = app(AdminScopeService::class)->forUser($user);
 
-        if (!$scope) {
+        if (! $scope) {
             $query->whereRaw('1 = 0');
+
             return;
         }
 
@@ -242,16 +245,19 @@ class PendingQrLinks extends Component
 
         if ($scope->isUsgAdmin()) {
             $query->whereHas('organization', fn ($orgQuery) => $orgQuery->where('type', 'usg')->orWhere('id', $scope->organizationId));
+
             return;
         }
 
         if ($scope->isLsgAdmin()) {
             $query->whereHas('organization', fn ($orgQuery) => $orgQuery->where('college_id', $scope->collegeId));
+
             return;
         }
 
-        if (!$scope->organizationId) {
+        if (! $scope->organizationId) {
             $query->whereRaw('1 = 0');
+
             return;
         }
 
@@ -262,7 +268,7 @@ class PendingQrLinks extends Component
     {
         $scope = app(AdminScopeService::class)->forUser($user);
 
-        if (!$scope) {
+        if (! $scope) {
             abort(403, 'Access denied. No active admin assignment found.');
         }
 
@@ -275,7 +281,7 @@ class PendingQrLinks extends Component
         }
 
         $targetOrg = $pendingLink->organization ?: Organization::findOrFail($pendingLink->organization_id);
-        if (!$scope->canAccessOrganization($targetOrg)) {
+        if (! $scope->canAccessOrganization($targetOrg)) {
             abort(403, $scope->isLsgAdmin()
                 ? 'Access denied. LSG Admin restricted to college boundary.'
                 : 'Access denied. Restricted to your organization boundary.');
@@ -284,21 +290,7 @@ class PendingQrLinks extends Component
 
     private function canResolveStudentForPendingLink(PendingStudentLink $pendingLink, User $student, User $admin): bool
     {
-        if ($pendingLink->participationScope && app(ParticipationScopeService::class)->userBelongsToScope($student, $pendingLink->participationScope)) {
-            return true;
-        }
-
-        if ($student->organization_id === $pendingLink->organization_id && !$pendingLink->event_participation_scope_id) {
-            return true;
-        }
-
-        $scope = app(AdminScopeService::class)->forUser($admin);
-
-        if ($scope?->isSuperAdmin()) {
-            return true;
-        }
-
-        return false;
+        return app(ParticipationScopeService::class)->canResolveStudentForPendingLink($pendingLink, $student, $admin);
     }
 
     private function authorizeDashboardAccess(): void

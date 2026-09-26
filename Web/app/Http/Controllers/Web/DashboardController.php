@@ -1634,20 +1634,6 @@ class DashboardController extends Controller
 
     private function canResolveStudentForPendingLink(PendingStudentLink $pendingLink, User $student, User $admin): bool
     {
-        if ($pendingLink->participationScope && $this->participationScopes->userBelongsToScope($student, $pendingLink->participationScope)) {
-            return true;
-        }
-
-        if ($student->organization_id === $pendingLink->organization_id && ! $pendingLink->event_participation_scope_id) {
-            return true;
-        }
-
-        $scope = $this->adminScopes->forUser($admin);
-
-        if ($scope?->isSuperAdmin()) {
-            return true;
-        }
-
-        return false;
+        return $this->participationScopes->canResolveStudentForPendingLink($pendingLink, $student, $admin);
     }
 }

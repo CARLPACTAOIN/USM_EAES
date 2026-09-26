@@ -286,13 +286,13 @@ class AttendanceSyncController extends Controller
 
         return $this->participationScopes
             ->audienceQuery($scope)
-            ->whereNotNull('qr_code_value')
+            ->whereNotNull('users.qr_code_value')
             ->select(
-                'id as student_id',
-                'qr_code_value',
-                'name',
-                'program_code',
-                'student_id_number',
+                'users.id as student_id',
+                'users.qr_code_value',
+                'users.name',
+                'users.program_code',
+                'users.student_id_number',
             )
             ->get();
     }

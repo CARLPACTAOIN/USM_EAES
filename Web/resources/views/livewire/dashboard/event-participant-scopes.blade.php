@@ -10,8 +10,8 @@
 
     <div class="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
         <div>
-            <h3 class="font-semibold text-sm text-(--color-text-primary)">Scope Register</h3>
-            <p class="text-xs text-(--color-text-tertiary)">Participant PPA actions update here without leaving the modal.</p>
+            <h3 class="font-semibold text-sm text-text-primary">Scope Register</h3>
+            <p class="text-xs text-text-tertiary">Participant PPA actions update here without leaving the modal.</p>
         </div>
         <span class="badge badge-pending">{{ $eventScopes->count() }} {{ Str::plural('scope', $eventScopes->count()) }}</span>
     </div>
@@ -31,11 +31,11 @@
                 <div class="grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(18rem,auto)]">
                     <div class="min-w-0">
                         <div class="flex flex-wrap items-center gap-2">
-                            <p class="text-sm font-semibold text-(--color-text-primary)">{{ $scope->displayName() }}</p>
+                            <p class="text-sm font-semibold text-text-primary">{{ $scope->displayName() }}</p>
                             <span class="badge badge-{{ $scope->participation_role === 'organizer' ? 'approved' : 'pending' }}">{{ ucfirst($scope->participation_role) }}</span>
                             <span class="badge badge-{{ str_replace('_', '-', $scope->ppa_status) }}">{{ ucwords(str_replace('_', ' ', $scope->ppa_status)) }}</span>
                         </div>
-                        <div class="mt-2 grid gap-1 text-xs text-(--color-text-secondary)">
+                        <div class="mt-2 grid gap-1 text-xs text-text-secondary">
                             <span>{{ ucwords(str_replace('_', ' ', $scope->participant_type)) }} · {{ ucwords(str_replace('_', ' ', $scope->capture_mode)) }}</span>
                             <span>
                                 Late cutoff:
@@ -49,12 +49,12 @@
                             </span>
                             <span>{{ $scope->analytics_rollup_enabled ? 'Included in roll-up analytics' : 'Excluded from roll-up analytics' }}</span>
                             @if($scope->participation_role === \App\Models\EventParticipationScope::ROLE_PARTICIPANT)
-                                <span class="{{ $scope->invitation_acknowledged_at ? 'text-(--color-success)' : 'text-(--color-warning)' }}">
+                                <span class="{{ $scope->invitation_acknowledged_at ? 'text-success' : 'text-warning' }}">
                                     {{ $scope->invitation_acknowledged_at ? 'Invitation acknowledged ' . $scope->invitation_acknowledged_at->diffForHumans() : 'Invitation not acknowledged' }}
                                 </span>
                             @endif
                             @if($scope->review_remarks)
-                                <span class="text-(--color-warning)">Review note: {{ $scope->review_remarks }}</span>
+                                <span class="text-warning">Review note: {{ $scope->review_remarks }}</span>
                             @endif
                         </div>
                     </div>
@@ -81,7 +81,7 @@
                                     @error('ppaSoftcopies.'.$scope->id)
                                         <p class="form-error" role="alert">{{ $message }}</p>
                                     @enderror
-                                    <p class="mt-1 text-[0.7rem] text-(--color-text-tertiary)">Hardcopy, org head, and adviser confirmations are submitted together.</p>
+                                    <p class="mt-1 text-[0.7rem] text-text-tertiary">Hardcopy, org head, and adviser confirmations are submitted together.</p>
                                 </div>
                                 <button type="submit"
                                         class="btn btn-sm btn-primary justify-center"
@@ -151,7 +151,7 @@
                         @endif
 
                         @if(!($actions['canAcknowledge'] ?? false) && !($actions['canSubmit'] ?? false) && !($actions['canReview'] ?? false) && !($actions['canFinalize'] ?? false))
-                            <span class="rounded-lg border border-(--color-border) bg-(--color-surface-muted) px-3 py-2 text-center text-xs font-medium text-(--color-text-tertiary)">
+                            <span class="rounded-lg border border-(--color-border) bg-(--color-surface-muted) px-3 py-2 text-center text-xs font-medium text-text-tertiary">
                                 No action needed
                             </span>
                         @endif
@@ -160,8 +160,8 @@
             </div>
         @empty
             <div class="rounded-lg border border-dashed border-(--color-border) bg-(--color-surface-muted) p-4">
-                <p class="text-sm font-medium text-(--color-text-primary)">No participant scopes yet</p>
-                <p class="mt-1 text-xs text-(--color-text-tertiary)">The organizer scope will be generated when the proposal is saved or backfilled by migration.</p>
+                <p class="text-sm font-medium text-text-primary">No participant scopes yet</p>
+                <p class="mt-1 text-xs text-text-tertiary">The organizer scope will be generated when the proposal is saved or backfilled by migration.</p>
             </div>
         @endforelse
     </div>
@@ -202,8 +202,8 @@
              })">
         <div class="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
             <div>
-                <h3 class="font-semibold text-sm text-(--color-text-primary)">Add Participant Scope</h3>
-                <p class="text-xs text-(--color-text-tertiary)">Choose who can participate; each selected College or org becomes its own scope.</p>
+                <h3 class="font-semibold text-sm text-text-primary">Add Participant Scope</h3>
+                <p class="text-xs text-text-tertiary">Choose who can participate; each selected College or org becomes its own scope.</p>
             </div>
             <p class="participant-audience-count" aria-live="polite" x-text="selectionLabel()">
                 @if($audienceMode === 'all')
@@ -251,12 +251,12 @@
             @error('audienceMode') <p class="form-error" role="alert">{{ $message }}</p> @enderror
 
             <div class="participant-audience-panel" x-show="audienceMode === 'all'" x-cloak>
-                    <p class="text-sm font-medium text-(--color-text-primary)">Every College audience will be invited.</p>
-                    <p class="mt-1 text-xs text-(--color-text-secondary)">This creates one College participant scope per College so scanner access, PPAs, acknowledgements, and analytics stay separate.</p>
+                    <p class="text-sm font-medium text-text-primary">Every College audience will be invited.</p>
+                    <p class="mt-1 text-xs text-text-secondary">This creates one College participant scope per College so scanner access, PPAs, acknowledgements, and analytics stay separate.</p>
             </div>
 
             <div class="participant-audience-panel" x-show="audienceMode === 'college'" x-cloak>
-                    <label for="scope-college-search-{{ $event->id }}" class="text-xs font-semibold text-(--color-text-secondary)">Find Colleges</label>
+                    <label for="scope-college-search-{{ $event->id }}" class="text-xs font-semibold text-text-secondary">Find Colleges</label>
                     <input id="scope-college-search-{{ $event->id }}"
                            type="search"
                            class="form-input text-sm mt-1"
@@ -275,12 +275,12 @@
                                 </span>
                             </label>
                         </template>
-                        <p x-show="filteredColleges().length === 0" x-cloak class="rounded-lg border border-dashed border-(--color-border) bg-(--color-surface-muted) p-3 text-xs text-(--color-text-tertiary)">No Colleges match the search.</p>
+                        <p x-show="filteredColleges().length === 0" x-cloak class="rounded-lg border border-dashed border-(--color-border) bg-(--color-surface-muted) p-3 text-xs text-text-tertiary">No Colleges match the search.</p>
                     </div>
             </div>
 
             <div class="participant-audience-panel" x-show="audienceMode === 'department'" x-cloak>
-                    <label for="scope-dept-search-{{ $event->id }}" class="text-xs font-semibold text-(--color-text-secondary)">Find Departments</label>
+                    <label for="scope-dept-search-{{ $event->id }}" class="text-xs font-semibold text-text-secondary">Find Departments</label>
                     <input id="scope-dept-search-{{ $event->id }}"
                            type="search"
                            class="form-input text-sm mt-1"
@@ -299,12 +299,12 @@
                                 </span>
                             </label>
                         </template>
-                        <p x-show="filteredDepartments().length === 0" x-cloak class="rounded-lg border border-dashed border-(--color-border) bg-(--color-surface-muted) p-3 text-xs text-(--color-text-tertiary)">No departments match the search.</p>
+                        <p x-show="filteredDepartments().length === 0" x-cloak class="rounded-lg border border-dashed border-(--color-border) bg-(--color-surface-muted) p-3 text-xs text-text-tertiary">No departments match the search.</p>
                     </div>
             </div>
 
             <div class="participant-audience-panel" x-show="audienceMode === 'organization'" x-cloak>
-                    <label for="scope-org-search-{{ $event->id }}" class="text-xs font-semibold text-(--color-text-secondary)">Find Organizations</label>
+                    <label for="scope-org-search-{{ $event->id }}" class="text-xs font-semibold text-text-secondary">Find Organizations</label>
                     <input id="scope-org-search-{{ $event->id }}"
                            type="search"
                            class="form-input text-sm mt-1"
@@ -323,13 +323,13 @@
                                 </span>
                             </label>
                         </template>
-                        <p x-show="filteredOrganizations().length === 0" x-cloak class="rounded-lg border border-dashed border-(--color-border) bg-(--color-surface-muted) p-3 text-xs text-(--color-text-tertiary)">No organizations match the search.</p>
+                        <p x-show="filteredOrganizations().length === 0" x-cloak class="rounded-lg border border-dashed border-(--color-border) bg-(--color-surface-muted) p-3 text-xs text-text-tertiary">No organizations match the search.</p>
                     </div>
             </div>
 
             <div class="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] lg:items-end">
                 <div>
-                    <label for="scope-capture-{{ $event->id }}" class="text-xs font-semibold text-(--color-text-secondary)">Capture mode</label>
+                    <label for="scope-capture-{{ $event->id }}" class="text-xs font-semibold text-text-secondary">Capture mode</label>
                     <select id="scope-capture-{{ $event->id }}" x-model="captureMode" class="form-input form-select text-sm mt-1" required>
                         <option value="self_scanning">Self scanning</option>
                         <option value="parent_scanning">Parent scanning</option>

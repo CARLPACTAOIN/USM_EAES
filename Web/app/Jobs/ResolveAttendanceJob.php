@@ -6,8 +6,10 @@ use App\Models\AttendanceRecord;
 use App\Models\Event;
 use App\Models\EventParticipationScope;
 use App\Models\RawScan;
+use App\Models\User;
 use App\Services\EventAnalyticsCache;
 use App\Services\EventSessionScheduleService;
+use App\Services\ParticipationScopeService;
 use Carbon\Carbon;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -62,9 +64,13 @@ class ResolveAttendanceJob implements ShouldQueue
         ];
     }
 
-    public function handle(EventAnalyticsCache $analyticsCache, ?EventSessionScheduleService $sessionSchedules = null): void
-    {
+    public function handle(
+        EventAnalyticsCache $analyticsCache,
+        ?EventSessionScheduleService $sessionSchedules = null,
+        ?ParticipationScopeService $participationScopesService = null
+    ): void {
         $sessionSchedules ??= app(EventSessionScheduleService::class);
+        $participationScopesService ??= app(ParticipationScopeService::class);
 
         if (empty($this->studentIds)) {
             return;
@@ -84,7 +90,7 @@ class ResolveAttendanceJob implements ShouldQueue
         $eventDays = $event->eventDays;
         $participationScopes = $event->participationScopes->keyBy('id');
 
-        DB::transaction(function () use ($eventId, $studentIds, $event, $eventDays, $eventParticipationScopeId, $participationScopes, $sessionSchedules): void {
+        DB::transaction(function () use ($eventId, $studentIds, $event, $eventDays, $eventParticipationScopeId, $participationScopes, $sessionSchedules, $participationScopesService): void {
             if ($eventParticipationScopeId) {
                 EventParticipationScope::query()
                     ->whereKey($eventParticipationScopeId)
@@ -118,6 +124,8 @@ class ResolveAttendanceJob implements ShouldQueue
                 });
 
             foreach ($studentIds as $studentId) {
+                $student = User::find($studentId);
+
                 $scopeKeys = $eventParticipationScopeId
                     ? [$studentId.'_'.$eventParticipationScopeId]
                     : $rawScans->keys()
@@ -133,6 +141,31 @@ class ResolveAttendanceJob implements ShouldQueue
                     }
 
                     $scopeId = $studentScans->first()?->event_participation_scope_id;
+                    $scope = $scopeId ? $participationScopes->get($scopeId) : null;
+
+                    // Resolve participant eligibility against active School Year scope
+                    $isEligible = true;
+                    if ($student && $scope) {
+                        $isEligible = $participationScopesService->userBelongsToScope($student, $scope);
+                    } elseif ($student && ! $scope && $event->organization_id) {
+                        $organizerScope = $participationScopesService->ensureOrganizerScope($event);
+                        $isEligible = $participationScopesService->userBelongsToScope($student, $organizerScope);
+                    }
+
+                    if (! $isEligible) {
+                        AttendanceRecord::where('event_id', $eventId)
+                            ->where('student_id', $studentId)
+                            ->when($scopeId, fn ($q) => $q->where('event_participation_scope_id', $scopeId))
+                            ->delete();
+
+                        RawScan::where('event_id', $eventId)
+                            ->where('student_id', $studentId)
+                            ->when($scopeId, fn ($query) => $query->where('event_participation_scope_id', $scopeId))
+                            ->whereNull('processed_at')
+                            ->update(['processed_at' => now()]);
+
+                        continue;
+                    }
 
                     // Group student scans by matching event-day session.
                     $scansBySession = [];

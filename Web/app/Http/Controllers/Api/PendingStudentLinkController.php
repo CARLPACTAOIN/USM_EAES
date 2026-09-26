@@ -201,20 +201,6 @@ class PendingStudentLinkController extends Controller
 
     private function canResolveStudentForPendingLink(PendingStudentLink $pendingStudentLink, User $student, User $user): bool
     {
-        if ($pendingStudentLink->participationScope && $this->participationScopes->userBelongsToScope($student, $pendingStudentLink->participationScope)) {
-            return true;
-        }
-
-        if (! $pendingStudentLink->event_participation_scope_id && $student->organization_id === $pendingStudentLink->organization_id) {
-            return true;
-        }
-
-        $scope = $this->adminScopes->forUser($user);
-
-        if ($scope?->isSuperAdmin()) {
-            return true;
-        }
-
-        return false;
+        return $this->participationScopes->canResolveStudentForPendingLink($pendingStudentLink, $student, $user);
     }
 }

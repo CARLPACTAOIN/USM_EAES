@@ -7,6 +7,7 @@ use App\Models\Department;
 use App\Models\Event;
 use App\Models\EventParticipationScope;
 use App\Models\Organization;
+use App\Models\PendingStudentLink;
 use App\Models\User;
 use DomainException;
 use Illuminate\Database\Eloquent\Builder;
@@ -464,7 +465,7 @@ class ParticipationScopeService
 
         if ($scope->event?->event_domain === 'hr' || $scope->participant_type === 'hr_unit') {
             return User::query()
-                ->whereIn('id', function ($query) use ($scope): void {
+                ->whereIn('users.id', function ($query) use ($scope): void {
                     $query->select('user_id')
                         ->from('employee_roster_entries')
                         ->whereNotNull('user_id')
@@ -477,27 +478,138 @@ class ParticipationScopeService
         $organization = $scope->organization;
         $scopeSchoolYearId = $scope->school_year_id ?: $scope->event?->school_year_id;
 
+        $departmentFilter = function (Builder $q) use ($scope, $scopeSchoolYearId): void {
+            $q->where(function (Builder $sub) use ($scope, $scopeSchoolYearId): void {
+                $sub->where('users.department_id', $scope->department_id)
+                    ->orWhere(function (Builder $fallback) use ($scope, $scopeSchoolYearId): void {
+                        $fallback->whereNull('users.department_id')
+                            ->where(function (Builder $progSub) use ($scope, $scopeSchoolYearId): void {
+                                $progSub->whereIn('users.program_id', function ($progQuery) use ($scope): void {
+                                    $progQuery->select('id')
+                                        ->from('programs')
+                                        ->where('department_id', $scope->department_id);
+                                })
+                                    ->orWhereIn('users.id', function ($mq) use ($scope, $scopeSchoolYearId): void {
+                                        $mq->select('user_id')
+                                            ->from('organization_memberships')
+                                            ->where('department_id', $scope->department_id)
+                                            ->where('status', 'active');
+
+                                        if ($scopeSchoolYearId) {
+                                            $mq->where(function ($sq) use ($scopeSchoolYearId): void {
+                                                $sq->whereNull('school_year_id')
+                                                    ->orWhere('school_year_id', $scopeSchoolYearId);
+                                            });
+                                        }
+                                    });
+                            });
+                    });
+            });
+        };
+
+        $programFilter = function (Builder $q) use ($scope, $scopeSchoolYearId): void {
+            $q->where(function (Builder $sub) use ($scope, $scopeSchoolYearId): void {
+                $sub->where('users.program_id', $scope->program_id)
+                    ->orWhere(function (Builder $fallback) use ($scope, $scopeSchoolYearId): void {
+                        $fallback->whereNull('users.program_id')
+                            ->whereIn('users.id', function ($mq) use ($scope, $scopeSchoolYearId): void {
+                                $mq->select('user_id')
+                                    ->from('organization_memberships')
+                                    ->where('program_id', $scope->program_id)
+                                    ->where('status', 'active');
+
+                                if ($scopeSchoolYearId) {
+                                    $mq->where(function ($sq) use ($scopeSchoolYearId): void {
+                                        $sq->whereNull('school_year_id')
+                                            ->orWhere('school_year_id', $scopeSchoolYearId);
+                                    });
+                                }
+                            });
+                    });
+            });
+        };
+
+        $collegeFilter = function (Builder $q) use ($scope, $scopeSchoolYearId): void {
+            $q->where(function (Builder $sub) use ($scope, $scopeSchoolYearId): void {
+                $sub->where('users.college_id', $scope->college_id)
+                    ->orWhere(function (Builder $fallback) use ($scope, $scopeSchoolYearId): void {
+                        $fallback->whereNull('users.college_id')
+                            ->whereIn('users.id', function ($mq) use ($scope, $scopeSchoolYearId): void {
+                                $mq->select('user_id')
+                                    ->from('organization_memberships')
+                                    ->where('college_id', $scope->college_id)
+                                    ->where('status', 'active');
+
+                                if ($scopeSchoolYearId) {
+                                    $mq->where(function ($sq) use ($scopeSchoolYearId): void {
+                                        $sq->whereNull('school_year_id')
+                                            ->orWhere('school_year_id', $scopeSchoolYearId);
+                                    });
+                                }
+                            });
+                    });
+            });
+        };
+
+        $organizationFilter = function (Builder $q) use ($scope, $scopeSchoolYearId): void {
+            $q->where(function (Builder $sub) use ($scope, $scopeSchoolYearId): void {
+                $sub->whereIn('users.id', function ($membershipQuery) use ($scope, $scopeSchoolYearId): void {
+                    $membershipQuery->select('user_id')
+                        ->from('organization_memberships')
+                        ->where('organization_id', $scope->organization_id)
+                        ->where('status', 'active');
+
+                    if ($scopeSchoolYearId) {
+                        $membershipQuery->where(function ($sq) use ($scopeSchoolYearId): void {
+                            $sq->whereNull('school_year_id')
+                                ->orWhere('school_year_id', $scopeSchoolYearId);
+                        });
+                    }
+                })->orWhere(function (Builder $fallbackQuery) use ($scope, $scopeSchoolYearId): void {
+                    $fallbackQuery->where('organization_id', $scope->organization_id)
+                        ->whereNotIn('users.id', function ($conflictQuery) use ($scope, $scopeSchoolYearId): void {
+                            $conflictQuery->select('user_id')
+                                ->from('organization_memberships')
+                                ->where('organization_id', $scope->organization_id);
+
+                            if ($scopeSchoolYearId) {
+                                $conflictQuery->where(function ($sq) use ($scopeSchoolYearId): void {
+                                    $sq->where('status', '!=', 'active')
+                                        ->orWhere(function ($yearQuery) use ($scopeSchoolYearId): void {
+                                            $yearQuery->whereNotNull('school_year_id')
+                                                ->where('school_year_id', '!=', $scopeSchoolYearId);
+                                        });
+                                });
+                            } else {
+                                $conflictQuery->where('status', '!=', 'active');
+                            }
+                        });
+                });
+            });
+        };
+
         if ($scope->participant_type === 'program' && $scope->program_id) {
-            return $query->where('program_id', $scope->program_id);
+            $query->where($programFilter);
+            if ($scope->department_id) {
+                $query->where($departmentFilter);
+            }
+            if ($scope->college_id) {
+                $query->where($collegeFilter);
+            }
+
+            return $query;
         }
 
         if ($scope->participant_type === 'department' && $scope->department_id) {
-            return $query->where(function ($query) use ($scope, $scopeSchoolYearId): void {
-                $query->where('department_id', $scope->department_id)
-                    ->orWhereIn('id', function ($membershipQuery) use ($scope, $scopeSchoolYearId): void {
-                        $membershipQuery->select('user_id')
-                            ->from('organization_memberships')
-                            ->where('department_id', $scope->department_id)
-                            ->where('status', 'active');
+            $query->where($departmentFilter);
+            if ($scope->program_id) {
+                $query->where($programFilter);
+            }
+            if ($scope->college_id) {
+                $query->where($collegeFilter);
+            }
 
-                        if ($scopeSchoolYearId) {
-                            $membershipQuery->where(function ($sq) use ($scopeSchoolYearId): void {
-                                $sq->whereNull('school_year_id')
-                                    ->orWhere('school_year_id', $scopeSchoolYearId);
-                            });
-                        }
-                    });
-            });
+            return $query;
         }
 
         if ($scope->participant_type === 'college' || ($organization?->type === 'lsg' && $scope->participation_role === EventParticipationScope::ROLE_ORGANIZER)) {
@@ -505,45 +617,43 @@ class ParticipationScopeService
                 return $query->whereRaw('1 = 0');
             }
 
-            return $query->where(function ($query) use ($scope, $scopeSchoolYearId): void {
-                $query->where('college_id', $scope->college_id)
-                    ->orWhereIn('id', function ($membershipQuery) use ($scope, $scopeSchoolYearId): void {
-                        $membershipQuery->select('user_id')
-                            ->from('organization_memberships')
-                            ->where('college_id', $scope->college_id)
-                            ->where('status', 'active');
+            $query->where($collegeFilter);
+            if ($scope->department_id) {
+                $query->where($departmentFilter);
+            }
+            if ($scope->program_id) {
+                $query->where($programFilter);
+            }
 
-                        if ($scopeSchoolYearId) {
-                            $membershipQuery->where(function ($sq) use ($scopeSchoolYearId): void {
-                                $sq->whereNull('school_year_id')
-                                    ->orWhere('school_year_id', $scopeSchoolYearId);
-                            });
-                        }
-                    });
-            });
+            return $query;
         }
 
         if ($organization?->type === 'usg' && $scope->participation_role === EventParticipationScope::ROLE_ORGANIZER) {
+            if ($scope->college_id) {
+                $query->where($collegeFilter);
+            }
+            if ($scope->department_id) {
+                $query->where($departmentFilter);
+            }
+            if ($scope->program_id) {
+                $query->where($programFilter);
+            }
+
             return $query;
         }
 
         if ($scope->organization_id) {
-            return $query->where(function ($query) use ($scope, $scopeSchoolYearId): void {
-                $query->where('organization_id', $scope->organization_id)
-                    ->orWhereIn('id', function ($membershipQuery) use ($scope, $scopeSchoolYearId): void {
-                        $membershipQuery->select('user_id')
-                            ->from('organization_memberships')
-                            ->where('organization_id', $scope->organization_id)
-                            ->where('status', 'active');
+            $query->where($organizationFilter);
 
-                        if ($scopeSchoolYearId) {
-                            $membershipQuery->where(function ($sq) use ($scopeSchoolYearId): void {
-                                $sq->whereNull('school_year_id')
-                                    ->orWhere('school_year_id', $scopeSchoolYearId);
-                            });
-                        }
-                    });
-            });
+            if ($scope->department_id && in_array($organization?->type, ['society', 'academic_unit'], true)) {
+                $query->where($departmentFilter);
+            }
+
+            if ($scope->program_id) {
+                $query->where($programFilter);
+            }
+
+            return $query;
         }
 
         return $query->whereRaw('1 = 0');
@@ -553,20 +663,95 @@ class ParticipationScopeService
     {
         if ($scope->capture_mode === 'delegated_scanning' && $scope->delegated_to_organization_id) {
             $scopeSchoolYearId = $scope->school_year_id ?: $scope->event?->school_year_id;
-            if ($user->organization_id === $scope->delegated_to_organization_id) {
-                return true;
-            }
-
-            return $user->activeOrganizationMemberships()
+            $hasActiveMembership = $user->activeOrganizationMemberships()
                 ->where('organization_id', $scope->delegated_to_organization_id)
                 ->where('status', 'active')
                 ->when($scopeSchoolYearId, fn ($query) => $query->where(fn ($sq) => $sq->whereNull('school_year_id')->orWhere('school_year_id', $scopeSchoolYearId)))
                 ->exists();
+
+            if ($hasActiveMembership) {
+                return true;
+            }
+
+            if ($user->organization_id === $scope->delegated_to_organization_id) {
+                $hasConflictingMembership = $user->organizationMemberships()
+                    ->where('organization_id', $scope->delegated_to_organization_id)
+                    ->where(function ($q) use ($scopeSchoolYearId): void {
+                        $q->where('status', '!=', 'active');
+                        if ($scopeSchoolYearId) {
+                            $q->orWhere(fn ($sq) => $sq->whereNotNull('school_year_id')->where('school_year_id', '!=', $scopeSchoolYearId));
+                        }
+                    })
+                    ->exists();
+
+                if (! $hasConflictingMembership) {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         return $this->audienceQuery($scope, requireRuntimeApproval: false)
-            ->whereKey($user->id)
+            ->where('users.id', $user->id)
             ->exists();
+    }
+
+    public function canResolveStudentForPendingLink(PendingStudentLink $pendingStudentLink, User $student, ?User $admin = null): bool
+    {
+        // 1. Must be a student account
+        if (! $student->hasRole('Student') && $student->user_type !== 'student') {
+            return false;
+        }
+
+        // 2. Validate hierarchy consistency
+        if ($student->department_id && $student->college_id) {
+            $student->loadMissing(['department', 'program']);
+            if ($student->department && $student->department->college_id !== $student->college_id) {
+                return false;
+            }
+        }
+
+        if ($student->program_id && $student->department_id) {
+            $student->loadMissing('program');
+            if ($student->program && $student->program->department_id !== $student->department_id) {
+                return false;
+            }
+        }
+
+        // 3. Resolve participant scope from link or event
+        $scope = $pendingStudentLink->participationScope;
+        if (! $scope && $pendingStudentLink->event_participation_scope_id) {
+            $scope = EventParticipationScope::find($pendingStudentLink->event_participation_scope_id);
+        }
+
+        if ($scope) {
+            return $this->userBelongsToScope($student, $scope);
+        }
+
+        $event = $pendingStudentLink->event ?: Event::find($pendingStudentLink->event_id);
+        if ($event) {
+            $organizerScope = $this->ensureOrganizerScope($event);
+
+            return $this->userBelongsToScope($student, $organizerScope);
+        }
+
+        if ($pendingStudentLink->organization_id) {
+            if ($student->organization_id === $pendingStudentLink->organization_id) {
+                return true;
+            }
+
+            return $student->activeOrganizationMemberships()
+                ->where('organization_id', $pendingStudentLink->organization_id)
+                ->where('status', 'active')
+                ->exists();
+        }
+
+        if ($admin && app(AdminScopeService::class)->forUser($admin)?->isSuperAdmin()) {
+            return true;
+        }
+
+        return false;
     }
 
     public function approvedParticipantScopes(Event $event): Collection
