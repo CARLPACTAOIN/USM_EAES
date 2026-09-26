@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class SchoolYear extends Model
 {
@@ -72,12 +73,20 @@ class SchoolYear extends Model
         return $this->belongsTo(User::class, 'transition_closed_by');
     }
 
+    public static function active(): ?self
+    {
+        return self::query()
+            ->where('status', self::STATUS_ACTIVE)
+            ->latest('activated_at')
+            ->first();
+    }
+
     public function isTransitionOpen(): bool
     {
         return $this->transition_started_at !== null && $this->transition_closed_at === null;
     }
 
-    public function officerRosters()
+    public function officerRosters(): HasMany
     {
         return $this->hasMany(OrganizationOfficerRoster::class);
     }

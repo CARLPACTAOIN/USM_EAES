@@ -40,6 +40,11 @@ class AdminAccessController extends Controller
         'update-organization-logo',
         'delete-organization-logo',
         'execute-osa-authority-override',
+        'create-proposal-process-template',
+        'update-proposal-process-template-draft',
+        'publish-proposal-process-template-version',
+        'retire-proposal-process-template-version',
+        'create-proposal-process-template-draft-version',
     ];
 
     private const AUDIT_ACTION_LABELS = [
@@ -59,6 +64,11 @@ class AdminAccessController extends Controller
         'update-organization-logo' => 'Organization Logo Updated',
         'delete-organization-logo' => 'Organization Logo Deleted',
         'execute-osa-authority-override' => 'OSA Authority Override',
+        'create-proposal-process-template' => 'Workflow Template Created',
+        'update-proposal-process-template-draft' => 'Workflow Template Draft Updated',
+        'publish-proposal-process-template-version' => 'Workflow Template Published',
+        'retire-proposal-process-template-version' => 'Workflow Template Retired',
+        'create-proposal-process-template-draft-version' => 'Workflow Template Draft Version Created',
     ];
 
     public function index(Request $request)

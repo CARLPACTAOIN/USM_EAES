@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Database\Factories\ProposalTemplateApplicabilityRuleFactory;
+use DomainException;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -46,6 +47,27 @@ class ProposalTemplateApplicabilityRule extends Model
             'effective_start' => 'datetime',
             'effective_end' => 'datetime',
         ];
+    }
+
+    protected static function booted(): void
+    {
+        static::saving(function (ProposalTemplateApplicabilityRule $rule): void {
+            if (in_array($rule->templateVersion?->status, [
+                ProposalProcessTemplateVersion::STATUS_PUBLISHED,
+                ProposalProcessTemplateVersion::STATUS_RETIRED,
+            ], true)) {
+                throw new DomainException('Cannot modify applicability rules of a locked template version.');
+            }
+        });
+
+        static::deleting(function (ProposalTemplateApplicabilityRule $rule): void {
+            if (in_array($rule->templateVersion?->status, [
+                ProposalProcessTemplateVersion::STATUS_PUBLISHED,
+                ProposalProcessTemplateVersion::STATUS_RETIRED,
+            ], true)) {
+                throw new DomainException('Cannot delete applicability rules of a locked template version.');
+            }
+        });
     }
 
     public function templateVersion(): BelongsTo

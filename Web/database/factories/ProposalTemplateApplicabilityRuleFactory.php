@@ -16,7 +16,7 @@ class ProposalTemplateApplicabilityRuleFactory extends Factory
     public function definition(): array
     {
         return [
-            'template_version_id' => ProposalProcessTemplateVersion::factory()->published(),
+            'template_version_id' => ProposalProcessTemplateVersion::factory(),
             'priority' => 0,
             'organizer_role' => null,
             'organization_type' => null,

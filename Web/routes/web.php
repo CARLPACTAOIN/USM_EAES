@@ -15,6 +15,7 @@ use App\Http\Controllers\Web\NotificationController;
 use App\Http\Controllers\Web\OfficerRosterController;
 use App\Http\Controllers\Web\OrganizationProfileController;
 use App\Http\Controllers\Web\PortalController;
+use App\Http\Controllers\Web\ProposalProcessTemplateController;
 use App\Http\Controllers\Web\SchoolYearController;
 use App\Http\Controllers\Web\VenueController;
 use App\Models\AdminAssignment;
@@ -118,6 +119,12 @@ Route::middleware(['auth'])->group(function () {
 
             // Admin User Provisioning (Super Admin only)
             Route::get('/admin-users', [AdminAccessController::class, 'index'])->name('dashboard.admin-users');
+            Route::get('/proposal-process-templates', [ProposalProcessTemplateController::class, 'index'])->name('dashboard.proposal-process-templates.index');
+            Route::post('/proposal-process-templates', [ProposalProcessTemplateController::class, 'store'])->name('dashboard.proposal-process-templates.store');
+            Route::put('/proposal-process-template-versions/{version}', [ProposalProcessTemplateController::class, 'update'])->name('dashboard.proposal-process-template-versions.update');
+            Route::post('/proposal-process-template-versions/{version}/publish', [ProposalProcessTemplateController::class, 'publish'])->name('dashboard.proposal-process-template-versions.publish');
+            Route::post('/proposal-process-template-versions/{version}/retire', [ProposalProcessTemplateController::class, 'retire'])->name('dashboard.proposal-process-template-versions.retire');
+            Route::post('/proposal-process-template-versions/{version}/draft', [ProposalProcessTemplateController::class, 'createDraft'])->name('dashboard.proposal-process-template-versions.draft');
             Route::get('/venue-availability', [VenueController::class, 'availability'])->name('dashboard.venue-availability');
             Route::get('/venues', [VenueController::class, 'index'])->name('dashboard.venues');
             Route::get('/admin-access', [AdminAccessController::class, 'index'])->name('dashboard.admin-access');
