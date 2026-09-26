@@ -4,6 +4,7 @@ namespace Database\Factories;
 
 use App\Models\Event;
 use App\Models\Organization;
+use App\Models\SchoolYear;
 use App\Models\Venue;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
@@ -49,7 +50,24 @@ class EventFactory extends Factory
             'venue_confirmation_document_original_name' => 'confirmation.pdf',
             'proposal_document_path' => 'proposal-documents/example.pdf',
             'proposal_document_original_name' => 'proposal.pdf',
-            'hardcopy_submitted' => true,
         ]);
+    }
+
+    public function withGovernanceSnapshots(?SchoolYear $schoolYear = null): static
+    {
+        return $this->state(function (array $attributes) use ($schoolYear): array {
+            $orgId = $attributes['organization_id'] ?? null;
+            $org = $orgId ? Organization::find($orgId) : null;
+            $schoolYear ??= SchoolYear::where('status', SchoolYear::STATUS_ACTIVE)->first();
+
+            return [
+                'school_year_id' => $schoolYear?->id,
+                'college_name_snapshot' => $org?->resolvedCollege()?->name ?? 'College of Science and Mathematics',
+                'department_name_snapshot' => $org?->department?->name ?? 'Department of Computer Science',
+                'program_name_snapshot' => $org?->programs()->first()?->name ?? 'Bachelor of Science in Computer Science',
+                'organization_name_snapshot' => $org?->name ?? 'Computer Science Society',
+                'proponent_name_snapshot' => fake()->name(),
+            ];
+        });
     }
 }

@@ -29,10 +29,21 @@ class Event extends Model
 
     protected $fillable = [
         'organization_id',
+        'school_year_id',
         'parent_event_id',
         'title',
         'proposal_category',
         'status', // Proposal workflow: "draft", "submitted", "under_review", "revision_requested", "approved", "rejected", "completed"
+        'college_name_snapshot',
+        'department_name_snapshot',
+        'program_name_snapshot',
+        'organization_name_snapshot',
+        'proponent_name_snapshot',
+        'proponent_user_id',
+        'org_head_user_id',
+        'dept_chair_user_id',
+        'college_dean_user_id',
+        'governance_snapshots',
         'lifecycle_phase',
         'event_domain',
         'start_date',
@@ -80,7 +91,58 @@ class Event extends Model
         'society_late_threshold_min' => 'integer',
         'general_competition_threshold_min' => 'integer',
         'left_early_buffer_min' => 'integer',
+        'governance_snapshots' => 'array',
     ];
+
+    public function schoolYear(): BelongsTo
+    {
+        return $this->belongsTo(SchoolYear::class);
+    }
+
+    public function proponent(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'proponent_user_id');
+    }
+
+    public function organizationHead(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'org_head_user_id');
+    }
+
+    public function departmentChairperson(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'dept_chair_user_id');
+    }
+
+    public function collegeDean(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'college_dean_user_id');
+    }
+
+    public function getCollegeSnapshotAttribute(): ?string
+    {
+        return $this->college_name_snapshot;
+    }
+
+    public function getDepartmentSnapshotAttribute(): ?string
+    {
+        return $this->department_name_snapshot;
+    }
+
+    public function getProgramSnapshotAttribute(): ?string
+    {
+        return $this->program_name_snapshot;
+    }
+
+    public function getOrganizationSnapshotAttribute(): ?string
+    {
+        return $this->organization_name_snapshot;
+    }
+
+    public function getProponentSnapshotAttribute(): ?string
+    {
+        return $this->proponent_name_snapshot;
+    }
 
     public function organization()
     {

@@ -8,6 +8,7 @@ use App\Models\Event;
 use App\Models\EventDay;
 use App\Models\EventPermitVersion;
 use App\Models\Organization;
+use App\Models\SchoolYear;
 use App\Models\User;
 use App\Models\Venue;
 use App\Notifications\EventWorkflowNotification;
@@ -40,6 +41,7 @@ class EventProposalDraftService
     public function __construct(
         private readonly ParticipationScopeService $participationScopes,
         private readonly EventSessionScheduleService $sessionSchedules,
+        private readonly ProposalGovernanceService $governance,
     ) {}
 
     /**
@@ -61,17 +63,33 @@ class EventProposalDraftService
         $documentPath = $proposalDocument?->store('proposal-documents');
         $confirmationPath = $confirmationDocument?->store('venue-confirmations');
 
+        $schoolYearId = $data['school_year_id'] ?? null;
+        $schoolYear = $schoolYearId ? SchoolYear::find($schoolYearId) : null;
+        $govContext = $this->governance->resolveGovernanceContext($organization, $actor, $schoolYear);
+        $snapshots = $govContext['snapshots'];
+
         try {
-            return DB::transaction(function () use ($actor, $confirmationDocument, $confirmationPath, $data, $documentPath, $isHrEvent, $proposalDocument, $venueData): Event {
+            return DB::transaction(function () use ($actor, $confirmationDocument, $confirmationPath, $data, $documentPath, $govContext, $isHrEvent, $proposalDocument, $snapshots, $venueData): Event {
                 $hardcopySubmitted = $isHrEvent ? false : $data['hardcopy_submitted'];
 
                 $event = Event::create([
                     'organization_id' => $data['organization_id'],
+                    'school_year_id' => $govContext['school_year_id'],
                     'parent_event_id' => $data['parent_event_id'],
                     'title' => $data['title'],
                     'event_domain' => $isHrEvent ? 'hr' : 'student_affairs',
                     'proposal_category' => $data['proposal_category'],
                     'status' => $isHrEvent ? Event::STATUS_APPROVED : Event::STATUS_DRAFT,
+                    'college_name_snapshot' => $snapshots['college_name_snapshot'],
+                    'department_name_snapshot' => $snapshots['department_name_snapshot'],
+                    'program_name_snapshot' => $snapshots['program_name_snapshot'],
+                    'organization_name_snapshot' => $snapshots['organization_name_snapshot'],
+                    'proponent_name_snapshot' => $snapshots['proponent_name_snapshot'],
+                    'proponent_user_id' => $snapshots['proponent_user_id'],
+                    'org_head_user_id' => $snapshots['org_head_user_id'],
+                    'dept_chair_user_id' => $snapshots['dept_chair_user_id'],
+                    'college_dean_user_id' => $snapshots['college_dean_user_id'],
+                    'governance_snapshots' => $snapshots,
                     'start_date' => $data['start_date'],
                     'end_date' => $data['end_date'],
                     'location_type' => $data['location_type'],
@@ -400,7 +418,7 @@ class EventProposalDraftService
                 'activity_role' => $this->normalizeActivityRole($packet['activity_role'] ?? null),
                 'proposal_category' => $data['proposal_category'],
                 'title' => $data['title'],
-                'proponent_name' => $this->blankToNull($packet['proponent_name'] ?? null) ?: $actor->name,
+                'proponent_name' => $this->blankToNull($packet['proponent_name'] ?? null) ?: ($event->proponent_name_snapshot ?: $actor->name),
                 'proponent_position' => $this->blankToNull($packet['proponent_position'] ?? null),
                 'proponent_organization' => $this->blankToNull($packet['proponent_organization'] ?? null) ?: $event->organization?->name,
                 'proponent_email' => $this->blankToNull($packet['proponent_email'] ?? null) ?: $actor->email,
@@ -430,7 +448,7 @@ class EventProposalDraftService
                 'budget_breakdown' => $this->normalizeBudgetBreakdown($packet['budget_breakdown'] ?? [], $budget),
                 'schedule_summary' => $this->scheduleSummary($data),
                 'venue_summary' => $this->venueSummary($data),
-                'prepared_by_user_id' => $actor->id,
+                'prepared_by_user_id' => $event->proponent_user_id ?: $actor->id,
             ]
         );
     }

@@ -42,12 +42,17 @@ return new class extends Migration
             $table->string('status')->default('active');
             $table->date('effective_start')->nullable();
             $table->date('effective_end')->nullable();
-            $table->foreignUuid('replacement_officer_id')->nullable()->constrained('organization_officers')->nullOnDelete();
+            $table->uuid('replacement_officer_id')->nullable();
             $table->json('metadata')->nullable();
             $table->timestamps();
 
             $table->index(['officer_roster_id', 'position_key'], 'organization_officers_roster_position_index');
             $table->index(['user_id', 'status'], 'organization_officers_user_status_index');
+        });
+
+        // PostgreSQL requires the table and primary key to exist before adding self-referencing FK
+        Schema::table('organization_officers', function (Blueprint $table): void {
+            $table->foreign('replacement_officer_id')->references('id')->on('organization_officers')->nullOnDelete();
         });
     }
 
