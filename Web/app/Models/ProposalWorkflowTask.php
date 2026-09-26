@@ -34,6 +34,8 @@ class ProposalWorkflowTask extends Model
 
     public const DECISION_REVISION_REQUESTED = 'revision_requested';
 
+    public const DECISION_NOT_REQUIRED = 'not_required';
+
     protected $fillable = [
         'workflow_run_id',
         'process_step_id',
@@ -94,5 +96,11 @@ class ProposalWorkflowTask extends Model
     {
         return $this->hasMany(WorkflowTaskAssignmentHistory::class, 'workflow_task_id')
             ->latest('reassigned_at');
+    }
+
+    public function approvalTrails(): HasMany
+    {
+        return $this->hasMany(ApprovalTrail::class, 'workflow_task_id')
+            ->latest('decided_at');
     }
 }

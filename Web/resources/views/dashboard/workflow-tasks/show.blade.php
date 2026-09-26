@@ -1,5 +1,10 @@
 <x-layouts.app :title="'Workflow Task - EAES'">
     @php($packet = $event->canonicalPpaPacket)
+    @php($decisionApproved = \App\Models\ProposalWorkflowTask::DECISION_APPROVED)
+    @php($decisionRejected = \App\Models\ProposalWorkflowTask::DECISION_REJECTED)
+    @php($decisionRevisionRequested = \App\Models\ProposalWorkflowTask::DECISION_REVISION_REQUESTED)
+    @php($decisionNotRequired = \App\Models\ProposalWorkflowTask::DECISION_NOT_REQUIRED)
+    @php($statusAvailable = \App\Models\ProposalWorkflowTask::STATUS_AVAILABLE)
     <div class="space-y-6">
         <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
@@ -12,6 +17,9 @@
 
         @if(session('success'))
             <div class="alert alert-success">{{ session('success') }}</div>
+        @endif
+        @if($errors->any())
+            <div class="alert alert-error">Please review the highlighted workflow task fields.</div>
         @endif
 
         <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
@@ -54,6 +62,34 @@
             </div>
 
             <aside class="space-y-6">
+                @if($task->assigned_user_id === auth()->id() && $task->status === $statusAvailable)
+                    <section class="card p-5">
+                        <h2 class="font-semibold text-(--color-text-primary)">Decision</h2>
+                        <form method="POST" action="{{ route('dashboard.workflow-tasks.decide', $task) }}" class="mt-4 space-y-4">
+                            @csrf
+                            <div>
+                                <label class="form-label" for="decision">Outcome</label>
+                                <select id="decision" name="decision" class="form-input @error('decision') form-input-error @enderror" required>
+                                    <option value="">Select outcome</option>
+                                    <option value="{{ $decisionApproved }}" @selected(old('decision') === $decisionApproved)>Approved</option>
+                                    <option value="{{ $decisionRevisionRequested }}" @selected(old('decision') === $decisionRevisionRequested)>Revision Requested</option>
+                                    <option value="{{ $decisionRejected }}" @selected(old('decision') === $decisionRejected)>Rejected</option>
+                                    @if(! $task->processStep?->is_required || data_get($task->processStep?->condition_config, 'allow_not_required'))
+                                        <option value="{{ $decisionNotRequired }}" @selected(old('decision') === $decisionNotRequired)>Not Required</option>
+                                    @endif
+                                </select>
+                                @error('decision') <p class="form-error">{{ $message }}</p> @enderror
+                            </div>
+                            <div>
+                                <label class="form-label" for="remarks">Remarks</label>
+                                <textarea id="remarks" name="remarks" class="form-input @error('remarks') form-input-error @enderror" rows="4" maxlength="2000">{{ old('remarks') }}</textarea>
+                                @error('remarks') <p class="form-error">{{ $message }}</p> @enderror
+                            </div>
+                            <button type="submit" class="btn btn-primary">Record Decision</button>
+                        </form>
+                    </section>
+                @endif
+
                 <section class="card p-5">
                     <h2 class="font-semibold text-(--color-text-primary)">Assignment</h2>
                     <dl class="mt-4 space-y-3 text-sm">
@@ -87,6 +123,24 @@
                         </form>
                     </section>
                 @endif
+
+                <section class="card p-5">
+                    <h2 class="font-semibold text-(--color-text-primary)">Approval Trail</h2>
+                    <div class="mt-4 space-y-3">
+                        @forelse($task->workflowRun->approvalTrails as $trail)
+                            <div class="rounded-md border border-(--color-border) p-3 text-sm">
+                                <div class="flex items-start justify-between gap-3">
+                                    <p class="font-semibold text-(--color-text-primary)">{{ str($trail->decision)->replace('_', ' ')->title() }}</p>
+                                    <span class="badge {{ in_array($trail->decision, [$decisionApproved, $decisionNotRequired], true) ? 'badge-approved' : 'badge-pending' }}">{{ $trail->reference_id }}</span>
+                                </div>
+                                <p class="text-xs text-(--color-text-tertiary)">By {{ $trail->actor?->name ?? 'System' }} | {{ $trail->decided_at?->format('M d, Y g:i A') }}</p>
+                                <p class="mt-2 text-(--color-text-secondary)">{{ $trail->remarks ?: 'No remarks provided.' }}</p>
+                            </div>
+                        @empty
+                            <p class="text-sm text-(--color-text-secondary)">No approval trail decisions yet.</p>
+                        @endforelse
+                    </div>
+                </section>
 
                 <section class="card p-5">
                     <h2 class="font-semibold text-(--color-text-primary)">Assignment History</h2>

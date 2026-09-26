@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Web;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\DecideWorkflowTaskRequest;
 use App\Models\ProposalWorkflowTask;
 use App\Models\User;
 use App\Services\ProposalWorkflowTaskService;
@@ -53,5 +54,21 @@ class WorkflowTaskController extends Controller
         return redirect()
             ->route('dashboard.workflow-tasks.show', $task)
             ->with('success', 'Workflow task reassigned with assignment history recorded.');
+    }
+
+    public function decide(DecideWorkflowTaskRequest $request, ProposalWorkflowTask $task): RedirectResponse
+    {
+        $validated = $request->validated();
+
+        $this->tasks->decide(
+            $task,
+            $request->user(),
+            $validated['decision'],
+            $validated['remarks'] ?? null
+        );
+
+        return redirect()
+            ->route('dashboard.workflow-tasks.show', $task)
+            ->with('success', 'Workflow task decision recorded in the Approval Trail.');
     }
 }

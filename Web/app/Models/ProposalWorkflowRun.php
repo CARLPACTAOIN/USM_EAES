@@ -66,6 +66,12 @@ class ProposalWorkflowRun extends Model
         return $this->hasMany(ProposalWorkflowTask::class, 'workflow_run_id')->orderBy('display_order');
     }
 
+    public function approvalTrails(): HasMany
+    {
+        return $this->hasMany(ApprovalTrail::class, 'workflow_run_id')
+            ->latest('decided_at');
+    }
+
     public function startedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'started_by');

@@ -71,6 +71,7 @@ Route::middleware(['auth'])->group(function () {
             Route::post('/notifications/read-all', [NotificationController::class, 'readAll'])->name('dashboard.notifications.read-all');
             Route::get('/workflow-tasks', [WorkflowTaskController::class, 'index'])->name('dashboard.workflow-tasks.index');
             Route::get('/workflow-tasks/{task}', [WorkflowTaskController::class, 'show'])->name('dashboard.workflow-tasks.show');
+            Route::post('/workflow-tasks/{task}/decision', [WorkflowTaskController::class, 'decide'])->name('dashboard.workflow-tasks.decide');
             Route::post('/workflow-tasks/{task}/reassign', [WorkflowTaskController::class, 'reassign'])->name('dashboard.workflow-tasks.reassign');
 
             // Events / PPA
