@@ -226,7 +226,7 @@ class AdminAssignmentService
     public function syncUserProjection(User $user): void
     {
         $activeAssignments = $user->adminAssignments()
-            ->where('status', AdminAssignment::STATUS_ACTIVE)
+            ->currentlyEffective()
             ->orderByDesc('is_primary_admin')
             ->orderByDesc('approved_at')
             ->get();
@@ -262,7 +262,7 @@ class AdminAssignmentService
         if ($application->organization_id) {
             $organization = $application->organization;
 
-            if ($organization && $application->logo_path && !$organization->logo_path) {
+            if ($organization && $application->logo_path && ! $organization->logo_path) {
                 $organization->update(['logo_path' => $application->logo_path]);
             }
 
@@ -278,7 +278,7 @@ class AdminAssignmentService
 
     private function assertAdminRole(string $roleName): void
     {
-        if (!in_array($roleName, self::ADMIN_ROLES, true)) {
+        if (! in_array($roleName, self::ADMIN_ROLES, true)) {
             throw ValidationException::withMessages(['role_name' => 'Invalid administrative role.']);
         }
     }

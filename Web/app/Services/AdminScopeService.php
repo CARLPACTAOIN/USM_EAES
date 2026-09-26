@@ -71,7 +71,7 @@ class AdminScopeService
     {
         return $user->adminAssignments()
             ->with(['organization', 'college', 'department', 'schoolYear'])
-            ->where('status', AdminAssignment::STATUS_ACTIVE)
+            ->currentlyEffective()
             ->whereIn('role_name', AdminAssignmentService::ADMIN_ROLES)
             ->where(function ($query): void {
                 $query->whereNull('school_year_id')

@@ -3,13 +3,18 @@
 namespace App\Http\Controllers\Web;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\StoreOsaAuthorityOverrideRequest;
 use App\Models\AdminAssignment;
 use App\Models\AuditLog;
 use App\Models\College;
 use App\Models\Organization;
+use App\Models\OsaAuthorityOverride;
+use App\Models\SchoolYear;
 use App\Models\User;
 use App\Services\AdminAssignmentService;
 use App\Services\OrganizationManagementService;
+use App\Services\OsaAuthorityOverrideService;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
@@ -34,6 +39,7 @@ class AdminAccessController extends Controller
         'update-organization',
         'update-organization-logo',
         'delete-organization-logo',
+        'execute-osa-authority-override',
     ];
 
     private const AUDIT_ACTION_LABELS = [
@@ -52,6 +58,7 @@ class AdminAccessController extends Controller
         'update-organization' => 'Organization Updated',
         'update-organization-logo' => 'Organization Logo Updated',
         'delete-organization-logo' => 'Organization Logo Deleted',
+        'execute-osa-authority-override' => 'OSA Authority Override',
     ];
 
     public function index(Request $request)
@@ -74,11 +81,13 @@ class AdminAccessController extends Controller
         $auditTo = $request->input('audit_to');
 
         $activeTab = $request->input('tab');
-        if (! in_array($activeTab, ['organizations', 'assignments', 'audit'], true)) {
+        if (! in_array($activeTab, ['organizations', 'assignments', 'overrides', 'audit'], true)) {
             if ($request->has('orgs_page') || $request->has('org_search') || $request->has('org_type') || $request->has('org_status')) {
                 $activeTab = 'organizations';
             } elseif ($request->has('page') || $request->has('assign_search') || $request->has('assign_role') || $request->has('assign_status') || $request->has('assign_term')) {
                 $activeTab = 'assignments';
+            } elseif ($request->has('overrides_page')) {
+                $activeTab = 'overrides';
             } elseif ($request->has('audit_page') || $request->has('audit_search') || $request->has('audit_action') || $request->has('audit_from') || $request->has('audit_to')) {
                 $activeTab = 'audit';
             } else {
@@ -177,6 +186,7 @@ class AdminAccessController extends Controller
         [$auditUsers, $auditOrganizations, $auditColleges] = $this->resolveAuditContext($auditLogs);
 
         $colleges = College::with(['departments', 'programs'])->orderBy('name')->get();
+        $schoolYears = SchoolYear::query()->orderByDesc('starts_on')->get();
         $adminRoles = AdminAssignmentService::ADMIN_ROLES;
         $assignableRoles = AdminAssignmentService::OSA_ASSIGNABLE_ROLES;
         $auditActions = self::AUDIT_ACTIONS;
@@ -187,6 +197,7 @@ class AdminAccessController extends Controller
             'active_organizations' => Organization::whereIn('type', OrganizationManagementService::ORGANIZATION_TYPES)->where('status', 'active')->count(),
             'total_organizations' => Organization::whereIn('type', OrganizationManagementService::ORGANIZATION_TYPES)->count(),
             'audit_logs' => AuditLog::whereIn('action', self::AUDIT_ACTIONS)->count(),
+            'active_overrides' => OsaAuthorityOverride::where('status', OsaAuthorityOverride::STATUS_ACTIVE)->count(),
         ];
 
         return view('dashboard.admin-users.index', compact(
@@ -194,6 +205,7 @@ class AdminAccessController extends Controller
             'organizations',
             'activeOrganizations',
             'colleges',
+            'schoolYears',
             'adminRoles',
             'assignableRoles',
             'auditLogs',
@@ -367,6 +379,14 @@ class AdminAccessController extends Controller
 
         return redirect()->route('dashboard.admin-users', ['tab' => 'assignments'])
             ->with('success', 'Admin assignment expired.');
+    }
+
+    public function storeAuthorityOverride(StoreOsaAuthorityOverrideRequest $request, OsaAuthorityOverrideService $service): RedirectResponse
+    {
+        $override = $service->execute($request->validated(), $request->user());
+
+        return redirect()->route('dashboard.admin-users', ['tab' => 'overrides'])
+            ->with('success', str($override->action)->headline().' authority override recorded.');
     }
 
     private function authorizeOsa(Request $request): void

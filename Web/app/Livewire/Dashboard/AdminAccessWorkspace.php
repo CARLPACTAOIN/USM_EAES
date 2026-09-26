@@ -6,9 +6,11 @@ use App\Models\AdminAssignment;
 use App\Models\AuditLog;
 use App\Models\College;
 use App\Models\Organization;
+use App\Models\OsaAuthorityOverride;
 use App\Models\User;
 use App\Services\AdminAssignmentService;
 use App\Services\OrganizationManagementService;
+use Illuminate\Database\Eloquent\Builder;
 use Livewire\Attributes\Locked;
 use Livewire\Attributes\Url;
 use Livewire\Component;
@@ -34,6 +36,7 @@ class AdminAccessWorkspace extends Component
         'update-organization',
         'update-organization-logo',
         'delete-organization-logo',
+        'execute-osa-authority-override',
     ];
 
     private const AUDIT_ACTION_LABELS = [
@@ -52,6 +55,7 @@ class AdminAccessWorkspace extends Component
         'update-organization' => 'Organization Updated',
         'update-organization-logo' => 'Organization Logo Updated',
         'delete-organization-logo' => 'Organization Logo Deleted',
+        'execute-osa-authority-override' => 'OSA Authority Override',
     ];
 
     #[Url(as: 'tab', except: 'organizations')]
@@ -78,6 +82,15 @@ class AdminAccessWorkspace extends Component
     #[Url(as: 'assign_term', except: '')]
     public string $assignTerm = '';
 
+    #[Url(as: 'override_search', except: '')]
+    public string $overrideSearch = '';
+
+    #[Url(as: 'override_action', except: '')]
+    public string $overrideAction = '';
+
+    #[Url(as: 'override_status', except: '')]
+    public string $overrideStatus = '';
+
     #[Url(as: 'audit_search', except: '')]
     public string $auditSearch = '';
 
@@ -103,7 +116,7 @@ class AdminAccessWorkspace extends Component
     {
         $this->authorizeOsa();
 
-        if (in_array($initialTab, ['organizations', 'assignments', 'audit'], true)) {
+        if (in_array($initialTab, ['organizations', 'assignments', 'overrides', 'audit'], true)) {
             $this->activeTab = $initialTab;
         }
 
@@ -115,6 +128,9 @@ class AdminAccessWorkspace extends Component
         $this->assignRole = (string) request('assign_role', $this->assignRole);
         $this->assignStatus = (string) request('assign_status', $this->assignStatus);
         $this->assignTerm = (string) request('assign_term', $this->assignTerm);
+        $this->overrideSearch = trim((string) request('override_search', $this->overrideSearch));
+        $this->overrideAction = (string) request('override_action', $this->overrideAction);
+        $this->overrideStatus = (string) request('override_status', $this->overrideStatus);
         $this->auditSearch = trim((string) request('audit_search', $this->auditSearch));
         $this->auditAction = (string) request('audit_action', $this->auditAction);
         $this->auditFrom = (string) request('audit_from', $this->auditFrom);
@@ -123,7 +139,7 @@ class AdminAccessWorkspace extends Component
 
     public function setTab(string $tab): void
     {
-        if (in_array($tab, ['organizations', 'assignments', 'audit'], true)) {
+        if (in_array($tab, ['organizations', 'assignments', 'overrides', 'audit'], true)) {
             $this->activeTab = $tab;
         }
     }
@@ -139,6 +155,10 @@ class AdminAccessWorkspace extends Component
 
         if (str_starts_with($property, 'assign')) {
             $this->resetPage('assignmentsPage');
+        }
+
+        if (str_starts_with($property, 'override')) {
+            $this->resetPage('overridesPage');
         }
 
         if (str_starts_with($property, 'audit')) {
@@ -161,6 +181,14 @@ class AdminAccessWorkspace extends Component
         $this->assignStatus = '';
         $this->assignTerm = '';
         $this->resetPage('assignmentsPage');
+    }
+
+    public function clearOverrideFilters(): void
+    {
+        $this->overrideSearch = '';
+        $this->overrideAction = '';
+        $this->overrideStatus = '';
+        $this->resetPage('overridesPage');
     }
 
     public function clearAuditFilters(): void
@@ -234,16 +262,21 @@ class AdminAccessWorkspace extends Component
         $auditLogs = $this->auditQuery()
             ->paginate(12, ['*'], 'auditPage');
 
+        $overrides = $this->overrideQuery()
+            ->paginate(12, ['*'], 'overridesPage');
+
         [$auditUsers, $auditOrganizations, $auditColleges] = $this->resolveAuditContext($auditLogs);
 
         return view('livewire.dashboard.admin-access-workspace', [
             'assignments' => $assignments,
             'organizations' => $organizations,
+            'overrides' => $overrides,
             'auditLogs' => $auditLogs,
             'auditUsers' => $auditUsers,
             'auditOrganizations' => $auditOrganizations,
             'auditColleges' => $auditColleges,
             'adminRoles' => AdminAssignmentService::ADMIN_ROLES,
+            'overrideActions' => OsaAuthorityOverride::actions(),
             'auditActions' => self::AUDIT_ACTIONS,
             'auditActionLabels' => self::AUDIT_ACTION_LABELS,
         ]);
@@ -309,6 +342,36 @@ class AdminAccessWorkspace extends Component
                 });
             })
             ->orderBy('name');
+    }
+
+    private function overrideQuery(): Builder
+    {
+        $overrideSearch = trim($this->overrideSearch);
+
+        return OsaAuthorityOverride::with(['targetUser', 'organization', 'college', 'schoolYear', 'actor', 'projectedAssignment'])
+            ->when(in_array($this->overrideAction, OsaAuthorityOverride::actions(), true), function ($query) {
+                $query->where('action', $this->overrideAction);
+            })
+            ->when(in_array($this->overrideStatus, [OsaAuthorityOverride::STATUS_ACTIVE], true), function ($query) {
+                $query->where('status', $this->overrideStatus);
+            })
+            ->when($overrideSearch !== '', function ($query) use ($overrideSearch) {
+                $needle = '%'.mb_strtolower($overrideSearch).'%';
+                $query->where(function ($inner) use ($needle) {
+                    $inner->whereRaw('LOWER(action) LIKE ?', [$needle])
+                        ->orWhereRaw('LOWER(role_name) LIKE ?', [$needle])
+                        ->orWhereRaw('LOWER(reason) LIKE ?', [$needle])
+                        ->orWhereHas('targetUser', function ($userQuery) use ($needle) {
+                            $userQuery->whereRaw('LOWER(name) LIKE ?', [$needle])
+                                ->orWhereRaw('LOWER(email) LIKE ?', [$needle]);
+                        })
+                        ->orWhereHas('organization', function ($organizationQuery) use ($needle) {
+                            $organizationQuery->whereRaw('LOWER(name) LIKE ?', [$needle])
+                                ->orWhereRaw('LOWER(acronym) LIKE ?', [$needle]);
+                        });
+                });
+            })
+            ->latest();
     }
 
     private function auditQuery()

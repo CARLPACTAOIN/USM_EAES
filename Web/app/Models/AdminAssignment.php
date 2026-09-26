@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -18,6 +19,8 @@ class AdminAssignment extends Model
     public const STATUS_REVOKED = 'revoked';
 
     public const SOURCE_VERIFIED_OFFICER = 'verified_officer';
+
+    public const SOURCE_OSA_OVERRIDE = 'osa_override';
 
     protected $fillable = [
         'user_id',
@@ -48,6 +51,29 @@ class AdminAssignment extends Model
         'revoked_at' => 'datetime',
         'is_primary_admin' => 'boolean',
     ];
+
+    public function scopeCurrentlyEffective(Builder $query): Builder
+    {
+        $today = today()->toDateString();
+
+        return $query
+            ->where('status', self::STATUS_ACTIVE)
+            ->where(function (Builder $query) use ($today): void {
+                $query->where('source_type', '!=', self::SOURCE_OSA_OVERRIDE)
+                    ->orWhereNull('source_type')
+                    ->orWhere(function (Builder $overrideQuery) use ($today): void {
+                        $overrideQuery
+                            ->where(function (Builder $query) use ($today): void {
+                                $query->whereNull('term_start')
+                                    ->orWhereDate('term_start', '<=', $today);
+                            })
+                            ->where(function (Builder $query) use ($today): void {
+                                $query->whereNull('term_end')
+                                    ->orWhereDate('term_end', '>=', $today);
+                            });
+                    });
+            });
+    }
 
     public function user()
     {

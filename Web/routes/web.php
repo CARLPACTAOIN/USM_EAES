@@ -135,6 +135,7 @@ Route::middleware(['auth'])->group(function () {
             Route::put('/organizations/{organization}', [AdminAccessController::class, 'updateOrganization'])->name('dashboard.organizations.update');
             Route::post('/admin-assignments/{assignment}/revoke', [AdminAccessController::class, 'revoke'])->name('dashboard.admin-assignments.revoke');
             Route::post('/admin-assignments/{assignment}/expire', [AdminAccessController::class, 'expire'])->name('dashboard.admin-assignments.expire');
+            Route::post('/osa-authority-overrides', [AdminAccessController::class, 'storeAuthorityOverride'])->name('dashboard.osa-authority-overrides.store');
 
             // Officer Roster (PRD Feature 1.3)
             Route::get('/organizations/{organization}/officer-roster', [OfficerRosterController::class, 'show'])->name('dashboard.officer-rosters.show');

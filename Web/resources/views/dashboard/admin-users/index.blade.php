@@ -42,6 +42,12 @@
             </div>
             <div class="admin-access-hero-actions">
                 <button type="button"
+                        onclick="document.getElementById('authority-override-modal')?.showModal()"
+                        class="btn btn-secondary cursor-pointer">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 6v6l3 3m5.66-6.66l-1.41 1.41M4.75 9.75L3.34 8.34m15.91 7.91l1.41 1.41M3.34 17.66l1.41-1.41M12 2.75v2M12 19.25v2"/></svg>
+                    OSA Override
+                </button>
+                <button type="button"
                         onclick="document.getElementById('assign-admin-modal')?.showModal()"
                         class="btn btn-primary cursor-pointer">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 4v16m8-8H4"/></svg>
@@ -115,6 +121,21 @@
                 </div>
                 <span class="admin-access-metric-note">governance actions available for review</span>
             </article>
+            <article class="admin-access-metric admin-access-metric--roles">
+                <div class="admin-access-metric-top">
+                    <span class="admin-access-metric-icon" aria-hidden="true">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 6v6l3 3m5.66-6.66l-1.41 1.41M4.75 9.75L3.34 8.34m15.91 7.91l1.41 1.41M3.34 17.66l1.41-1.41M12 2.75v2M12 19.25v2"/>
+                        </svg>
+                    </span>
+                    <span class="admin-access-metric-label">Active Overrides</span>
+                </div>
+                <div class="admin-access-metric-main">
+                    <strong class="admin-access-metric-value">{{ $stats['active_overrides'] }}</strong>
+                    <span class="admin-access-metric-badge">Reasoned</span>
+                </div>
+                <span class="admin-access-metric-note">exceptional authority records</span>
+            </article>
         </div>
 
         {{-- Assignment creation --}}
@@ -172,10 +193,150 @@
         </form>
     </dialog>
 
+    {{-- OSA authority override modal --}}
+    <dialog id="authority-override-modal"
+            class="proposal-modal modal-sm"
+            aria-labelledby="authority-override-modal-title"
+            onclick="if (event.target === this) this.close()">
+        <form method="POST"
+              action="{{ route('dashboard.osa-authority-overrides.store') }}"
+              class="proposal-modal-form">
+            @csrf
+            <input type="hidden" name="override_form" value="1">
+            <div class="proposal-modal-header">
+                <div class="proposal-modal-title-row">
+                    <span class="proposal-modal-icon" aria-hidden="true">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 6v6l3 3m5.66-6.66l-1.41 1.41M4.75 9.75L3.34 8.34m15.91 7.91l1.41 1.41M3.34 17.66l1.41-1.41M12 2.75v2M12 19.25v2"/></svg>
+                    </span>
+                    <div>
+                        <p class="proposal-modal-kicker">OSA exception control</p>
+                        <h2 id="authority-override-modal-title" class="proposal-modal-title">Authority Override</h2>
+                    </div>
+                </div>
+                <button type="button" onclick="document.getElementById('authority-override-modal').close()" class="btn-icon btn-ghost" aria-label="Close">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <div class="proposal-modal-body space-y-4">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                        <label class="form-label">Action</label>
+                        <select name="action" class="form-input form-select @error('action') form-input-error @enderror" required>
+                            <option value="grant" @selected(old('action', 'grant') === 'grant')>Grant</option>
+                            <option value="replace" @selected(old('action') === 'replace')>Replace</option>
+                            <option value="lock" @selected(old('action') === 'lock')>Lock</option>
+                            <option value="revoke" @selected(old('action') === 'revoke')>Revoke</option>
+                        </select>
+                        @error('action') <p class="form-error" role="alert">{{ $message }}</p> @enderror
+                    </div>
+                    <div>
+                        <label class="form-label">Target User ID</label>
+                        <input type="text" name="target_user_id" value="{{ old('target_user_id') }}" class="form-input @error('target_user_id') form-input-error @enderror" placeholder="UUID for grant or replace">
+                        @error('target_user_id') <p class="form-error" role="alert">{{ $message }}</p> @enderror
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                        <label class="form-label">Role</label>
+                        <select name="role_name" class="form-input form-select @error('role_name') form-input-error @enderror">
+                            <option value="">Select role</option>
+                            @foreach($assignableRoles as $roleName)
+                                <option value="{{ $roleName }}" @selected(old('role_name') === $roleName)>{{ $roleName }}</option>
+                            @endforeach
+                        </select>
+                        @error('role_name') <p class="form-error" role="alert">{{ $message }}</p> @enderror
+                    </div>
+                    <div>
+                        <label class="form-label">Source Assignment ID</label>
+                        <input type="text" name="assignment_id" value="{{ old('assignment_id') }}" class="form-input @error('assignment_id') form-input-error @enderror" placeholder="Required for revoke">
+                        @error('assignment_id') <p class="form-error" role="alert">{{ $message }}</p> @enderror
+                    </div>
+                </div>
+
+                <div>
+                    <label class="form-label">Organization Scope</label>
+                    <select name="organization_id" class="form-input form-select @error('organization_id') form-input-error @enderror">
+                        <option value="">University-wide or assignment-derived</option>
+                        @foreach($activeOrganizations as $organization)
+                            <option value="{{ $organization->id }}" @selected(old('organization_id') === $organization->id)>{{ $organization->acronym }} - {{ $organization->name }}</option>
+                        @endforeach
+                    </select>
+                    @error('organization_id') <p class="form-error" role="alert">{{ $message }}</p> @enderror
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                        <label class="form-label">College Scope</label>
+                        <select name="college_id" class="form-input form-select @error('college_id') form-input-error @enderror">
+                            <option value="">None or organization-derived</option>
+                            @foreach($colleges as $college)
+                                <option value="{{ $college->id }}" @selected(old('college_id') === $college->id)>{{ $college->code }} - {{ $college->name }}</option>
+                            @endforeach
+                        </select>
+                        @error('college_id') <p class="form-error" role="alert">{{ $message }}</p> @enderror
+                    </div>
+                    <div>
+                        <label class="form-label">School Year</label>
+                        <select name="school_year_id" class="form-input form-select @error('school_year_id') form-input-error @enderror">
+                            <option value="">None</option>
+                            @foreach($schoolYears as $schoolYear)
+                                <option value="{{ $schoolYear->id }}" @selected(old('school_year_id') === $schoolYear->id)>{{ $schoolYear->label }} - {{ ucfirst($schoolYear->status) }}</option>
+                            @endforeach
+                        </select>
+                        @error('school_year_id') <p class="form-error" role="alert">{{ $message }}</p> @enderror
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div>
+                        <label class="form-label">Academic Year</label>
+                        <input type="text" name="academic_year" value="{{ old('academic_year', now()->year . '-' . (now()->year + 1)) }}" class="form-input @error('academic_year') form-input-error @enderror">
+                        @error('academic_year') <p class="form-error" role="alert">{{ $message }}</p> @enderror
+                    </div>
+                    <div>
+                        <label class="form-label">Term Start</label>
+                        <input type="date" name="term_start" value="{{ old('term_start') }}" class="form-input @error('term_start') form-input-error @enderror">
+                        @error('term_start') <p class="form-error" role="alert">{{ $message }}</p> @enderror
+                    </div>
+                    <div>
+                        <label class="form-label">Term End</label>
+                        <input type="date" name="term_end" value="{{ old('term_end') }}" class="form-input @error('term_end') form-input-error @enderror">
+                        @error('term_end') <p class="form-error" role="alert">{{ $message }}</p> @enderror
+                    </div>
+                </div>
+
+                <div>
+                    <label class="form-label">Position Title</label>
+                    <input type="text" name="position_title" value="{{ old('position_title') }}" class="form-input @error('position_title') form-input-error @enderror" placeholder="Emergency acting president, locked roster, dispute correction">
+                    @error('position_title') <p class="form-error" role="alert">{{ $message }}</p> @enderror
+                </div>
+
+                <div>
+                    <label class="form-label">Reason</label>
+                    <textarea name="reason" rows="4" class="form-input @error('reason') form-input-error @enderror" required>{{ old('reason') }}</textarea>
+                    @error('reason') <p class="form-error" role="alert">{{ $message }}</p> @enderror
+                </div>
+            </div>
+            <div class="proposal-modal-footer">
+                <div class="proposal-footer-actions">
+                    <button type="button" onclick="document.getElementById('authority-override-modal').close()" class="btn btn-secondary">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Record Override</button>
+                </div>
+            </div>
+        </form>
+    </dialog>
+
     @if($errors->getBag('default')->any() || $errors->getBag('organization')->any())
         <script>
             document.addEventListener('DOMContentLoaded', () => {
-                @if($errors->getBag('default')->any())
+                @if(old('override_form') && $errors->getBag('default')->any())
+                    const authorityOverrideModal = document.getElementById('authority-override-modal');
+                    if (authorityOverrideModal) {
+                        if (authorityOverrideModal.open) authorityOverrideModal.close();
+                        authorityOverrideModal.showModal();
+                    }
+                @elseif($errors->getBag('default')->any())
                     const assignAdminModal = document.getElementById('assign-admin-modal');
                     if (assignAdminModal) {
                         if (assignAdminModal.open) assignAdminModal.close();

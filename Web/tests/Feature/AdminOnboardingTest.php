@@ -8,7 +8,9 @@ use App\Models\AuditLog;
 use App\Models\College;
 use App\Models\Department;
 use App\Models\Organization;
+use App\Models\OsaAuthorityOverride;
 use App\Models\Program;
+use App\Models\SchoolYear;
 use App\Models\University;
 use App\Models\User;
 use App\Services\AdminAssignmentService;
@@ -134,6 +136,177 @@ class AdminOnboardingTest extends TestCase
             'organization_id' => $adminOrganization->id,
             'status' => AdminAssignment::STATUS_ACTIVE,
         ]);
+    }
+
+    public function test_osa_authority_override_requires_a_reason(): void
+    {
+        [$college] = $this->createCollegeAndProgram();
+        $organization = Organization::create([
+            'college_id' => $college->id,
+            'name' => 'PSITS',
+            'acronym' => 'PSITS',
+            'type' => 'society',
+            'status' => 'active',
+        ]);
+        $schoolYear = SchoolYear::factory()->create([
+            'label' => '2026-2027',
+            'status' => SchoolYear::STATUS_ACTIVE,
+            'activated_at' => now(),
+        ]);
+        $student = $this->createStudent('override.target@usm.edu.ph');
+
+        $this->actingAs($this->createOsa())
+            ->from(route('dashboard.admin-users', ['tab' => 'overrides']))
+            ->post(route('dashboard.osa-authority-overrides.store'), [
+                'action' => OsaAuthorityOverride::ACTION_GRANT,
+                'target_user_id' => $student->id,
+                'role_name' => 'Society Admin',
+                'organization_id' => $organization->id,
+                'college_id' => $college->id,
+                'school_year_id' => $schoolYear->id,
+                'academic_year' => '2026-2027',
+                'term_start' => '2026-07-01',
+                'term_end' => '2027-06-30',
+                'position_title' => 'Emergency acting president',
+                'reason' => '',
+            ])
+            ->assertRedirect(route('dashboard.admin-users', ['tab' => 'overrides']))
+            ->assertSessionHasErrors('reason');
+
+        $this->assertDatabaseCount('osa_authority_overrides', 0);
+        $this->assertDatabaseMissing('admin_assignments', [
+            'user_id' => $student->id,
+            'source_type' => AdminAssignment::SOURCE_OSA_OVERRIDE,
+        ]);
+    }
+
+    public function test_osa_authority_override_requires_compatible_exact_scope(): void
+    {
+        $schoolYear = SchoolYear::factory()->create([
+            'label' => '2026-2027',
+            'status' => SchoolYear::STATUS_ACTIVE,
+            'activated_at' => now(),
+        ]);
+        $student = $this->createStudent('override.scope@usm.edu.ph');
+
+        $this->actingAs($this->createOsa())
+            ->from(route('dashboard.admin-users', ['tab' => 'overrides']))
+            ->post(route('dashboard.osa-authority-overrides.store'), [
+                'action' => OsaAuthorityOverride::ACTION_GRANT,
+                'target_user_id' => $student->id,
+                'role_name' => 'Society Admin',
+                'school_year_id' => $schoolYear->id,
+                'academic_year' => '2026-2027',
+                'position_title' => 'Emergency acting president',
+                'reason' => 'OSA must resolve an exceptional authority dispute for one scoped organization.',
+            ])
+            ->assertRedirect(route('dashboard.admin-users', ['tab' => 'overrides']))
+            ->assertSessionHasErrors('organization_id');
+
+        $this->assertDatabaseCount('osa_authority_overrides', 0);
+    }
+
+    public function test_osa_can_grant_reasoned_authority_override_with_audit_projection(): void
+    {
+        [$college] = $this->createCollegeAndProgram();
+        $organization = Organization::create([
+            'college_id' => $college->id,
+            'name' => 'PSITS',
+            'acronym' => 'PSITS',
+            'type' => 'society',
+            'status' => 'active',
+        ]);
+        $schoolYear = SchoolYear::factory()->create([
+            'label' => '2026-2027',
+            'status' => SchoolYear::STATUS_ACTIVE,
+            'activated_at' => now(),
+        ]);
+        $target = $this->createStudent('override.grant@usm.edu.ph');
+        $osa = $this->createOsa();
+
+        $this->actingAs($osa)
+            ->post(route('dashboard.osa-authority-overrides.store'), [
+                'action' => OsaAuthorityOverride::ACTION_GRANT,
+                'target_user_id' => $target->id,
+                'role_name' => 'Society Admin',
+                'organization_id' => $organization->id,
+                'college_id' => $college->id,
+                'school_year_id' => $schoolYear->id,
+                'academic_year' => '2026-2027',
+                'term_start' => '2026-07-01',
+                'term_end' => '2027-06-30',
+                'position_title' => 'Emergency acting president',
+                'reason' => 'Adviser verified a dispute and OSA must temporarily restore signing authority.',
+            ])
+            ->assertRedirect(route('dashboard.admin-users', ['tab' => 'overrides']))
+            ->assertSessionHasNoErrors();
+
+        $override = OsaAuthorityOverride::query()->sole();
+        $assignment = AdminAssignment::query()
+            ->where('source_type', AdminAssignment::SOURCE_OSA_OVERRIDE)
+            ->where('source_id', $override->id)
+            ->sole();
+
+        $this->assertSame(OsaAuthorityOverride::ACTION_GRANT, $override->action);
+        $this->assertSame($target->id, $override->target_user_id);
+        $this->assertSame($osa->id, $override->actor_id);
+        $this->assertSame($assignment->id, $override->projected_assignment_id);
+        $this->assertSame(AdminAssignment::STATUS_ACTIVE, $assignment->status);
+        $this->assertSame($target->id, $assignment->user_id);
+        $this->assertSame($organization->id, $assignment->organization_id);
+        $this->assertSame($schoolYear->id, $assignment->school_year_id);
+        $this->assertTrue($target->fresh()->hasRole('Society Admin'));
+
+        $auditLog = AuditLog::where('action', 'execute-osa-authority-override')
+            ->where('target_id', $override->id)
+            ->firstOrFail();
+
+        $this->assertSame($osa->id, $auditLog->admin_id);
+        $this->assertSame($assignment->id, $auditLog->details['assignment_id']);
+        $this->assertSame('grant', $auditLog->details['action']);
+        $this->assertSame('Society Admin', $auditLog->details['role_name']);
+        $this->assertSame($organization->id, $auditLog->details['organization_id']);
+        $this->assertSame('Adviser verified a dispute and OSA must temporarily restore signing authority.', $auditLog->details['reason']);
+    }
+
+    public function test_future_dated_osa_authority_override_does_not_immediately_grant_permissions(): void
+    {
+        [$college] = $this->createCollegeAndProgram();
+        $organization = Organization::create([
+            'college_id' => $college->id,
+            'name' => 'PSITS',
+            'acronym' => 'PSITS',
+            'type' => 'society',
+            'status' => 'active',
+        ]);
+        $schoolYear = SchoolYear::factory()->create([
+            'label' => '2026-2027',
+            'status' => SchoolYear::STATUS_ACTIVE,
+            'activated_at' => now(),
+        ]);
+        $target = $this->createStudent('override.future@usm.edu.ph');
+
+        $this->actingAs($this->createOsa())
+            ->post(route('dashboard.osa-authority-overrides.store'), [
+                'action' => OsaAuthorityOverride::ACTION_GRANT,
+                'target_user_id' => $target->id,
+                'role_name' => 'Society Admin',
+                'organization_id' => $organization->id,
+                'college_id' => $college->id,
+                'school_year_id' => $schoolYear->id,
+                'academic_year' => '2026-2027',
+                'starts_at' => now()->addDays(10)->toDateTimeString(),
+                'expires_at' => now()->addDays(20)->toDateTimeString(),
+                'position_title' => 'Future acting president',
+                'reason' => 'OSA pre-recorded an exceptional authority correction for a future transition window.',
+            ])
+            ->assertRedirect(route('dashboard.admin-users', ['tab' => 'overrides']))
+            ->assertSessionHasNoErrors();
+
+        $assignment = AdminAssignment::where('source_type', AdminAssignment::SOURCE_OSA_OVERRIDE)->sole();
+
+        $this->assertSame(now()->addDays(10)->toDateString(), $assignment->term_start->toDateString());
+        $this->assertFalse($target->fresh()->hasRole('Society Admin'));
     }
 
     public function test_osa_can_assign_admin_from_typed_person_search_email(): void

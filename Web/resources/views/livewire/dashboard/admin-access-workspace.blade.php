@@ -37,6 +37,18 @@
             </span>
         </button>
         <button type="button"
+                wire:click="setTab('overrides')"
+                wire:loading.attr="disabled"
+                class="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-150 focus:outline-none cursor-pointer {{ $activeTab === 'overrides' ? 'bg-(--color-accent) text-white shadow-sm' : 'text-(--color-text-secondary) hover:text-(--color-text-primary) hover:bg-(--color-surface-raised)' }}">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 6v6l3 3m5.66-6.66l-1.41 1.41M4.75 9.75L3.34 8.34m15.91 7.91l1.41 1.41M3.34 17.66l1.41-1.41M12 2.75v2M12 19.25v2"/>
+            </svg>
+            Overrides
+            <span class="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full text-[10px] font-bold transition-colors {{ $activeTab === 'overrides' ? 'bg-white/20 text-white' : 'bg-(--color-surface-inset) text-(--color-text-secondary) border border-(--color-border)' }}">
+                {{ $overrides->total() }}
+            </span>
+        </button>
+        <button type="button"
                 wire:click="setTab('audit')"
                 wire:loading.attr="disabled"
                 class="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-150 focus:outline-none cursor-pointer {{ $activeTab === 'audit' ? 'bg-(--color-accent) text-white shadow-sm' : 'text-(--color-text-secondary) hover:text-(--color-text-primary) hover:bg-(--color-surface-raised)' }}">
@@ -51,7 +63,7 @@
     </div>
 
     <div class="card admin-access-table-card overflow-hidden relative">
-        <div wire:loading.delay.class="opacity-60" wire:target="setTab,clearOrgFilters,clearAssignmentFilters,clearAuditFilters,expireAssignment,revokeAssignment,orgSearch,orgType,orgStatus,assignSearch,assignRole,assignStatus,assignTerm,auditSearch,auditAction,auditFrom,auditTo">
+        <div wire:loading.delay.class="opacity-60" wire:target="setTab,clearOrgFilters,clearAssignmentFilters,clearOverrideFilters,clearAuditFilters,expireAssignment,revokeAssignment,orgSearch,orgType,orgStatus,assignSearch,assignRole,assignStatus,assignTerm,overrideSearch,overrideAction,overrideStatus,auditSearch,auditAction,auditFrom,auditTo">
             @if($activeTab === 'organizations')
                 <div>
                     <div class="admin-access-section-header">
@@ -398,6 +410,114 @@
                             </dialog>
                         @endif
                     @endforeach
+                </div>
+            @elseif($activeTab === 'overrides')
+                <div>
+                    <div class="admin-access-section-header">
+                        <div>
+                            <h2 class="font-semibold text-(--color-text-primary)">OSA Authority Overrides</h2>
+                            <p class="text-xs text-(--color-text-secondary) mt-0.5">Reasoned exceptions, disputes, locked rosters, and temporary authority corrections</p>
+                        </div>
+                        <button type="button" onclick="document.getElementById('authority-override-modal')?.showModal()" class="btn btn-secondary btn-sm cursor-pointer">New Override</button>
+                    </div>
+
+                    <form wire:submit.prevent="$refresh" class="p-4 border-b border-(--color-border) bg-(--color-surface-raised)">
+                        <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+                            <div class="sm:col-span-2">
+                                <label for="override-search" class="sr-only">Search overrides</label>
+                                <input type="search"
+                                       id="override-search"
+                                       wire:model.live.debounce.400ms="overrideSearch"
+                                       placeholder="Search action, user, role, scope, or reason"
+                                       class="form-input">
+                            </div>
+                            <div>
+                                <label for="override-action" class="sr-only">Override action</label>
+                                <select id="override-action" wire:model.live="overrideAction" class="form-input form-select">
+                                    <option value="">All actions</option>
+                                    @foreach($overrideActions as $action)
+                                        <option value="{{ $action }}">{{ str($action)->headline() }}</option>
+                                    @endforeach
+                                </select>
+                            </div>
+                            <div>
+                                <label for="override-status" class="sr-only">Override status</label>
+                                <select id="override-status" wire:model.live="overrideStatus" class="form-input form-select">
+                                    <option value="">All statuses</option>
+                                    <option value="active">Active</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="flex flex-wrap items-center justify-between gap-3 mt-3">
+                            <p class="text-xs text-(--color-text-tertiary) font-data">
+                                Showing {{ $overrides->firstItem() ?? 0 }}-{{ $overrides->lastItem() ?? 0 }} of {{ $overrides->total() }}
+                            </p>
+                            <div class="flex items-center gap-2">
+                                @if($overrideSearch !== '' || $overrideAction !== '' || $overrideStatus !== '')
+                                    <button type="button" wire:click="clearOverrideFilters" class="btn btn-secondary btn-sm">Clear</button>
+                                @endif
+                                <button type="submit" class="btn btn-primary btn-sm" wire:loading.attr="disabled">Filter</button>
+                            </div>
+                        </div>
+                    </form>
+
+                    <div class="admin-access-record-list">
+                        @forelse($overrides as $override)
+                            <article class="admin-access-record-row admin-access-audit-row" wire:key="override-row-{{ $override->id }}">
+                                <div class="admin-access-record-main">
+                                    <div class="admin-access-entity">
+                                        <span class="admin-access-entity-mark">{{ str($override->action)->substr(0, 1)->upper() }}</span>
+                                        <span class="min-w-0">
+                                            <span class="block font-medium text-(--color-text-primary) truncate">{{ str($override->action)->headline() }} Override</span>
+                                            <span class="block text-xs text-(--color-text-secondary) font-data truncate">{{ $override->acted_at?->format('M d, Y g:i A') ?? 'Timestamp unavailable' }}</span>
+                                        </span>
+                                    </div>
+                                    <div class="admin-access-record-meta">
+                                        <span class="admin-access-type-pill">{{ strtoupper($override->action) }}</span>
+                                        <span class="badge badge-{{ $override->status === 'active' ? 'approved' : 'pending' }}">{{ ucfirst($override->status) }}</span>
+                                    </div>
+                                </div>
+                                <div class="admin-access-record-detail admin-access-audit-detail">
+                                    @if($override->targetUser)
+                                        <span class="admin-access-detail-label">Account</span>
+                                        <span>{{ $override->targetUser->name }}</span>
+                                        <span class="text-xs text-(--color-text-tertiary) font-data">{{ $override->targetUser->email }}</span>
+                                    @endif
+
+                                    @if($override->role_name)
+                                        <span class="admin-access-detail-label">Role</span>
+                                        <span>{{ $override->role_name }}</span>
+                                    @endif
+
+                                    <span class="admin-access-detail-label">Scope</span>
+                                    <span>{{ $override->organization?->acronym ?? $override->college?->code ?? 'University-wide' }}</span>
+
+                                    @if($override->schoolYear)
+                                        <span class="admin-access-detail-label">SY</span>
+                                        <span class="font-data">{{ $override->schoolYear->label }}</span>
+                                    @elseif($override->academic_year)
+                                        <span class="admin-access-detail-label">AY</span>
+                                        <span class="font-data">{{ $override->academic_year }}</span>
+                                    @endif
+
+                                    <span class="admin-access-detail-label">Reason</span>
+                                    <span>{{ $override->reason }}</span>
+                                </div>
+                                <div class="admin-access-record-actions">
+                                    <span class="text-xs text-(--color-text-tertiary) font-data">{{ str($override->id)->substr(0, 8) }}</span>
+                                </div>
+                            </article>
+                        @empty
+                            <div class="empty-state py-8">
+                                <p class="empty-state-title">No OSA overrides found</p>
+                                <p class="empty-state-description">Reasoned exception records appear here after OSA records an authority override.</p>
+                            </div>
+                        @endforelse
+                    </div>
+
+                    @if($overrides->hasPages())
+                        <div class="card-footer">{{ $overrides->links() }}</div>
+                    @endif
                 </div>
             @else
                 <div>

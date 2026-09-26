@@ -9,6 +9,7 @@ use App\Models\Organization;
 use App\Models\OrganizationMembership;
 use App\Models\OrganizationOfficer;
 use App\Models\OrganizationOfficerRoster;
+use App\Models\OsaAuthorityOverride;
 use App\Models\SchoolYear;
 use App\Models\User;
 use Illuminate\Http\UploadedFile;
@@ -420,6 +421,10 @@ class OfficerRosterService
     {
         if ($user->hasRole('Super Admin (OSA)')) {
             return true;
+        }
+
+        if ($this->isRosterLocked($roster)) {
+            return false;
         }
 
         $roster->loadMissing('officers');
@@ -894,5 +899,15 @@ class OfficerRosterService
 
             return $changeRequest->load(['oldOfficer.user', 'newUser', 'decidedBy', 'requestedBy']);
         });
+    }
+
+    private function isRosterLocked(OrganizationOfficerRoster $roster): bool
+    {
+        return OsaAuthorityOverride::query()
+            ->currentlyEffective()
+            ->where('action', OsaAuthorityOverride::ACTION_LOCK)
+            ->where('organization_id', $roster->organization_id)
+            ->where('school_year_id', $roster->school_year_id)
+            ->exists();
     }
 }

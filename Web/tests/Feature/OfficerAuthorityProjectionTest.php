@@ -9,6 +9,7 @@ use App\Models\OfficerChangeRequest;
 use App\Models\Organization;
 use App\Models\OrganizationOfficer;
 use App\Models\OrganizationOfficerRoster;
+use App\Models\OsaAuthorityOverride;
 use App\Models\PendingStudentLink;
 use App\Models\SchoolYear;
 use App\Models\User;
@@ -376,6 +377,92 @@ class OfficerAuthorityProjectionTest extends TestCase
             ->withHeader('X-Authority-Context', $assignment->id)
             ->getJson("/_test/event-tenant-scope/{$hiddenEvent->id}")
             ->assertForbidden();
+    }
+
+    public function test_osa_override_does_not_interfere_with_normal_officer_verification_flow(): void
+    {
+        [$organization, $schoolYear, $roster, , , $adviser, $presidentOfficer, $secretaryOfficer] = $this->submittedRoster();
+        $overrideTarget = User::factory()->create(['user_type' => 'student']);
+        $osa = User::factory()->create(['user_type' => 'faculty_or_staff']);
+        $osa->assignRole('Super Admin (OSA)');
+
+        $this->actingAs($osa)
+            ->post(route('dashboard.osa-authority-overrides.store'), [
+                'action' => OsaAuthorityOverride::ACTION_GRANT,
+                'target_user_id' => $overrideTarget->id,
+                'role_name' => 'Society Admin',
+                'organization_id' => $organization->id,
+                'college_id' => $organization->college_id,
+                'school_year_id' => $schoolYear->id,
+                'academic_year' => $schoolYear->label,
+                'term_start' => $schoolYear->starts_on->toDateString(),
+                'term_end' => $schoolYear->ends_on->toDateString(),
+                'position_title' => 'Temporary dispute observer',
+                'is_primary_admin' => false,
+                'reason' => 'OSA granted a temporary non-primary exception while the adviser verifies the roster.',
+            ])
+            ->assertRedirect(route('dashboard.admin-users', ['tab' => 'overrides']));
+
+        $this->actingAs($adviser)
+            ->postJson(route('dashboard.officer-rosters.verify', [
+                'organization' => $organization,
+                'roster' => $roster,
+            ]))
+            ->assertOk();
+
+        $this->assertSame(OrganizationOfficerRoster::STATUS_VERIFIED, $roster->fresh()->status);
+        $this->assertDatabaseHas('admin_assignments', [
+            'source_type' => AdminAssignment::SOURCE_OSA_OVERRIDE,
+            'user_id' => $overrideTarget->id,
+            'organization_id' => $organization->id,
+            'school_year_id' => $schoolYear->id,
+            'status' => AdminAssignment::STATUS_ACTIVE,
+        ]);
+        $this->assertDatabaseHas('admin_assignments', [
+            'source_type' => AdminAssignment::SOURCE_VERIFIED_OFFICER,
+            'source_id' => $presidentOfficer->id,
+            'organization_id' => $organization->id,
+            'school_year_id' => $schoolYear->id,
+            'status' => AdminAssignment::STATUS_ACTIVE,
+        ]);
+        $this->assertDatabaseHas('admin_assignments', [
+            'source_type' => AdminAssignment::SOURCE_VERIFIED_OFFICER,
+            'source_id' => $secretaryOfficer->id,
+            'organization_id' => $organization->id,
+            'school_year_id' => $schoolYear->id,
+            'status' => AdminAssignment::STATUS_ACTIVE,
+        ]);
+    }
+
+    public function test_active_osa_lock_override_blocks_normal_officer_roster_verification(): void
+    {
+        [$organization, $schoolYear, $roster, , , $adviser] = $this->submittedRoster();
+        $osa = User::factory()->create(['user_type' => 'faculty_or_staff']);
+        $osa->assignRole('Super Admin (OSA)');
+
+        $this->actingAs($osa)
+            ->post(route('dashboard.osa-authority-overrides.store'), [
+                'action' => OsaAuthorityOverride::ACTION_LOCK,
+                'organization_id' => $organization->id,
+                'school_year_id' => $schoolYear->id,
+                'academic_year' => $schoolYear->label,
+                'reason' => 'OSA locked the roster while an officer eligibility dispute is being investigated.',
+            ])
+            ->assertRedirect(route('dashboard.admin-users', ['tab' => 'overrides']));
+
+        $this->actingAs($adviser)
+            ->postJson(route('dashboard.officer-rosters.verify', [
+                'organization' => $organization,
+                'roster' => $roster,
+            ]))
+            ->assertForbidden();
+
+        $this->assertSame(OrganizationOfficerRoster::STATUS_SUBMITTED, $roster->fresh()->status);
+        $this->assertDatabaseMissing('admin_assignments', [
+            'source_type' => AdminAssignment::SOURCE_VERIFIED_OFFICER,
+            'organization_id' => $organization->id,
+            'school_year_id' => $schoolYear->id,
+        ]);
     }
 
     public function test_multi_organization_officer_selects_an_owned_web_authority_context(): void
