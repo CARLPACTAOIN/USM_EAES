@@ -2,16 +2,21 @@
 
 namespace Tests\Feature;
 
+use App\Models\AdminAssignment;
 use App\Models\CanonicalPpaPacket;
 use App\Models\College;
+use App\Models\Department;
 use App\Models\Event;
 use App\Models\EventDay;
 use App\Models\EventParticipationScope;
 use App\Models\Organization;
+use App\Models\OrganizationOfficer;
+use App\Models\OrganizationOfficerRoster;
 use App\Models\ProposalProcessStep;
 use App\Models\ProposalProcessTemplateVersion;
 use App\Models\ProposalTemplateApplicabilityRule;
 use App\Models\ProposalWorkflowRun;
+use App\Models\SchoolYear;
 use App\Models\User;
 use App\Models\Venue;
 use App\Services\AdminAssignmentService;
@@ -346,32 +351,142 @@ class ProposalProcessTemplateManagementTest extends TestCase
      */
     private function setupOrganizationWithOrganizer(): array
     {
+        $schoolYear = SchoolYear::create([
+            'label' => '2026-2027',
+            'starts_on' => today()->subMonths(3),
+            'ends_on' => today()->addMonths(9),
+            'status' => SchoolYear::STATUS_ACTIVE,
+            'activated_at' => now(),
+        ]);
         $college = College::factory()->create();
+        $department = Department::factory()->create([
+            'college_id' => $college->id,
+            'name' => 'Department of Computer Science',
+            'code' => 'DCS'.mb_strtoupper(str()->random(5)),
+        ]);
         $organization = Organization::create([
             'name' => 'Computer Students Society',
             'acronym' => 'CSS',
             'type' => 'society',
             'college_id' => $college->id,
+            'department_id' => $department->id,
             'status' => 'active',
         ]);
 
         $organizer = User::factory()->create([
             'college_id' => $college->id,
+            'department_id' => $department->id,
             'email' => 'organizer.'.uniqid().'@usm.edu.ph',
         ]);
+        $secretary = User::factory()->create([
+            'college_id' => $college->id,
+            'department_id' => $department->id,
+            'email' => 'secretary.'.uniqid().'@usm.edu.ph',
+        ]);
+        $adviser = User::factory()->create([
+            'college_id' => $college->id,
+            'department_id' => $department->id,
+            'user_type' => 'faculty',
+            'email' => 'adviser.'.uniqid().'@usm.edu.ph',
+        ]);
+        $chair = User::factory()->create([
+            'college_id' => $college->id,
+            'department_id' => $department->id,
+            'user_type' => 'faculty',
+            'email' => 'chair.'.uniqid().'@usm.edu.ph',
+        ]);
+        $dean = User::factory()->create([
+            'college_id' => $college->id,
+            'user_type' => 'faculty',
+            'email' => 'dean.'.uniqid().'@usm.edu.ph',
+        ]);
+        $security = User::factory()->create(['email' => 'security.'.uniqid().'@usm.edu.ph']);
+        $security->assignRole('Chief Security');
 
         app(AdminAssignmentService::class)->createAssignment(
             user: $organizer,
             roleName: 'Society Admin',
             organization: $organization,
             college: $college,
-            academicYear: '2026-2027',
+            academicYear: $schoolYear->label,
             termStart: today()->subMonth()->toDateString(),
             termEnd: today()->addYear()->toDateString(),
             positionTitle: 'President',
             approvedBy: $organizer,
             isPrimaryAdmin: true,
         );
+
+        AdminAssignment::create([
+            'user_id' => $chair->id,
+            'role_name' => 'Department Chairperson',
+            'position_title' => 'Chairperson, Department of Computer Science',
+            'college_id' => $college->id,
+            'department_id' => $department->id,
+            'school_year_id' => $schoolYear->id,
+            'academic_year' => $schoolYear->label,
+            'status' => AdminAssignment::STATUS_ACTIVE,
+            'is_primary_admin' => true,
+            'approved_at' => now(),
+        ]);
+
+        AdminAssignment::create([
+            'user_id' => $dean->id,
+            'role_name' => 'College Dean',
+            'position_title' => 'Dean',
+            'college_id' => $college->id,
+            'school_year_id' => $schoolYear->id,
+            'academic_year' => $schoolYear->label,
+            'status' => AdminAssignment::STATUS_ACTIVE,
+            'is_primary_admin' => true,
+            'approved_at' => now(),
+        ]);
+
+        AdminAssignment::create([
+            'user_id' => $security->id,
+            'role_name' => 'Chief Security',
+            'position_title' => 'Chief Security Officer',
+            'school_year_id' => $schoolYear->id,
+            'academic_year' => $schoolYear->label,
+            'status' => AdminAssignment::STATUS_ACTIVE,
+            'is_primary_admin' => true,
+            'approved_at' => now(),
+        ]);
+
+        AdminAssignment::create([
+            'user_id' => $this->osa->id,
+            'role_name' => 'Super Admin (OSA)',
+            'position_title' => 'OSA Workflow Approver',
+            'school_year_id' => $schoolYear->id,
+            'academic_year' => $schoolYear->label,
+            'status' => AdminAssignment::STATUS_ACTIVE,
+            'is_primary_admin' => true,
+            'approved_at' => now(),
+        ]);
+
+        $roster = OrganizationOfficerRoster::create([
+            'organization_id' => $organization->id,
+            'school_year_id' => $schoolYear->id,
+            'status' => OrganizationOfficerRoster::STATUS_VERIFIED,
+            'submitted_by' => $organizer->id,
+            'submitted_at' => now()->subDays(4),
+            'verified_by' => $adviser->id,
+            'verified_at' => now()->subDays(3),
+        ]);
+
+        foreach ([
+            [$organizer, OrganizationOfficer::POSITION_PRESIDENT, 'President'],
+            [$secretary, OrganizationOfficer::POSITION_SECRETARY, 'Secretary'],
+            [$adviser, OrganizationOfficer::POSITION_ADVISER, 'Faculty Adviser'],
+        ] as [$user, $positionKey, $positionTitle]) {
+            OrganizationOfficer::create([
+                'officer_roster_id' => $roster->id,
+                'user_id' => $user->id,
+                'position_key' => $positionKey,
+                'position_title' => $positionTitle,
+                'status' => OrganizationOfficer::STATUS_ACTIVE,
+                'effective_start' => $schoolYear->starts_on,
+            ]);
+        }
 
         return [$organization, $organizer->fresh()];
     }
@@ -385,6 +500,8 @@ class ProposalProcessTemplateManagementTest extends TestCase
 
         $event = Event::create([
             'organization_id' => $organization->id,
+            'school_year_id' => SchoolYear::where('status', SchoolYear::STATUS_ACTIVE)->value('id'),
+            'department_id' => $organization->department_id,
             'title' => $title,
             'proposal_category' => 'activity',
             'status' => Event::STATUS_DRAFT,
@@ -404,6 +521,14 @@ class ProposalProcessTemplateManagementTest extends TestCase
             'proposal_document_original_name' => 'proposal.pdf',
             'hardcopy_submitted' => true,
             'hardcopy_submitted_at' => now(),
+            'college_name_snapshot' => $organization->resolvedCollege()?->name,
+            'department_name_snapshot' => $organization->department?->name,
+            'organization_name_snapshot' => $organization->name,
+            'proponent_name_snapshot' => $organizer->name,
+            'proponent_user_id' => $organizer->id,
+            'org_head_user_id' => $organizer->id,
+            'dept_chair_user_id' => AdminAssignment::where('role_name', 'Department Chairperson')->where('department_id', $organization->department_id)->value('user_id'),
+            'college_dean_user_id' => AdminAssignment::where('role_name', 'College Dean')->where('college_id', $organization->college_id)->value('user_id'),
         ]);
 
         EventDay::create([

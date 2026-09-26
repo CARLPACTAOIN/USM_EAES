@@ -29,6 +29,8 @@ use App\Models\EventParticipationScope;
 use App\Models\EventScannerAssignment;
 use App\Models\Organization;
 use App\Models\OrganizationMembership;
+use App\Models\OrganizationOfficer;
+use App\Models\OrganizationOfficerRoster;
 use App\Models\PendingStudentLink;
 use App\Models\Program;
 use App\Models\RawScan;
@@ -74,7 +76,7 @@ class WebPortalTest extends TestCase
     private function seedRolesAndPermissions(): void
     {
         $permissions = [
-            'manage-organizations', 'approve-proposals', 'view-all-analytics',
+            'manage-organizations', 'approve-proposals', 'approve-security-clearance', 'view-all-analytics',
             'force-validate-any', 'manage-global-settings', 'create-proposals',
             'assign-scanners-own', 'set-attendance-policy', 'set-late-threshold', 'view-own-analytics',
             'view-college-analytics', 'view-constituent-data', 'force-validate-own',
@@ -96,6 +98,8 @@ class WebPortalTest extends TestCase
             ->syncPermissions(['create-proposals', 'assign-scanners-own', 'set-attendance-policy', 'view-own-analytics']);
         Role::firstOrCreate(['name' => 'LSG Admin', 'guard_name' => 'web'])
             ->syncPermissions(['create-proposals', 'set-attendance-policy', 'view-college-analytics', 'view-constituent-data']);
+        Role::firstOrCreate(['name' => 'Chief Security', 'guard_name' => 'web'])
+            ->syncPermissions(['approve-security-clearance']);
     }
 
     private function createHierarchy(): array
@@ -192,7 +196,135 @@ class WebPortalTest extends TestCase
             isPrimaryAdmin: ! $existingPrimary
         );
 
+        if ($assignmentOrganization && $role !== 'Super Admin (OSA)' && $assignmentOrganization->type !== 'hr_unit') {
+            $this->ensureWorkflowApprovers($assignmentOrganization, $user);
+        }
+
         return $user;
+    }
+
+    private function ensureWorkflowApprovers(Organization $organization, User $president): void
+    {
+        $schoolYear = SchoolYear::firstOrCreate(
+            ['label' => '2026-2027'],
+            [
+                'starts_on' => '2026-07-01',
+                'ends_on' => '2027-06-30',
+                'status' => SchoolYear::STATUS_ACTIVE,
+                'activated_at' => now(),
+            ]
+        );
+
+        $organization->loadMissing(['college', 'department']);
+        $department = $organization->department;
+
+        if (! OrganizationOfficerRoster::where('organization_id', $organization->id)->where('school_year_id', $schoolYear->id)->where('status', OrganizationOfficerRoster::STATUS_VERIFIED)->exists()) {
+            $secretary = User::factory()->create([
+                'college_id' => $organization->college_id,
+                'department_id' => $department?->id,
+                'email' => 'secretary.'.uniqid().'@usm.edu.ph',
+            ]);
+            $adviser = User::factory()->create([
+                'college_id' => $organization->college_id,
+                'department_id' => $department?->id,
+                'user_type' => 'faculty',
+                'email' => 'adviser.'.uniqid().'@usm.edu.ph',
+            ]);
+
+            $roster = OrganizationOfficerRoster::create([
+                'organization_id' => $organization->id,
+                'school_year_id' => $schoolYear->id,
+                'status' => OrganizationOfficerRoster::STATUS_VERIFIED,
+                'submitted_by' => $president->id,
+                'submitted_at' => now()->subDays(4),
+                'verified_by' => $adviser->id,
+                'verified_at' => now()->subDays(3),
+            ]);
+
+            foreach ([
+                [$president, OrganizationOfficer::POSITION_PRESIDENT, 'President'],
+                [$secretary, OrganizationOfficer::POSITION_SECRETARY, 'Secretary'],
+                [$adviser, OrganizationOfficer::POSITION_ADVISER, 'Faculty Adviser'],
+            ] as [$user, $positionKey, $positionTitle]) {
+                OrganizationOfficer::create([
+                    'officer_roster_id' => $roster->id,
+                    'user_id' => $user->id,
+                    'position_key' => $positionKey,
+                    'position_title' => $positionTitle,
+                    'status' => OrganizationOfficer::STATUS_ACTIVE,
+                    'effective_start' => $schoolYear->starts_on,
+                ]);
+            }
+        }
+
+        if ($department) {
+            $chair = User::factory()->create([
+                'college_id' => $organization->college_id,
+                'department_id' => $department->id,
+                'user_type' => 'faculty',
+                'email' => 'chair.'.uniqid().'@usm.edu.ph',
+            ]);
+            $this->institutionalAssignment($chair, 'Department Chairperson', 'Chairperson', $schoolYear, $organization->college, $department);
+        }
+
+        if ($organization->college) {
+            $dean = User::factory()->create([
+                'college_id' => $organization->college_id,
+                'user_type' => 'faculty',
+                'email' => 'dean.'.uniqid().'@usm.edu.ph',
+            ]);
+            $this->institutionalAssignment($dean, 'College Dean', 'Dean', $schoolYear, $organization->college);
+        }
+
+        if (! User::role('Chief Security')->exists()) {
+            $security = User::factory()->create(['email' => 'security.'.uniqid().'@usm.edu.ph']);
+            $security->assignRole('Chief Security');
+            $this->institutionalAssignment($security, 'Chief Security', 'Chief Security Officer', $schoolYear);
+        }
+
+        if (! User::role('Super Admin (OSA)')->exists()) {
+            $osa = User::factory()->create(['email' => 'osa.'.uniqid().'@usm.edu.ph']);
+            $osa->assignRole('Super Admin (OSA)');
+            $this->institutionalAssignment($osa, 'Super Admin (OSA)', 'OSA Workflow Approver', $schoolYear);
+        }
+    }
+
+    private function institutionalAssignment(
+        User $user,
+        string $roleName,
+        string $positionTitle,
+        SchoolYear $schoolYear,
+        ?College $college = null,
+        ?Department $department = null,
+    ): void {
+        if (AdminAssignment::where('role_name', $roleName)
+            ->where('academic_year', $schoolYear->label)
+            ->where('college_id', $college?->id)
+            ->where('department_id', $department?->id)
+            ->where('status', AdminAssignment::STATUS_ACTIVE)
+            ->exists()) {
+            return;
+        }
+
+        $isPrimary = ! AdminAssignment::where('role_name', $roleName)
+            ->where('academic_year', $schoolYear->label)
+            ->where('college_id', $college?->id)
+            ->where('status', AdminAssignment::STATUS_ACTIVE)
+            ->where('is_primary_admin', true)
+            ->exists();
+
+        AdminAssignment::create([
+            'user_id' => $user->id,
+            'role_name' => $roleName,
+            'position_title' => $positionTitle,
+            'college_id' => $college?->id,
+            'department_id' => $department?->id,
+            'school_year_id' => $schoolYear->id,
+            'academic_year' => $schoolYear->label,
+            'status' => AdminAssignment::STATUS_ACTIVE,
+            'is_primary_admin' => $isPrimary,
+            'approved_at' => now(),
+        ]);
     }
 
     private function createParticipantScope(Event $event, Organization $participantOrg, string $ppaStatus = EventParticipationScope::PPA_DRAFT): EventParticipationScope

@@ -23,6 +23,7 @@ class RolePermissionSeeder extends Seeder
             'manage-organizations',
             'manage-venues',
             'approve-proposals',
+            'approve-security-clearance',
             'view-all-analytics',
             'force-validate-any',
             'manage-global-settings',
@@ -90,6 +91,16 @@ class RolePermissionSeeder extends Seeder
             'assign-hr-scanners',
             'view-hr-analytics',
             'export-hr-attendance',
+        ]);
+
+        // Chief Security / Office of Security
+        $chiefSecurity = Role::firstOrCreate(['name' => 'Chief Security', 'guard_name' => 'web']);
+        $chiefSecurity->syncPermissions([
+            'approve-security-clearance',
+        ]);
+        $chiefSecurityApi = Role::firstOrCreate(['name' => 'Chief Security', 'guard_name' => 'api']);
+        $chiefSecurityApi->syncPermissions([
+            'approve-security-clearance',
         ]);
 
         // USG Admin

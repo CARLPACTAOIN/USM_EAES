@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Exceptions\WorkflowAssignmentResolutionException;
 use App\Models\Event;
 use App\Models\ProposalProcessStep;
 use App\Models\ProposalProcessStepDependency;
@@ -11,10 +12,13 @@ use App\Models\ProposalTemplateApplicabilityRule;
 use App\Models\ProposalWorkflowRun;
 use App\Models\ProposalWorkflowTask;
 use App\Models\User;
+use App\Notifications\EventWorkflowNotification;
 use Illuminate\Support\Facades\DB;
 
 class ProposalWorkflowService
 {
+    public function __construct(private readonly ProposalWorkflowAssignmentResolver $assignmentResolver) {}
+
     /**
      * Bind an event proposal to an immutable published template workflow run on first submission.
      * Idempotent: returns existing run if already bound.
@@ -26,50 +30,58 @@ class ProposalWorkflowService
             return $existing;
         }
 
-        return DB::transaction(function () use ($event, $actor): ProposalWorkflowRun {
-            $existing = ProposalWorkflowRun::where('event_id', $event->id)->lockForUpdate()->first();
-            if ($existing) {
-                return $existing;
-            }
+        try {
+            return DB::transaction(function () use ($event, $actor): ProposalWorkflowRun {
+                $existing = ProposalWorkflowRun::where('event_id', $event->id)->lockForUpdate()->first();
+                if ($existing) {
+                    return $existing;
+                }
 
-            $templateVersion = $this->resolveApplicableTemplateVersion($event);
-            $steps = $templateVersion->steps()->with('dependencies')->orderBy('display_order')->get();
+                $templateVersion = $this->resolveApplicableTemplateVersion($event);
+                $steps = $templateVersion->steps()->with('dependencies')->orderBy('display_order')->get();
 
-            $run = ProposalWorkflowRun::create([
-                'event_id' => $event->id,
-                'template_version_id' => $templateVersion->id,
-                'status' => ProposalWorkflowRun::STATUS_IN_PROGRESS,
-                'started_by' => $actor->id,
-                'started_at' => now(),
-                'submitted_at' => now(),
-            ]);
-
-            foreach ($steps as $step) {
-                $hasPrerequisites = $step->dependencies->isNotEmpty();
-
-                $status = $hasPrerequisites
-                    ? ProposalWorkflowTask::STATUS_BLOCKED
-                    : ProposalWorkflowTask::STATUS_AVAILABLE;
-
-                $config = $step->condition_config ?? [];
-
-                ProposalWorkflowTask::create([
-                    'workflow_run_id' => $run->id,
-                    'process_step_id' => $step->id,
-                    'status' => $status,
-                    'display_order' => $step->display_order,
-                    'step_key' => $step->step_key,
-                    'step_type' => $step->step_type,
-                    'title' => $step->title,
-                    'description' => $step->description,
-                    'assigned_role' => $config['assigned_role'] ?? null,
-                    'assigned_scope' => $config['assigned_scope'] ?? null,
-                    'available_at' => $hasPrerequisites ? null : now(),
+                $run = ProposalWorkflowRun::create([
+                    'event_id' => $event->id,
+                    'template_version_id' => $templateVersion->id,
+                    'status' => ProposalWorkflowRun::STATUS_IN_PROGRESS,
+                    'started_by' => $actor->id,
+                    'started_at' => now(),
+                    'submitted_at' => now(),
                 ]);
-            }
 
-            return $run->fresh(['tasks']);
-        });
+                foreach ($steps as $step) {
+                    $hasPrerequisites = $step->dependencies->isNotEmpty();
+
+                    $status = $hasPrerequisites
+                        ? ProposalWorkflowTask::STATUS_BLOCKED
+                        : ProposalWorkflowTask::STATUS_AVAILABLE;
+
+                    $assignment = $this->assignmentResolver->resolve($event, $step, $actor);
+
+                    ProposalWorkflowTask::create([
+                        'workflow_run_id' => $run->id,
+                        'process_step_id' => $step->id,
+                        'status' => $status,
+                        'display_order' => $step->display_order,
+                        'step_key' => $step->step_key,
+                        'step_type' => $step->step_type,
+                        'title' => $step->title,
+                        'description' => $step->description,
+                        'assigned_user_id' => $assignment['assigned_user_id'],
+                        'assigned_role' => $assignment['assigned_role'],
+                        'assigned_scope' => $assignment['assigned_scope'],
+                        'available_at' => $hasPrerequisites ? null : now(),
+                        'metadata' => $assignment['metadata'],
+                    ]);
+                }
+
+                return $run->fresh(['tasks']);
+            });
+        } catch (WorkflowAssignmentResolutionException $exception) {
+            $this->alertOsaAboutAssignmentFailure($event, $exception);
+
+            throw $exception;
+        }
     }
 
     /**
@@ -201,15 +213,15 @@ class ProposalWorkflowService
 
             $step4 = ProposalProcessStep::create([
                 'template_version_id' => $version->id,
-                'step_key' => 'venue_clearance',
-                'title' => 'Venue Clearance',
-                'description' => 'Clearance and reservation confirmation from the venue administrator.',
+                'step_key' => 'security_clearance',
+                'title' => 'Security Clearance',
+                'description' => 'Clearance from the Office of Security for campus safety routing.',
                 'step_type' => ProposalProcessStep::TYPE_CLEARANCE,
                 'phase' => 'clearance',
                 'display_order' => 4,
                 'is_required' => true,
                 'is_gate' => false,
-                'condition_config' => ['assigned_role' => 'venue_admin', 'assigned_scope' => 'venue'],
+                'condition_config' => ['assigned_role' => 'chief_security', 'assigned_scope' => 'university'],
             ]);
 
             $step5 = ProposalProcessStep::create([
@@ -266,6 +278,29 @@ class ProposalWorkflowService
             ]);
 
             return $version->fresh(['steps.dependencies']);
+        });
+    }
+
+    private function alertOsaAboutAssignmentFailure(Event $event, WorkflowAssignmentResolutionException $exception): void
+    {
+        User::role('Super Admin (OSA)')->get()->each(function (User $recipient) use ($event, $exception): void {
+            $recipient->notify(new EventWorkflowNotification([
+                'notification_key' => "proposal_workflow_assignment_failed:{$event->id}:{$exception->stepKey}:{$exception->roleKey}",
+                'kind' => 'proposal_workflow_assignment_failed',
+                'event_id' => $event->id,
+                'event_title' => $event->title,
+                'step_key' => $exception->stepKey,
+                'step_title' => $exception->stepTitle,
+                'role_key' => $exception->roleKey,
+                'role_label' => $exception->roleLabel,
+                'title' => 'Workflow assignment failed',
+                'body' => "{$exception->roleLabel} could not be resolved for {$event->title}.",
+                'action_label' => 'Open Event Proposals',
+                'action_url' => route('dashboard.events'),
+                'severity' => 'warning',
+                'needs_action' => true,
+                'created_label' => now()->diffForHumans(),
+            ]));
         });
     }
 }
