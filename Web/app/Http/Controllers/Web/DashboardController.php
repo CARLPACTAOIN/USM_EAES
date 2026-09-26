@@ -20,6 +20,7 @@ use App\Services\EventNotificationService;
 use App\Services\EventPermitService;
 use App\Services\EventProposalDraftService;
 use App\Services\EventSessionScheduleService;
+use App\Services\OrganizerChecklistService;
 use App\Services\ParticipationScopeService;
 use App\Services\ScannerAssignmentService;
 use App\Services\ScannerSessionService;
@@ -47,6 +48,7 @@ class DashboardController extends Controller
         private readonly EventProposalDraftService $proposalDrafts,
         private readonly EventPermitService $eventPermits,
         private readonly EventSessionScheduleService $sessionSchedules,
+        private readonly OrganizerChecklistService $organizerChecklists,
     ) {}
 
     /**
@@ -518,13 +520,24 @@ class DashboardController extends Controller
         $this->authorizeEventAccess($event, $request->user());
 
         try {
-            $event = $this->eventPermits->submit($event, $request->user());
+            $event = $this->eventPermits->submit(
+                $event,
+                $request->user(),
+                $request->boolean('returned_tasks_addressed')
+            );
             $this->eventNotifications->notifyPendingInvitationsForEvent($event->fresh(['organization', 'participationScopes.organization', 'participationScopes.delegatedOrganization']));
         } catch (DomainException $exception) {
             return redirect()->back()->with('error', $exception->getMessage());
         }
 
         return redirect()->back()->with('success', 'Proposal submitted for review.');
+    }
+
+    public function organizerChecklist(Request $request, Event $event): View
+    {
+        $this->authorizeEventAccess($event, $request->user());
+
+        return view('dashboard.events.checklist', $this->organizerChecklists->viewData($event, $request->user()));
     }
 
     /**

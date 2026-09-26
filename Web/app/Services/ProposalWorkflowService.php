@@ -13,6 +13,8 @@ use App\Models\ProposalWorkflowRun;
 use App\Models\ProposalWorkflowTask;
 use App\Models\User;
 use App\Notifications\EventWorkflowNotification;
+use DomainException;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 class ProposalWorkflowService
@@ -82,6 +84,72 @@ class ProposalWorkflowService
 
             throw $exception;
         }
+    }
+
+    /**
+     * @return Collection<int, ProposalWorkflowTask>
+     */
+    public function reopenReturnedTasksForResubmission(Event $event, bool $returnedTasksAddressed): Collection
+    {
+        $run = ProposalWorkflowRun::query()
+            ->where('event_id', $event->id)
+            ->lockForUpdate()
+            ->first();
+
+        if (! $run) {
+            return collect();
+        }
+
+        $returnedTasks = ProposalWorkflowTask::query()
+            ->with(['assignedUser', 'workflowRun.event.organization'])
+            ->where('workflow_run_id', $run->id)
+            ->where('status', ProposalWorkflowTask::STATUS_REVISION_REQUESTED)
+            ->lockForUpdate()
+            ->orderBy('display_order')
+            ->get();
+
+        if ($returnedTasks->isEmpty()) {
+            throw new DomainException('Returned workflow tasks must be addressed before resubmission.');
+        }
+
+        if (! $returnedTasksAddressed) {
+            throw new DomainException('Confirm that returned workflow tasks and packet corrections were addressed before resubmitting.');
+        }
+
+        $event->loadMissing('canonicalPpaPacket');
+        $latestReturnedAt = $returnedTasks
+            ->map(fn (ProposalWorkflowTask $task) => $task->decided_at ?? $task->completed_at ?? $task->updated_at)
+            ->filter()
+            ->sortDesc()
+            ->first();
+        $latestPacketCorrectionAt = collect([$event->updated_at, $event->canonicalPpaPacket?->updated_at])
+            ->filter()
+            ->sortDesc()
+            ->first();
+
+        if (! $latestReturnedAt || ! $latestPacketCorrectionAt || $latestPacketCorrectionAt->lessThanOrEqualTo($latestReturnedAt)) {
+            throw new DomainException('Edit the returned proposal packet before resubmitting the workflow task.');
+        }
+
+        $availableAt = now();
+        $run->update([
+            'status' => ProposalWorkflowRun::STATUS_IN_PROGRESS,
+            'submitted_at' => $availableAt,
+            'completed_at' => null,
+        ]);
+
+        $returnedTasks->each(function (ProposalWorkflowTask $task) use ($availableAt): void {
+            $task->update([
+                'status' => ProposalWorkflowTask::STATUS_AVAILABLE,
+                'decision' => null,
+                'decided_by' => null,
+                'decided_at' => null,
+                'completed_at' => null,
+                'available_at' => $availableAt,
+            ]);
+        });
+
+        return $returnedTasks->map->fresh(['assignedUser', 'workflowRun.event.organization']);
     }
 
     /**

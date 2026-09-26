@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\AdminAssignment;
 use App\Models\Event;
 use App\Models\EventParticipationScope;
+use App\Models\ProposalWorkflowTask;
 use App\Models\User;
 use App\Notifications\EventWorkflowNotification;
 use Illuminate\Notifications\DatabaseNotification;
@@ -148,6 +149,66 @@ class EventNotificationService
                 'needs_action' => str_contains($kind, 'submitted') || str_contains($kind, 'revision-requested'),
             ]
         );
+    }
+
+    public function notifyWorkflowTaskRevisionRequested(ProposalWorkflowTask $task): int
+    {
+        $task->loadMissing(['workflowRun.event.organization', 'assignedUser']);
+        $event = $task->workflowRun->event;
+        $scope = $this->participationScopesForNotification($event);
+
+        return $this->notifyUsers(
+            $this->organizerRecipients($scope),
+            'workflow_task_revision_requested:'.$task->id.':'.optional($task->decided_at)->timestamp,
+            'workflow_task_revision_requested',
+            $scope,
+            [
+                'title' => 'Workflow task returned for revision',
+                'body' => "{$task->title} returned {$event->title} for organizer correction.",
+                'action_label' => 'Open Organizer Checklist',
+                'action_url' => route('dashboard.events.checklist', $event),
+                'severity' => 'warning',
+                'needs_action' => true,
+                'workflow_task_id' => $task->id,
+                'workflow_run_id' => $task->workflow_run_id,
+                'remarks' => $task->remarks,
+            ]
+        );
+    }
+
+    public function notifyWorkflowTaskResubmitted(ProposalWorkflowTask $task): int
+    {
+        $task->loadMissing(['workflowRun.event.organization', 'assignedUser']);
+
+        if (! $task->assignedUser) {
+            return 0;
+        }
+
+        $event = $task->workflowRun->event;
+        $key = 'workflow_task_resubmitted:'.$task->id.':'.optional($task->available_at)->timestamp;
+
+        if ($this->hasNotificationKey($task->assignedUser, $key)) {
+            return 0;
+        }
+
+        $task->assignedUser->notify(new EventWorkflowNotification([
+            'notification_key' => $key,
+            'kind' => 'workflow_task_resubmitted',
+            'event_id' => $event->id,
+            'event_title' => $event->title,
+            'workflow_task_id' => $task->id,
+            'workflow_run_id' => $task->workflow_run_id,
+            'step_title' => $task->title,
+            'title' => 'Returned workflow task resubmitted',
+            'body' => "{$event->title} was corrected and resubmitted for {$task->title}.",
+            'action_label' => 'Open Workflow Task',
+            'action_url' => route('dashboard.workflow-tasks.show', $task),
+            'severity' => 'info',
+            'needs_action' => true,
+            'created_label' => now()->diffForHumans(),
+        ]));
+
+        return 1;
     }
 
     public function notifyParticipantScopeReviewed(EventParticipationScope $scope, string $status): int

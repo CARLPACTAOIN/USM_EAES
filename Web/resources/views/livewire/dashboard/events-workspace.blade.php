@@ -284,12 +284,20 @@
                             <div class="event-actions-cell">
                                 <div class="event-primary-cta">
                                     @if(!$isParticipatingWorkspace && $user->can('create-proposals') && in_array($event->status, ['draft', 'revision_requested'], true))
-                                        <button type="button"
-                                                class="btn btn-sm btn-primary"
-                                                title="Submit for review"
-                                                wire:click="openModal('workflow', '{{ $event->id }}')">
-                                            Submit
-                                        </button>
+                                        @if($event->status === 'revision_requested' && $event->workflowRun)
+                                            <a class="btn btn-sm btn-primary"
+                                               href="{{ route('dashboard.events.checklist', $event) }}"
+                                               title="Open Organizer Checklist">
+                                                Checklist
+                                            </a>
+                                        @else
+                                            <button type="button"
+                                                    class="btn btn-sm btn-primary"
+                                                    title="Submit for review"
+                                                    wire:click="openModal('workflow', '{{ $event->id }}')">
+                                                Submit
+                                            </button>
+                                        @endif
                                     @endif
 
                                     @if($user->hasRole('Super Admin (OSA)') && in_array($event->status, ['submitted', 'under_review'], true))
@@ -377,6 +385,14 @@
 
                                     {{-- Scopes --}}
                                     @if($canEditProposal)
+                                    @if($event->workflowRun)
+                                    <a class="btn btn-sm btn-secondary"
+                                       href="{{ route('dashboard.events.checklist', $event) }}"
+                                       title="Open Organizer Checklist">
+                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M8.25 6.75h7.5M8.25 12h7.5m-7.5 5.25h4.5M4.5 5.25A2.25 2.25 0 016.75 3h10.5a2.25 2.25 0 012.25 2.25v13.5A2.25 2.25 0 0117.25 21H6.75a2.25 2.25 0 01-2.25-2.25V5.25z"/></svg>
+                                        Checklist
+                                    </a>
+                                    @endif
                                     <button type="button"
                                             class="btn btn-sm btn-secondary"
                                             title="{{ $event->status === 'revision_requested' ? 'Revise returned proposal' : 'Edit draft proposal' }}"

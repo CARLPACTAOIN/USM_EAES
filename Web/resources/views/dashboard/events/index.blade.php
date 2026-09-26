@@ -4,6 +4,8 @@
         'status' => request('status', ''),
         'search' => request('q', ''),
         'perPage' => (int) request('per_page', 15),
+        'modal' => request('modal', ''),
+        'eventId' => request('event', ''),
     ])
 
     @if($canCreateProposals)

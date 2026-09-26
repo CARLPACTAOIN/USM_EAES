@@ -86,7 +86,7 @@ class EventProposalWorkflow extends Component
         $this->authorizeEventAccess($event);
 
         try {
-            $event = $permits->submit($event, auth()->user());
+            $event = $permits->submit($event, auth()->user(), $event->status === Event::STATUS_REVISION_REQUESTED);
         } catch (DomainException $exception) {
             $this->errorNotice = $exception->getMessage();
 

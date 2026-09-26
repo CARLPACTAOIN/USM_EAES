@@ -32,8 +32,14 @@ class EventsWorkspace extends Component
     #[Locked]
     public ?string $activeEventId = null;
 
-    public function mount(?string $workspace = null, ?string $status = null, ?string $search = null, int $perPage = 15): void
-    {
+    public function mount(
+        ?string $workspace = null,
+        ?string $status = null,
+        ?string $search = null,
+        int $perPage = 15,
+        ?string $modal = null,
+        ?string $eventId = null
+    ): void {
         $this->workspace = $workspace === 'participating' ? 'participating' : 'organized';
         $this->status = (string) $status;
         $this->search = trim((string) $search);
@@ -41,6 +47,10 @@ class EventsWorkspace extends Component
 
         if ($user = auth()->user()) {
             app(DashboardEventWorkspaceService::class)->refreshLifecycleForDashboard($user);
+
+            if (filled($modal) && filled($eventId)) {
+                $this->openModal((string) $modal, (string) $eventId);
+            }
         }
     }
 

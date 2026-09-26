@@ -153,6 +153,7 @@ class DashboardEventWorkspaceService
             'eventDays',
             'evaluationFormVersion',
             'parentEvent.organization',
+            'workflowRun',
             'participationScopes.organization',
             'participationScopes.college',
             'participationScopes.delegatedOrganization',

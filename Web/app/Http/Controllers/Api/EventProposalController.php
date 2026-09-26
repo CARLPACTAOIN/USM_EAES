@@ -355,7 +355,7 @@ class EventProposalController extends Controller
         EventTenantScope::authorize($event, request()->user());
 
         try {
-            $event = $this->eventPermits->submit($event, request()->user());
+            $event = $this->eventPermits->submit($event, request()->user(), request()->boolean('returned_tasks_addressed'));
             $this->eventNotifications->notifyPendingInvitationsForEvent($event->fresh(['organization', 'participationScopes.organization', 'participationScopes.delegatedOrganization']));
         } catch (DomainException $exception) {
             return response()->json(['success' => false, 'message' => $exception->getMessage()], 422);

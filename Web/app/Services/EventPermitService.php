@@ -6,10 +6,12 @@ use App\Models\AuditLog;
 use App\Models\Event;
 use App\Models\EventParticipationScope;
 use App\Models\EventPermitVersion;
+use App\Models\ProposalWorkflowTask;
 use App\Models\ScannerSession;
 use App\Models\User;
 use App\Support\EventEvaluationForm;
 use DomainException;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 class EventPermitService
@@ -23,7 +25,7 @@ class EventPermitService
         private readonly ProposalWorkflowService $proposalWorkflows,
     ) {}
 
-    public function submit(Event $event, User $actor): Event
+    public function submit(Event $event, User $actor, bool $returnedTasksAddressed = false): Event
     {
         $this->authorizeOrganizer($event, $actor);
 
@@ -32,8 +34,14 @@ class EventPermitService
         }
 
         $this->submissionGuard->assertSubmittable($event);
+        $isRevisionResubmission = $event->status === Event::STATUS_REVISION_REQUESTED;
+        $reopenedTasks = collect();
 
-        return DB::transaction(function () use ($event, $actor): Event {
+        $submittedEvent = DB::transaction(function () use ($event, $actor, $isRevisionResubmission, $returnedTasksAddressed, &$reopenedTasks): Event {
+            if ($isRevisionResubmission) {
+                $reopenedTasks = $this->proposalWorkflows->reopenReturnedTasksForResubmission($event, $returnedTasksAddressed);
+            }
+
             $event->update(['status' => Event::STATUS_SUBMITTED]);
             $this->participationScopes->ensureOrganizerScope($event)->update([
                 'ppa_status' => EventParticipationScope::PPA_SUBMITTED,
@@ -49,6 +57,10 @@ class EventPermitService
 
             return $event->fresh();
         });
+
+        $this->notifyResubmittedWorkflowTasks($reopenedTasks);
+
+        return $submittedEvent;
     }
 
     public function startReview(Event $event, User $actor): Event
@@ -248,6 +260,14 @@ class EventPermitService
         if (! $actor->hasRole('Super Admin (OSA)') || ! $actor->can('approve-proposals')) {
             throw new DomainException('Only OSA may review event proposals.');
         }
+    }
+
+    /**
+     * @param  Collection<int, ProposalWorkflowTask>  $tasks
+     */
+    private function notifyResubmittedWorkflowTasks(Collection $tasks): void
+    {
+        $tasks->each(fn (ProposalWorkflowTask $task): int => $this->notifications->notifyWorkflowTaskResubmitted($task));
     }
 
     /** @param array<string, mixed> $details */

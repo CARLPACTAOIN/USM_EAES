@@ -21,6 +21,8 @@ use Illuminate\Validation\ValidationException;
 
 class ProposalWorkflowTaskService
 {
+    public function __construct(private readonly EventNotificationService $notifications) {}
+
     private const ACTIVE_STATUSES = [
         ProposalWorkflowTask::STATUS_BLOCKED,
         ProposalWorkflowTask::STATUS_AVAILABLE,
@@ -174,7 +176,7 @@ class ProposalWorkflowTaskService
 
         $this->validateDecisionInput($task, $actor, $decision, $remarks);
 
-        return DB::transaction(function () use ($task, $actor, $decision, $remarks): ApprovalTrail {
+        $trail = DB::transaction(function () use ($task, $actor, $decision, $remarks): ApprovalTrail {
             $lockedTask = ProposalWorkflowTask::with(['workflowRun.event', 'processStep'])
                 ->whereKey($task->id)
                 ->lockForUpdate()
@@ -247,6 +249,14 @@ class ProposalWorkflowTaskService
 
             return $trail;
         });
+
+        if ($decision === ProposalWorkflowTask::DECISION_REVISION_REQUESTED) {
+            $this->notifications->notifyWorkflowTaskRevisionRequested(
+                $trail->workflowTask()->with(['workflowRun.event.organization', 'assignedUser'])->firstOrFail()
+            );
+        }
+
+        return $trail;
     }
 
     public function userCanViewTask(User $user, ProposalWorkflowTask $task): bool
