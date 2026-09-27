@@ -8,9 +8,11 @@ use App\Models\EventPermitVersion;
 use App\Models\User;
 use App\Services\AdminScopeService;
 use App\Support\EventTenantScope;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
+use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class VenueController extends Controller
@@ -40,9 +42,29 @@ class VenueController extends Controller
     public function permitHistory(Request $request, Event $event): View
     {
         $this->authorizeEvent($request->user(), $event);
-        $event->load(['organization', 'venue', 'permitVersions.approver']);
+        $event->load(['organization', 'venue', 'permitVersions.approver', 'permitVersions.copyOwners']);
 
         return view('dashboard.events.permit-history', compact('event'));
+    }
+
+    public function downloadCurrentPermitCertificate(Request $request, Event $event): Response
+    {
+        $this->authorizeEvent($request->user(), $event);
+
+        $permitVersion = $event->currentPermitVersion()
+            ->with(['approver', 'copyOwners'])
+            ->first();
+
+        abort_unless($permitVersion, 404);
+
+        return $this->permitCertificateResponse($event, $permitVersion);
+    }
+
+    public function downloadVersionCertificate(Request $request, Event $event, EventPermitVersion $permitVersion): Response
+    {
+        $this->authorizeVersion($request->user(), $event, $permitVersion);
+
+        return $this->permitCertificateResponse($event, $permitVersion->loadMissing(['approver', 'copyOwners']));
     }
 
     public function downloadVersionEvidence(Request $request, Event $event, EventPermitVersion $permitVersion): StreamedResponse
@@ -65,6 +87,24 @@ class VenueController extends Controller
     {
         abort_unless($permitVersion->event_id === $event->id, 404);
         $this->authorizeEvent($user, $event);
+    }
+
+    private function permitCertificateResponse(Event $event, EventPermitVersion $permitVersion): Response
+    {
+        $event->loadMissing(['organization', 'venue']);
+
+        return Pdf::loadView('dashboard.events.permit-certificate', [
+            'event' => $event,
+            'permitVersion' => $permitVersion,
+        ])->download($this->permitCertificateFilename($event, $permitVersion));
+    }
+
+    private function permitCertificateFilename(Event $event, EventPermitVersion $permitVersion): string
+    {
+        $title = preg_replace('/[^A-Za-z0-9-]+/', '-', (string) str($event->title)->slug());
+        $title = trim((string) $title, '-') ?: 'event';
+
+        return $title.'-permit-v'.$permitVersion->version_number.'.pdf';
     }
 
     private function authorizeEvent(User $user, Event $event): void

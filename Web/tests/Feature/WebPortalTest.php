@@ -18,6 +18,7 @@ use App\Livewire\Dashboard\NotificationCenter;
 use App\Livewire\Dashboard\NotificationSidebarBadge;
 use App\Livewire\Dashboard\PendingQrLinks;
 use App\Models\AdminAssignment;
+use App\Models\ApprovalTrail;
 use App\Models\AttendanceRecord;
 use App\Models\CanonicalPpaPacket;
 use App\Models\College;
@@ -33,6 +34,7 @@ use App\Models\OrganizationOfficer;
 use App\Models\OrganizationOfficerRoster;
 use App\Models\PendingStudentLink;
 use App\Models\Program;
+use App\Models\ProposalWorkflowTask;
 use App\Models\RawScan;
 use App\Models\ScannerSession;
 use App\Models\SchoolYear;
@@ -157,6 +159,68 @@ class WebPortalTest extends TestCase
         $user->assignRole('Student');
 
         return $user;
+    }
+
+    /** @param array<string, mixed> $hierarchy */
+    private function createMembership(User $student, array $hierarchy, string $yearLevel): OrganizationMembership
+    {
+        return OrganizationMembership::create([
+            'user_id' => $student->id,
+            'organization_id' => $hierarchy['org']->id,
+            'college_id' => $hierarchy['college']->id,
+            'department_id' => $hierarchy['department']->id,
+            'program_id' => $hierarchy['program']->id,
+            'year_level' => $yearLevel,
+            'membership_type' => 'primary_academic',
+            'status' => OrganizationMembership::STATUS_ACTIVE,
+            'academic_year' => $hierarchy['schoolYear']->label,
+            'school_year_id' => $hierarchy['schoolYear']->id,
+            'source' => 'test-fixture',
+            'verified_at' => now(),
+        ]);
+    }
+
+    private function satisfyPermitGates(Event $event, User $actor): void
+    {
+        $event->loadMissing('workflowRun.tasks.processStep');
+
+        foreach ($event->workflowRun?->tasks ?? [] as $task) {
+            if (! $task->processStep?->is_gate || ! $task->processStep?->is_required) {
+                continue;
+            }
+
+            $decidedAt = now();
+            $task->update([
+                'status' => ProposalWorkflowTask::STATUS_APPROVED,
+                'decision' => ProposalWorkflowTask::DECISION_APPROVED,
+                'decided_by' => $actor->id,
+                'decided_at' => $decidedAt,
+                'completed_at' => $decidedAt,
+            ]);
+
+            ApprovalTrail::create([
+                'proposal_id' => $event->id,
+                'workflow_run_id' => $event->workflowRun->id,
+                'workflow_task_id' => $task->id,
+                'actor_id' => $actor->id,
+                'decision' => ProposalWorkflowTask::DECISION_APPROVED,
+                'remarks' => 'Permit gate satisfied for status transition regression.',
+                'reference_id' => 'AT-'.$task->id,
+                'previous_status' => ProposalWorkflowTask::STATUS_AVAILABLE,
+                'resulting_status' => ProposalWorkflowTask::STATUS_APPROVED,
+                'assigned_role' => $task->assigned_role,
+                'assigned_scope' => $task->assigned_scope,
+                'decided_at' => $decidedAt,
+                'metadata' => [
+                    'actor' => [
+                        'id' => $actor->id,
+                        'name' => $actor->name,
+                        'email' => $actor->email,
+                    ],
+                    'assignment' => $task->metadata['assignment'] ?? [],
+                ],
+            ]);
+        }
     }
 
     private function createAdmin(string $role, ?Organization $org = null): User
@@ -1359,6 +1423,7 @@ class WebPortalTest extends TestCase
             ->assertSessionHas('success');
         $event->refresh();
         $this->assertEquals('under_review', $event->status);
+        $this->satisfyPermitGates($event, $osaAdmin);
 
         // Approve (OSA)
         $this->actingAs($osaAdmin)
@@ -4884,6 +4949,8 @@ class WebPortalTest extends TestCase
         $thirdYear = $this->createStudent($h['org']);
         $fourthYear = $this->createStudent($h['org']);
         $fourthYear->update(['year_level' => '4th_year']);
+        $this->createMembership($thirdYear, $h, '3rd_year');
+        $this->createMembership($fourthYear->fresh(), $h, '4th_year');
         $admin = $this->createAdmin('Society Admin', $h['org']);
 
         Event::create([

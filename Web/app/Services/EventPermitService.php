@@ -2,10 +2,12 @@
 
 namespace App\Services;
 
+use App\Models\ApprovalTrail;
 use App\Models\AuditLog;
 use App\Models\Event;
 use App\Models\EventParticipationScope;
 use App\Models\EventPermitVersion;
+use App\Models\PermitCopyOwner;
 use App\Models\ProposalWorkflowTask;
 use App\Models\ScannerSession;
 use App\Models\User;
@@ -100,11 +102,19 @@ class EventPermitService
             if (! in_array($lockedEvent->status, [Event::STATUS_SUBMITTED, Event::STATUS_UNDER_REVIEW], true)) {
                 throw new DomainException('Proposal was already processed by another reviewer.');
             }
-            $versionNumber = $lockedEvent->permit_version + 1;
-            $lockedEvent->permitVersions()->whereNull('superseded_at')->update(['superseded_at' => now()]);
+            $lockedEvent->loadMissing(['canonicalPpaPacket', 'organization', 'venue']);
+            $this->assertDigitalPermitGateSatisfied($lockedEvent);
 
-            EventPermitVersion::create([
+            $approvedAt = now();
+            $versionNumber = $lockedEvent->permit_version + 1;
+            $approvalMetadata = $this->approvalMetadataSnapshot($lockedEvent);
+            $verificationReference = $this->verificationReference($approvalMetadata, $lockedEvent, $versionNumber);
+
+            $lockedEvent->permitVersions()->whereNull('superseded_at')->update(['superseded_at' => $approvedAt]);
+
+            $permitVersion = EventPermitVersion::create([
                 'event_id' => $lockedEvent->id,
+                'workflow_run_id' => $lockedEvent->workflowRun?->id,
                 'version_number' => $versionNumber,
                 'venue_id' => $lockedEvent->venue_id,
                 'venue_name_snapshot' => $lockedEvent->venue?->name ?: $lockedEvent->location_details,
@@ -120,8 +130,15 @@ class EventPermitService
                 'ppa_document_original_name' => $lockedEvent->proposal_document_original_name,
                 'amendment_reason' => $lockedEvent->pending_venue_amendment_reason,
                 'approved_by' => $actor->id,
-                'approved_at' => now(),
+                'approved_at' => $approvedAt,
+                'verification_reference' => $verificationReference,
+                'canonical_packet_snapshot' => $lockedEvent->canonicalPpaPacket?->toArray(),
+                'proposal_snapshot' => $this->proposalSnapshot($lockedEvent),
+                'permit_snapshot' => $this->permitSnapshot($lockedEvent, $versionNumber, $actor, $approvedAt, $verificationReference),
+                'evidence_snapshot' => $this->evidenceSnapshot($lockedEvent),
+                'approval_metadata_snapshot' => $approvalMetadata,
             ]);
+            $this->createPermitCopyOwners($permitVersion, $lockedEvent, $approvedAt);
 
             $isAmendment = filled($lockedEvent->pending_venue_amendment_reason);
             $lockedEvent->update([
@@ -133,8 +150,8 @@ class EventPermitService
             $this->participationScopes->ensureOrganizerScope($lockedEvent->fresh())->update([
                 'ppa_status' => EventParticipationScope::PPA_APPROVED,
                 'reviewed_by' => $actor->id,
-                'reviewed_at' => now(),
-                'approved_at' => now(),
+                'reviewed_at' => $approvedAt,
+                'approved_at' => $approvedAt,
                 'review_remarks' => null,
             ]);
             $this->audit($lockedEvent, $actor, $isAmendment ? 'venue-amendment-approved' : 'event-proposal-approved', [
@@ -245,6 +262,175 @@ class EventPermitService
         if (! in_array($event->status, [Event::STATUS_SUBMITTED, Event::STATUS_UNDER_REVIEW], true)) {
             throw new DomainException('Proposal must be submitted or under review.');
         }
+    }
+
+    private function assertDigitalPermitGateSatisfied(Event $event): void
+    {
+        $run = $event->workflowRun()
+            ->lockForUpdate()
+            ->first();
+
+        if (! $run) {
+            return;
+        }
+
+        $openGateTasks = ProposalWorkflowTask::query()
+            ->where('workflow_run_id', $run->id)
+            ->whereHas('processStep', fn ($query) => $query->where('is_required', true)->where('is_gate', true))
+            ->whereNotIn('status', [
+                ProposalWorkflowTask::STATUS_APPROVED,
+                ProposalWorkflowTask::STATUS_NOT_REQUIRED,
+            ])
+            ->lockForUpdate()
+            ->get(['id']);
+
+        if ($openGateTasks->isNotEmpty()) {
+            throw new DomainException('Digital Permit is locked until all required permit-gating workflow tasks are approved or marked Not Required.');
+        }
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function approvalMetadataSnapshot(Event $event): array
+    {
+        $run = $event->workflowRun()
+            ->with(['tasks.approvalTrails.actor'])
+            ->first();
+
+        if (! $run) {
+            return [];
+        }
+
+        return $run->tasks
+            ->sortBy('display_order')
+            ->flatMap(fn (ProposalWorkflowTask $task) => $task->approvalTrails
+                ->sortBy('decided_at')
+                ->map(fn (ApprovalTrail $trail): array => [
+                    'approval_trail_id' => $trail->id,
+                    'workflow_task_id' => $task->id,
+                    'step_key' => $task->step_key,
+                    'step_title' => $task->title,
+                    'assigned_role' => $trail->assigned_role,
+                    'assigned_scope' => $trail->assigned_scope,
+                    'decision' => $trail->decision,
+                    'remarks' => $trail->remarks,
+                    'reference_id' => $trail->reference_id,
+                    'actor_id' => $trail->actor_id,
+                    'actor_name' => $trail->actor?->name,
+                    'actor_email' => $trail->actor?->email,
+                    'decided_at' => $trail->decided_at?->toIso8601String(),
+                ]))
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $approvalMetadata
+     */
+    private function verificationReference(array $approvalMetadata, Event $event, int $versionNumber): string
+    {
+        $osaApproval = collect($approvalMetadata)
+            ->filter(fn (array $metadata): bool => ($metadata['assigned_role'] ?? null) === 'osa')
+            ->last();
+
+        return (string) ($osaApproval['reference_id'] ?? data_get(
+            collect($approvalMetadata)->last(),
+            'reference_id',
+            'DP-'.strtoupper(substr(str_replace('-', '', $event->id), 0, 12)).'-V'.$versionNumber,
+        ));
+    }
+
+    /** @return array<string, mixed> */
+    private function proposalSnapshot(Event $event): array
+    {
+        return [
+            'event_id' => $event->id,
+            'title' => $event->title,
+            'proposal_category' => $event->proposal_category,
+            'organization_id' => $event->organization_id,
+            'organization_name' => $event->organization?->name,
+            'organization_name_snapshot' => $event->organization_name_snapshot ?: data_get($event->governance_snapshots, 'organization_name_snapshot') ?: $event->organization?->name,
+            'college_name_snapshot' => $event->college_name_snapshot ?: data_get($event->governance_snapshots, 'college_name_snapshot') ?: $event->organization?->college?->name,
+            'department_name_snapshot' => $event->department_name_snapshot ?: data_get($event->governance_snapshots, 'department_name_snapshot') ?: $event->department?->name ?: $event->organization?->department?->name,
+            'program_name_snapshot' => $event->program_name_snapshot ?: data_get($event->governance_snapshots, 'program_name_snapshot') ?: $event->program?->name,
+            'proponent_name_snapshot' => $event->proponent_name_snapshot ?: data_get($event->governance_snapshots, 'proponent_name_snapshot') ?: $event->proponent?->name,
+            'school_year_id' => $event->school_year_id,
+            'school_year_label' => data_get($event->governance_snapshots, 'metadata.school_year_label') ?: $event->schoolYear?->label,
+            'start_date' => $event->start_date?->toDateString(),
+            'end_date' => $event->end_date?->toDateString(),
+            'location_type' => $event->location_type,
+            'location_details' => $event->location_details,
+            'governance_snapshots' => $event->governance_snapshots,
+        ];
+    }
+
+    /** @return array<string, mixed> */
+    private function permitSnapshot(Event $event, int $versionNumber, User $approver, \DateTimeInterface $approvedAt, string $verificationReference): array
+    {
+        return [
+            'event_id' => $event->id,
+            'title' => $event->title,
+            'version_number' => $versionNumber,
+            'verification_reference' => $verificationReference,
+            'approved_by' => [
+                'id' => $approver->id,
+                'name' => $approver->name,
+                'email' => $approver->email,
+            ],
+            'approved_at' => $approvedAt->format(DATE_ATOM),
+            'venue' => [
+                'id' => $event->venue_id,
+                'name' => $event->venue?->name ?: $event->location_details,
+                'location' => $event->venue?->campus_location,
+                'details' => $event->location_details,
+            ],
+        ];
+    }
+
+    /** @return array<string, mixed> */
+    private function evidenceSnapshot(Event $event): array
+    {
+        return [
+            'venue_confirmation_office' => $event->venue_confirmation_office,
+            'venue_confirmation_date' => $event->venue_confirmation_date?->toDateString(),
+            'venue_confirmation_reference_number' => $event->venue_confirmation_reference_number,
+            'venue_confirmation_document_path' => $event->venue_confirmation_document_path,
+            'venue_confirmation_document_original_name' => $event->venue_confirmation_document_original_name,
+            'ppa_document_path' => $event->proposal_document_path,
+            'ppa_document_original_name' => $event->proposal_document_original_name,
+        ];
+    }
+
+    private function createPermitCopyOwners(EventPermitVersion $permitVersion, Event $event, \DateTimeInterface $assignedAt): void
+    {
+        $permitVersion->copyOwners()->createMany([
+            [
+                'event_id' => $event->id,
+                'owner_type' => PermitCopyOwner::TYPE_OSA,
+                'owner_name' => 'Office of Student Affairs',
+                'owner_role' => 'Final permit approver and institutional custodian',
+                'copy_label' => 'OSA official copy',
+                'assigned_at' => $assignedAt,
+            ],
+            [
+                'event_id' => $event->id,
+                'owner_type' => PermitCopyOwner::TYPE_SECURITY,
+                'owner_name' => 'Office of Security',
+                'owner_role' => 'Security clearance and campus access custodian',
+                'copy_label' => 'Office of Security official copy',
+                'assigned_at' => $assignedAt,
+            ],
+            [
+                'event_id' => $event->id,
+                'owner_type' => PermitCopyOwner::TYPE_ORGANIZER,
+                'owner_id' => $event->organization_id,
+                'owner_name' => $event->organization_name_snapshot ?: $event->organization?->name ?: 'Organizing Society',
+                'owner_role' => 'Organizing society or organization custodian',
+                'copy_label' => 'Organizer official copy',
+                'assigned_at' => $assignedAt,
+            ],
+        ]);
     }
 
     private function authorizeOrganizer(Event $event, User $actor): void

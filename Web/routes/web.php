@@ -100,7 +100,9 @@ Route::middleware(['auth'])->group(function () {
             Route::post('/events/{event}/participant-scopes/{participationScope}/acknowledge', [DashboardController::class, 'acknowledgeParticipantScope'])->name('dashboard.events.participant-scopes.acknowledge');
             Route::get('/events/{event}/proposal-document', [DashboardController::class, 'downloadProposal'])->name('dashboard.events.proposal-document');
             Route::get('/events/{event}/venue-evidence', [VenueController::class, 'downloadEvidence'])->name('dashboard.events.venue-evidence');
+            Route::get('/events/{event}/permit-certificate', [VenueController::class, 'downloadCurrentPermitCertificate'])->name('dashboard.events.permit-certificate');
             Route::get('/events/{event}/permit-history', [VenueController::class, 'permitHistory'])->name('dashboard.events.permit-history');
+            Route::get('/events/{event}/permit-history/{permitVersion}/certificate', [VenueController::class, 'downloadVersionCertificate'])->name('dashboard.events.permit-history.certificate');
             Route::get('/events/{event}/permit-history/{permitVersion}/evidence', [VenueController::class, 'downloadVersionEvidence'])->name('dashboard.events.permit-history.evidence');
             Route::get('/events/{event}/permit-history/{permitVersion}/ppa', [VenueController::class, 'downloadVersionPpa'])->name('dashboard.events.permit-history.ppa');
             Route::get('/events/{event}/scanner-candidates', [DashboardController::class, 'scannerCandidates'])->name('dashboard.events.scanner-candidates');

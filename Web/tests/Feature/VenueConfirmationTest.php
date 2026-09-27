@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Livewire\Dashboard\VenueCatalog;
 use App\Models\AdminAssignment;
+use App\Models\ApprovalTrail;
 use App\Models\CanonicalPpaPacket;
 use App\Models\College;
 use App\Models\Department;
@@ -12,6 +13,7 @@ use App\Models\EventDay;
 use App\Models\Organization;
 use App\Models\OrganizationOfficer;
 use App\Models\OrganizationOfficerRoster;
+use App\Models\ProposalWorkflowTask;
 use App\Models\ScannerSession;
 use App\Models\SchoolYear;
 use App\Models\University;
@@ -90,6 +92,7 @@ class VenueConfirmationTest extends TestCase
         $event->update(['hardcopy_submitted' => true, 'hardcopy_submitted_at' => now()]);
 
         app(EventPermitService::class)->submit($event->fresh(), $organizer);
+        $this->satisfyPermitGates($event->fresh(), $osa);
         $approved = app(EventPermitService::class)->approve($event->fresh(), $osa);
 
         $this->assertSame(1, $approved->permit_version);
@@ -225,6 +228,7 @@ class VenueConfirmationTest extends TestCase
         Storage::put('venue-confirmations/replacement.pdf', 'new evidence');
         $event->refresh()->update(['venue_id' => $newVenue->id, 'location_type' => 'on-campus', 'location_details' => $newVenue->displayName(), 'venue_confirmation_office' => $newVenue->managing_office, 'venue_confirmation_date' => today(), 'venue_confirmation_document_path' => 'venue-confirmations/replacement.pdf', 'venue_confirmation_document_original_name' => 'replacement.pdf', 'proposal_document_path' => 'proposal-documents/replacement.pdf', 'proposal_document_original_name' => 'replacement.pdf']);
         app(EventPermitService::class)->submit($event->fresh(), $organizer);
+        $this->satisfyPermitGates($event->fresh(), $osa);
         $approved = app(EventPermitService::class)->approve($event->fresh(), $osa);
 
         $this->assertSame(2, $approved->permit_version);
@@ -490,6 +494,49 @@ class VenueConfirmationTest extends TestCase
             'is_primary_admin' => $isPrimary,
             'approved_at' => now(),
         ]);
+    }
+
+    private function satisfyPermitGates(Event $event, User $actor): void
+    {
+        $event->loadMissing('workflowRun.tasks.processStep');
+
+        foreach ($event->workflowRun?->tasks ?? [] as $task) {
+            if (! $task->processStep?->is_gate || ! $task->processStep?->is_required) {
+                continue;
+            }
+
+            $decidedAt = now();
+            $task->update([
+                'status' => ProposalWorkflowTask::STATUS_APPROVED,
+                'decision' => ProposalWorkflowTask::DECISION_APPROVED,
+                'decided_by' => $actor->id,
+                'decided_at' => $decidedAt,
+                'completed_at' => $decidedAt,
+            ]);
+
+            ApprovalTrail::create([
+                'proposal_id' => $event->id,
+                'workflow_run_id' => $event->workflowRun->id,
+                'workflow_task_id' => $task->id,
+                'actor_id' => $actor->id,
+                'decision' => ProposalWorkflowTask::DECISION_APPROVED,
+                'remarks' => 'Permit gate satisfied for venue confirmation regression.',
+                'reference_id' => 'AT-'.$task->id,
+                'previous_status' => ProposalWorkflowTask::STATUS_AVAILABLE,
+                'resulting_status' => ProposalWorkflowTask::STATUS_APPROVED,
+                'assigned_role' => $task->assigned_role,
+                'assigned_scope' => $task->assigned_scope,
+                'decided_at' => $decidedAt,
+                'metadata' => [
+                    'actor' => [
+                        'id' => $actor->id,
+                        'name' => $actor->name,
+                        'email' => $actor->email,
+                    ],
+                    'assignment' => $task->metadata['assignment'] ?? [],
+                ],
+            ]);
+        }
     }
 
     /** @return array<string, mixed> */
