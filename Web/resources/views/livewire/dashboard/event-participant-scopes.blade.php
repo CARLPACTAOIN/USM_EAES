@@ -37,6 +37,22 @@
                         </div>
                         <div class="mt-2 grid gap-1 text-xs text-text-secondary">
                             <span>{{ ucwords(str_replace('_', ' ', $scope->participant_type)) }} · {{ ucwords(str_replace('_', ' ', $scope->capture_mode)) }}</span>
+                            @if($scope->canonicalPpaPacket)
+                                <div class="flex flex-wrap items-center gap-2 text-xs text-text-primary font-medium mt-1">
+                                    <span class="badge badge-secondary">Canonical PPA Packet</span>
+                                    <span>Delegates: {{ $scope->canonicalPpaPacket->delegate_count ?? 'N/A' }}</span>
+                                    <span>Budget: PHP {{ number_format((float) ($scope->canonicalPpaPacket->budget_cost ?? 0), 2) }}</span>
+                                    @if($scope->canonicalPpaPacket->supporting_document_path || $scope->ppa_softcopy_path)
+                                        <a href="{{ route('dashboard.events.participant-scopes.evidence', [$event->id, $scope->id]) }}" class="text-primary hover:underline flex items-center gap-1">
+                                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                                            Evidence File
+                                        </a>
+                                    @endif
+                                    <a href="{{ route('dashboard.events.participant-scopes.preview', [$event->id, $scope->id]) }}" target="_blank" class="text-primary hover:underline">
+                                        Preview Packet ↗
+                                    </a>
+                                </div>
+                            @endif
                             <span>
                                 Late cutoff:
                                 @if($event->event_late_cutoff_min !== null)
@@ -72,25 +88,94 @@
                         @endif
 
                         @if($actions['canSubmit'] ?? false)
-                            <form wire:submit="submitParticipantPpa('{{ $scope->id }}')" class="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
-                                <div>
-                                    <input type="file"
-                                           class="form-input text-xs @error('ppaSoftcopies.'.$scope->id) form-input-error @enderror"
-                                           accept=".pdf,.doc,.docx"
-                                           wire:model="ppaSoftcopies.{{ $scope->id }}">
-                                    @error('ppaSoftcopies.'.$scope->id)
-                                        <p class="form-error" role="alert">{{ $message }}</p>
-                                    @enderror
-                                    <p class="mt-1 text-[0.7rem] text-text-tertiary">Hardcopy, org head, and adviser confirmations are submitted together.</p>
+                            <div class="rounded border border-(--color-border) bg-(--color-surface-muted) p-3 text-xs space-y-3">
+                                <div class="rounded bg-sky-50 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-800 p-2 text-[0.75rem] text-sky-900 dark:text-sky-200 space-y-1">
+                                    <p class="font-semibold">Parent Event Venue & Dates (Inherited Read-Only):</p>
+                                    <p><strong>Venue:</strong> {{ $event->location_details ?: ($event->venue?->name ?? 'Campus Venue') }} ({{ ucwords(str_replace('-', ' ', (string) $event->location_type)) }})</p>
+                                    <p><strong>Dates:</strong> {{ $event->start_date?->toFormattedDateString() }} - {{ $event->end_date?->toFormattedDateString() }}</p>
+                                    <p class="text-[0.7rem] text-sky-700 dark:text-sky-300">No separate venue booking is required. The parent event's approved permit covers participant scopes.</p>
                                 </div>
-                                <button type="submit"
-                                        class="btn btn-sm btn-primary justify-center"
-                                        wire:loading.attr="disabled"
-                                        wire:target="{{ $submitTarget }},ppaSoftcopies.{{ $scope->id }}">
-                                    <span wire:loading.remove wire:target="{{ $submitTarget }},ppaSoftcopies.{{ $scope->id }}">Submit PPA</span>
-                                    <span wire:loading wire:target="{{ $submitTarget }},ppaSoftcopies.{{ $scope->id }}">Submitting...</span>
-                                </button>
-                            </form>
+
+                                <div class="grid gap-2 sm:grid-cols-2">
+                                    <div>
+                                        <label class="font-medium text-text-secondary">Proponent Name</label>
+                                        <input type="text"
+                                               class="form-input text-xs w-full mt-0.5"
+                                               placeholder="Coordinator / Officer Name"
+                                               wire:model="packetForms.{{ $scope->id }}.proponent_name">
+                                    </div>
+                                    <div>
+                                        <label class="font-medium text-text-secondary">Position</label>
+                                        <input type="text"
+                                               class="form-input text-xs w-full mt-0.5"
+                                               placeholder="President / Representative"
+                                               wire:model="packetForms.{{ $scope->id }}.proponent_position">
+                                    </div>
+                                    <div>
+                                        <label class="font-medium text-text-secondary">Organization</label>
+                                        <input type="text"
+                                               class="form-input text-xs w-full mt-0.5"
+                                               wire:model="packetForms.{{ $scope->id }}.proponent_organization">
+                                    </div>
+                                    <div>
+                                        <label class="font-medium text-text-secondary">Email Address</label>
+                                        <input type="email"
+                                               class="form-input text-xs w-full mt-0.5"
+                                               wire:model="packetForms.{{ $scope->id }}.proponent_email">
+                                    </div>
+                                    <div>
+                                        <label class="font-medium text-text-secondary">Delegate Count</label>
+                                        <input type="number"
+                                               min="1"
+                                               class="form-input text-xs w-full mt-0.5"
+                                               placeholder="Expected delegates"
+                                               wire:model="packetForms.{{ $scope->id }}.delegate_count">
+                                    </div>
+                                    <div>
+                                        <label class="font-medium text-text-secondary">Source of Fund</label>
+                                        <input type="text"
+                                               class="form-input text-xs w-full mt-0.5"
+                                               placeholder="e.g. Org Funds, College Subsidy"
+                                               wire:model="packetForms.{{ $scope->id }}.source_of_fund">
+                                    </div>
+                                    <div class="sm:col-span-2">
+                                        <label class="font-medium text-text-secondary">Budget Contribution / Cost (PHP)</label>
+                                        <input type="number"
+                                               step="0.01"
+                                               min="0"
+                                               class="form-input text-xs w-full mt-0.5"
+                                               placeholder="0.00"
+                                               wire:model="packetForms.{{ $scope->id }}.budget_cost">
+                                    </div>
+                                    <div class="sm:col-span-2">
+                                        <label class="font-medium text-text-secondary">Supporting Checklist Evidence (Delegate list, travel order, endorsement)</label>
+                                        <input type="file"
+                                               class="form-input text-xs w-full mt-0.5"
+                                               accept=".pdf,.doc,.docx"
+                                               wire:model="supportingDocuments.{{ $scope->id }}">
+                                        @if($packetForms[$scope->id]['has_supporting_document'] ?? false)
+                                            <p class="mt-1 text-[0.7rem] text-success">
+                                                Attached evidence: {{ $packetForms[$scope->id]['supporting_document_name'] ?? 'File uploaded' }}
+                                            </p>
+                                        @endif
+                                    </div>
+                                </div>
+
+                                <div class="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-(--color-border)">
+                                    <button type="button"
+                                            class="btn btn-xs btn-secondary"
+                                            wire:click="saveParticipantDraft('{{ $scope->id }}')"
+                                            wire:loading.attr="disabled">
+                                        Save Draft
+                                    </button>
+                                    <button type="button"
+                                            class="btn btn-xs btn-primary"
+                                            wire:click="submitParticipantPacket('{{ $scope->id }}')"
+                                            wire:loading.attr="disabled">
+                                        Submit Packet
+                                    </button>
+                                </div>
+                            </div>
                         @endif
 
                         @if($actions['canReview'] ?? false)

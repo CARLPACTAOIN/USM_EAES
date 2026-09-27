@@ -91,7 +91,10 @@ Route::middleware(['auth'])->group(function () {
             Route::post('/events/{event}/hardcopy', [DashboardController::class, 'markHardcopy'])->name('dashboard.events.hardcopy');
             Route::post('/events/{event}/attendance-policy', [DashboardController::class, 'updateEventAttendancePolicy'])->name('dashboard.events.attendance-policy');
             Route::post('/events/{event}/participant-scopes', [DashboardController::class, 'storeParticipantScope'])->name('dashboard.events.participant-scopes.store');
+            Route::post('/events/{event}/participant-scopes/{participationScope}/draft', [DashboardController::class, 'saveParticipantScopeDraft'])->name('dashboard.events.participant-scopes.draft');
             Route::post('/events/{event}/participant-scopes/{participationScope}/submit', [DashboardController::class, 'submitParticipantScope'])->name('dashboard.events.participant-scopes.submit');
+            Route::get('/events/{event}/participant-scopes/{participationScope}/preview', [DashboardController::class, 'participantProposalPreview'])->name('dashboard.events.participant-scopes.preview');
+            Route::get('/events/{event}/participant-scopes/{participationScope}/evidence', [DashboardController::class, 'downloadParticipantEvidence'])->name('dashboard.events.participant-scopes.evidence');
             Route::post('/events/{event}/participant-scopes/{participationScope}/attendance-policy', [DashboardController::class, 'updateParticipantScopeAttendancePolicy'])->name('dashboard.events.participant-scopes.attendance-policy');
             Route::post('/events/{event}/participant-scopes/{participationScope}/review', [DashboardController::class, 'reviewParticipantScope'])->name('dashboard.events.participant-scopes.review');
             Route::post('/events/{event}/participant-scopes/{participationScope}/approve', [DashboardController::class, 'approveParticipantScope'])->name('dashboard.events.participant-scopes.approve');

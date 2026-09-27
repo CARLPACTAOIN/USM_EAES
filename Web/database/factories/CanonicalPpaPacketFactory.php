@@ -4,6 +4,7 @@ namespace Database\Factories;
 
 use App\Models\CanonicalPpaPacket;
 use App\Models\Event;
+use App\Models\EventParticipationScope;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -40,5 +41,16 @@ class CanonicalPpaPacketFactory extends Factory
             'program_activities' => [],
             'budget_breakdown' => [],
         ];
+    }
+
+    public function participant(?EventParticipationScope $scope = null): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'activity_role' => CanonicalPpaPacket::ROLE_PARTICIPANT,
+            'event_participation_scope_id' => $scope?->id,
+            'delegate_count' => fake()->numberBetween(5, 50),
+            'supporting_document_path' => 'participant-ppa-documents/sample-evidence.pdf',
+            'supporting_document_original_name' => 'sample-evidence.pdf',
+        ]);
     }
 }

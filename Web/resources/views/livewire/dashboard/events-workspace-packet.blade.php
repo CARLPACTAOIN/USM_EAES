@@ -17,13 +17,13 @@
         <hr class="ppa-status-divider">
 
         <div class="ppa-status-group">
-            <span class="ppa-status-item {{ $primaryParticipantScope->ppa_softcopy_path ? 'ppa-status-item--ok' : 'ppa-status-item--warn' }}">
-                @if($primaryParticipantScope->ppa_softcopy_path)
+            <span class="ppa-status-item {{ $primaryParticipantScope->canonicalPpaPacket || $primaryParticipantScope->ppa_softcopy_path ? 'ppa-status-item--ok' : 'ppa-status-item--warn' }}">
+                @if($primaryParticipantScope->canonicalPpaPacket || $primaryParticipantScope->ppa_softcopy_path)
                     <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
                 @else
                     <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01"/></svg>
                 @endif
-                Softcopy
+                Packet
             </span>
             <span class="ppa-status-item {{ $primaryParticipantScope->hardcopy_submitted ? 'ppa-status-item--ok' : 'ppa-status-item--warn' }}">
                 @if($primaryParticipantScope->hardcopy_submitted)

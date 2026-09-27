@@ -23,6 +23,7 @@ class CanonicalPpaPacket extends Model
 
     protected $fillable = [
         'event_id',
+        'event_participation_scope_id',
         'activity_role',
         'proposal_category',
         'title',
@@ -45,6 +46,8 @@ class CanonicalPpaPacket extends Model
         'venue_confirmation_reference_number',
         'venue_confirmation_document_path',
         'venue_confirmation_document_original_name',
+        'supporting_document_path',
+        'supporting_document_original_name',
         'rationale',
         'general_objective',
         'specific_objectives',
@@ -53,6 +56,7 @@ class CanonicalPpaPacket extends Model
         'program_activities',
         'expected_output',
         'beneficiaries',
+        'delegate_count',
         'budget_breakdown',
         'schedule_summary',
         'venue_summary',
@@ -63,6 +67,7 @@ class CanonicalPpaPacket extends Model
     {
         return [
             'budget_cost' => 'decimal:2',
+            'delegate_count' => 'integer',
             'start_date' => 'date',
             'end_date' => 'date',
             'venue_confirmation_date' => 'date',
@@ -80,6 +85,11 @@ class CanonicalPpaPacket extends Model
         return $this->belongsTo(Event::class);
     }
 
+    public function participationScope(): BelongsTo
+    {
+        return $this->belongsTo(EventParticipationScope::class, 'event_participation_scope_id');
+    }
+
     public function venue(): BelongsTo
     {
         return $this->belongsTo(Venue::class);
@@ -88,5 +98,15 @@ class CanonicalPpaPacket extends Model
     public function preparedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'prepared_by_user_id');
+    }
+
+    public function isParticipant(): bool
+    {
+        return $this->activity_role === self::ROLE_PARTICIPANT;
+    }
+
+    public function isOrganizer(): bool
+    {
+        return in_array($this->activity_role, [self::ROLE_ORGANIZER, self::ROLE_CO_ORGANIZER], true);
     }
 }

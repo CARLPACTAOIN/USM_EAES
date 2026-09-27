@@ -24,6 +24,12 @@
                 <div class="proposal-detail-item"><span class="proposal-detail-label">Collaborating office</span><span class="proposal-detail-value">{{ $packet->collaborating_office ?: 'N/A' }}</span></div>
                 <div class="proposal-detail-item"><span class="proposal-detail-label">Source of fund</span><span class="proposal-detail-value">{{ $packet->source_of_fund }}</span></div>
                 <div class="proposal-detail-item"><span class="proposal-detail-label">Budget / cost</span><span class="proposal-detail-value">PHP {{ number_format((float) $packet->budget_cost, 2) }}</span></div>
+                @if($packet->delegate_count !== null)
+                    <div class="proposal-detail-item"><span class="proposal-detail-label">Delegate count</span><span class="proposal-detail-value">{{ $packet->delegate_count }}</span></div>
+                @endif
+                @if($packet->supporting_document_path)
+                    <div class="proposal-detail-item"><span class="proposal-detail-label">Supporting evidence</span><span class="proposal-detail-value">{{ $packet->supporting_document_original_name ?: 'Attached evidence' }}</span></div>
+                @endif
                 <div class="proposal-detail-item"><span class="proposal-detail-label">Duration</span><span class="proposal-detail-value">{{ $packet->start_date?->toFormattedDateString() }} - {{ $packet->end_date?->toFormattedDateString() }}</span></div>
                 <div class="proposal-detail-item"><span class="proposal-detail-label">Location</span><span class="proposal-detail-value">{{ ucwords(str_replace('-', ' ', (string) $packet->location_type)) }}: {{ $packet->location_details }}</span></div>
             </div>

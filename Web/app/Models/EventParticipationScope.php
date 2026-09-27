@@ -90,6 +90,11 @@ class EventParticipationScope extends Model
         return $this->belongsTo(Event::class);
     }
 
+    public function canonicalPpaPacket()
+    {
+        return $this->hasOne(CanonicalPpaPacket::class, 'event_participation_scope_id');
+    }
+
     public function schoolYear()
     {
         return $this->belongsTo(SchoolYear::class);

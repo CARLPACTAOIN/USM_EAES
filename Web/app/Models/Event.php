@@ -174,7 +174,16 @@ class Event extends Model
 
     public function canonicalPpaPacket(): HasOne
     {
-        return $this->hasOne(CanonicalPpaPacket::class);
+        return $this->hasOne(CanonicalPpaPacket::class)
+            ->where(function ($query): void {
+                $query->where('activity_role', CanonicalPpaPacket::ROLE_ORGANIZER)
+                    ->orWhereNull('event_participation_scope_id');
+            });
+    }
+
+    public function canonicalPpaPackets(): HasMany
+    {
+        return $this->hasMany(CanonicalPpaPacket::class);
     }
 
     public function requiresVenueConfirmation(): bool

@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\CanonicalPpaPacket;
 use App\Models\Event;
 use DomainException;
 use Illuminate\Support\Facades\Storage;
@@ -82,6 +83,63 @@ class EventProposalSubmissionGuard
 
         if ($missing !== []) {
             throw new DomainException('Complete the following before submission: '.implode(', ', $missing).'.');
+        }
+    }
+
+    /** @return list<string> */
+    public function missingParticipantRequirements(CanonicalPpaPacket $packet): array
+    {
+        $missing = [];
+
+        if ($packet->activity_role !== CanonicalPpaPacket::ROLE_PARTICIPANT) {
+            $missing[] = 'participant activity role';
+        }
+
+        if (blank($packet->proponent_name)) {
+            $missing[] = 'proponent name';
+        }
+
+        if (blank($packet->proponent_position)) {
+            $missing[] = 'proponent position';
+        }
+
+        if (blank($packet->proponent_organization)) {
+            $missing[] = 'proponent organization';
+        }
+
+        if (blank($packet->proponent_email)) {
+            $missing[] = 'proponent email address';
+        }
+
+        if ($packet->delegate_count === null || $packet->delegate_count < 1) {
+            $missing[] = 'delegate count';
+        }
+
+        if (blank($packet->source_of_fund)) {
+            $missing[] = 'source of fund';
+        }
+
+        if ($packet->budget_cost === null || (float) $packet->budget_cost < 0) {
+            $missing[] = 'budget contribution';
+        }
+
+        if ((float) $packet->budget_cost > 0 && ! $this->hasCompleteBudgetBreakdown($packet->budget_breakdown)) {
+            $missing[] = 'budget breakdown';
+        }
+
+        if (blank($packet->supporting_document_path) || (! app()->runningUnitTests() && ! Storage::exists($packet->supporting_document_path))) {
+            $missing[] = 'supporting checklist evidence';
+        }
+
+        return array_values(array_unique($missing));
+    }
+
+    public function assertParticipantSubmittable(CanonicalPpaPacket $packet): void
+    {
+        $missing = $this->missingParticipantRequirements($packet);
+
+        if ($missing !== []) {
+            throw new DomainException('Complete the following before participant packet submission: '.implode(', ', $missing).'.');
         }
     }
 

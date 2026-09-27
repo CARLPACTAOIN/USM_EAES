@@ -21,6 +21,7 @@ use App\Services\EventPermitService;
 use App\Services\EventProposalDraftService;
 use App\Services\EventSessionScheduleService;
 use App\Services\OrganizerChecklistService;
+use App\Services\ParticipantPpaPacketService;
 use App\Services\ParticipationScopeService;
 use App\Services\ScannerAssignmentService;
 use App\Services\ScannerSessionService;
@@ -49,6 +50,7 @@ class DashboardController extends Controller
         private readonly EventPermitService $eventPermits,
         private readonly EventSessionScheduleService $sessionSchedules,
         private readonly OrganizerChecklistService $organizerChecklists,
+        private readonly ParticipantPpaPacketService $participantPackets,
     ) {}
 
     /**
@@ -828,6 +830,33 @@ class DashboardController extends Controller
             ->with('success', 'Participant invitation acknowledged.');
     }
 
+    public function saveParticipantScopeDraft(Request $request, Event $event, EventParticipationScope $participationScope)
+    {
+        $this->authorizeParticipantScopeAccess($event, $participationScope, $request->user());
+
+        $validated = $request->validate([
+            'proponent_name' => 'nullable|string|max:255',
+            'proponent_position' => 'nullable|string|max:255',
+            'proponent_organization' => 'nullable|string|max:255',
+            'proponent_email' => 'nullable|email|max:255',
+            'proponent_contact_number' => 'nullable|string|max:50',
+            'delegate_count' => 'nullable|integer|min:0',
+            'beneficiaries' => 'nullable|string|max:1000',
+            'source_of_fund' => 'nullable|string|max:255',
+            'budget_cost' => 'nullable|numeric|min:0',
+            'budget_breakdown' => 'nullable|array',
+            'rationale' => 'nullable|string|max:2000',
+            'supporting_document' => 'nullable|file|mimes:pdf,doc,docx|max:10240',
+            'ppa_softcopy' => 'nullable|file|mimes:pdf,doc,docx|max:10240',
+        ]);
+
+        $file = $request->file('supporting_document') ?? $request->file('ppa_softcopy');
+
+        $this->participantPackets->saveDraft($participationScope, $request->user(), $validated, $file);
+
+        return redirect()->back()->with('success', 'Participant PPA draft saved.');
+    }
+
     public function submitParticipantScope(Request $request, Event $event, EventParticipationScope $participationScope)
     {
         $this->authorizeParticipantScopeAccess($event, $participationScope, $request->user());
@@ -841,31 +870,96 @@ class DashboardController extends Controller
         }
 
         $validated = $request->validate([
-            'ppa_softcopy' => [$participationScope->ppa_softcopy_path ? 'nullable' : 'required', 'file', 'mimes:pdf,doc,docx', 'max:10240'],
+            'proponent_name' => 'nullable|string|max:255',
+            'proponent_position' => 'nullable|string|max:255',
+            'proponent_organization' => 'nullable|string|max:255',
+            'proponent_email' => 'nullable|email|max:255',
+            'proponent_contact_number' => 'nullable|string|max:50',
+            'delegate_count' => 'nullable|integer|min:1',
+            'beneficiaries' => 'nullable|string|max:1000',
+            'source_of_fund' => 'nullable|string|max:255',
+            'budget_cost' => 'nullable|numeric|min:0',
+            'budget_breakdown' => 'nullable|array',
+            'rationale' => 'nullable|string|max:2000',
+            'supporting_document' => 'nullable|file|mimes:pdf,doc,docx|max:10240',
+            'ppa_softcopy' => [$participationScope->ppa_softcopy_path || $participationScope->canonicalPpaPacket?->supporting_document_path ? 'nullable' : 'nullable', 'file', 'mimes:pdf,doc,docx', 'max:10240'],
             'hardcopy_submitted' => 'nullable|boolean',
             'org_head_signed' => 'nullable|boolean',
             'adviser_signed' => 'nullable|boolean',
         ]);
 
-        $updates = [
-            'ppa_status' => EventParticipationScope::PPA_SUBMITTED,
-            'hardcopy_submitted' => $request->boolean('hardcopy_submitted'),
-            'org_head_signed' => $request->boolean('org_head_signed'),
-            'adviser_signed' => $request->boolean('adviser_signed'),
-            'submitted_by' => $request->user()->id,
-            'submitted_at' => now(),
-            'review_remarks' => null,
-        ];
+        $file = $request->file('supporting_document') ?? $request->file('ppa_softcopy');
+        $existingPacket = $participationScope->canonicalPpaPacket;
 
-        if ($request->hasFile('ppa_softcopy')) {
-            $updates['ppa_softcopy_path'] = $request->file('ppa_softcopy')->store('participant-ppa-documents');
-            $updates['ppa_softcopy_original_name'] = $request->file('ppa_softcopy')->getClientOriginalName();
+        // Provide smart defaults for legacy callers that only send ppa_softcopy file or empty submit payload
+        if (blank($validated['proponent_name'] ?? null)) {
+            $validated['proponent_name'] = $existingPacket?->proponent_name ?: $request->user()->name;
+        }
+        if (blank($validated['proponent_position'] ?? null)) {
+            $validated['proponent_position'] = $existingPacket?->proponent_position ?: 'Organization Officer';
+        }
+        if (blank($validated['proponent_organization'] ?? null)) {
+            $validated['proponent_organization'] = $existingPacket?->proponent_organization ?: $participationScope->displayName();
+        }
+        if (blank($validated['proponent_email'] ?? null)) {
+            $validated['proponent_email'] = $existingPacket?->proponent_email ?: $request->user()->email;
+        }
+        if (! array_key_exists('delegate_count', $validated) || $validated['delegate_count'] === null) {
+            $validated['delegate_count'] = $existingPacket?->delegate_count ?? 1;
+        }
+        if (blank($validated['source_of_fund'] ?? null)) {
+            $validated['source_of_fund'] = $existingPacket?->source_of_fund ?: 'Organization Funds';
+        }
+        if (! array_key_exists('budget_cost', $validated) || $validated['budget_cost'] === null) {
+            $validated['budget_cost'] = $existingPacket?->budget_cost ?? 0;
+        }
+        if (! array_key_exists('budget_breakdown', $validated) || $validated['budget_breakdown'] === null) {
+            if ($existingPacket?->budget_breakdown) {
+                $validated['budget_breakdown'] = $existingPacket->budget_breakdown;
+            }
         }
 
-        $participationScope->update($updates);
-        $this->eventNotifications->notifyParticipantScopeSubmitted($participationScope->fresh(['event.organization', 'organization', 'delegatedOrganization']));
+        try {
+            $this->participantPackets->submitPacket($participationScope, $request->user(), $validated, $file);
+        } catch (DomainException $exception) {
+            return redirect()->back()->with('error', $exception->getMessage());
+        }
 
         return redirect()->back()->with('success', 'Participant PPA submitted for OSA review.');
+    }
+
+    public function participantProposalPreview(Request $request, Event $event, EventParticipationScope $participationScope): View
+    {
+        $user = $request->user();
+        if (! $user->hasRole('Super Admin (OSA)')) {
+            $this->authorizeParticipantScopeAccess($event, $participationScope, $user);
+        }
+        abort_unless($participationScope->event_id === $event->id, 404);
+
+        $packet = $this->participantPackets->getOrCreatePacket($participationScope, $user);
+
+        return view('dashboard.events.proposal-preview', [
+            'event' => $event,
+            'packet' => $packet,
+            'scope' => $participationScope,
+        ]);
+    }
+
+    public function downloadParticipantEvidence(Request $request, Event $event, EventParticipationScope $participationScope)
+    {
+        $user = $request->user();
+        if (! $user->hasRole('Super Admin (OSA)')) {
+            $this->authorizeParticipantScopeAccess($event, $participationScope, $user);
+        }
+        abort_unless($participationScope->event_id === $event->id, 404);
+
+        $packet = $participationScope->canonicalPpaPacket;
+        $path = $packet?->supporting_document_path ?: $participationScope->ppa_softcopy_path;
+        $name = $packet?->supporting_document_original_name ?: ($participationScope->ppa_softcopy_original_name ?: 'participant-evidence.pdf');
+
+        abort_unless($path && Storage::exists($path), 404, 'Supporting evidence document not found.');
+
+        return Storage::download($path, $name);
     }
 
     public function updateParticipantScopeAttendancePolicy(Request $request, Event $event, EventParticipationScope $participationScope)

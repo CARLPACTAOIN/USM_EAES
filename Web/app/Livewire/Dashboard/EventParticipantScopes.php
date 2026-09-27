@@ -10,8 +10,10 @@ use App\Models\Organization;
 use App\Models\User;
 use App\Services\AdminScopeService;
 use App\Services\EventNotificationService;
+use App\Services\ParticipantPpaPacketService;
 use App\Services\ParticipationScopeService;
 use App\Support\AdminScope;
+use DomainException;
 use Illuminate\Contracts\View\View;
 use Illuminate\Support\Collection;
 use Livewire\Attributes\Locked;
@@ -30,6 +32,12 @@ class EventParticipantScopes extends Component
     public bool $isParticipatingWorkspace = false;
 
     public array $ppaSoftcopies = [];
+
+    public array $supportingDocuments = [];
+
+    public array $packetForms = [];
+
+    public array $budgetBreakdowns = [];
 
     public array $reviewRemarks = [];
 
@@ -62,7 +70,9 @@ class EventParticipantScopes extends Component
         $this->eventId = $eventId;
         $this->isParticipatingWorkspace = $isParticipatingWorkspace;
 
-        $this->syncReviewRemarks($this->eventForDisplay());
+        $event = $this->eventForDisplay();
+        $this->syncReviewRemarks($event);
+        $this->syncPacketForms($event);
     }
 
     public function setAudienceMode(string $mode): void
@@ -147,7 +157,9 @@ class EventParticipantScopes extends Component
     #[On('participant-scopes-updated')]
     public function refreshScopes(): void
     {
-        $this->syncReviewRemarks($this->eventForDisplay());
+        $event = $this->eventForDisplay();
+        $this->syncReviewRemarks($event);
+        $this->syncPacketForms($event);
     }
 
     public function acknowledgeInvitation(EventNotificationService $notifications, string $scopeId): void
@@ -164,10 +176,47 @@ class EventParticipantScopes extends Component
         $this->dispatchUpdates();
     }
 
-    public function submitParticipantPpa(EventNotificationService $notifications, string $scopeId): void
+    public function addBudgetItem(string $scopeId): void
+    {
+        $this->budgetBreakdowns[$scopeId][] = ['item' => '', 'amount' => ''];
+    }
+
+    public function removeBudgetItem(string $scopeId, int $index): void
+    {
+        if (count($this->budgetBreakdowns[$scopeId] ?? []) <= 1) {
+            $this->budgetBreakdowns[$scopeId] = [['item' => '', 'amount' => '']];
+
+            return;
+        }
+
+        unset($this->budgetBreakdowns[$scopeId][$index]);
+        $this->budgetBreakdowns[$scopeId] = array_values($this->budgetBreakdowns[$scopeId]);
+    }
+
+    public function saveParticipantDraft(ParticipantPpaPacketService $participantPackets, string $scopeId): void
     {
         $this->resetFeedback();
+        $scope = $this->scopeForAction($scopeId);
+        $this->authorizeParticipantScopeAccess($scope);
 
+        $payload = $this->packetForms[$scopeId] ?? [];
+        $payload['budget_breakdown'] = $this->budgetBreakdowns[$scopeId] ?? [];
+
+        $file = $this->supportingDocuments[$scopeId] ?? $this->ppaSoftcopies[$scopeId] ?? null;
+
+        try {
+            $participantPackets->saveDraft($scope, auth()->user(), $payload, $file);
+            $this->notice = 'Participant PPA draft saved.';
+            $this->syncPacketForms($this->eventForDisplay());
+            $this->dispatchUpdates();
+        } catch (DomainException $e) {
+            $this->errorNotice = $e->getMessage();
+        }
+    }
+
+    public function submitParticipantPacket(ParticipantPpaPacketService $participantPackets, string $scopeId): void
+    {
+        $this->resetFeedback();
         $scope = $this->scopeForAction($scopeId);
         $this->authorizeParticipantScopeAccess($scope);
 
@@ -183,37 +232,48 @@ class EventParticipantScopes extends Component
             return;
         }
 
-        $rules = [
-            "ppaSoftcopies.{$scopeId}" => [$scope->ppa_softcopy_path ? 'nullable' : 'required', 'file', 'mimes:pdf,doc,docx', 'max:10240'],
-        ];
+        $payload = $this->packetForms[$scopeId] ?? [];
+        $payload['budget_breakdown'] = $this->budgetBreakdowns[$scopeId] ?? [];
 
-        $this->validate($rules, [], [
-            "ppaSoftcopies.{$scopeId}" => 'PPA softcopy',
-        ]);
-
-        $updates = [
-            'ppa_status' => EventParticipationScope::PPA_SUBMITTED,
-            'hardcopy_submitted' => true,
-            'org_head_signed' => true,
-            'adviser_signed' => true,
-            'submitted_by' => auth()->id(),
-            'submitted_at' => now(),
-            'review_remarks' => null,
-        ];
-
-        $uploadedFile = $this->ppaSoftcopies[$scopeId] ?? null;
-        if ($uploadedFile) {
-            $updates['ppa_softcopy_path'] = $uploadedFile->store('participant-ppa-documents');
-            $updates['ppa_softcopy_original_name'] = $uploadedFile->getClientOriginalName();
+        // Apply defaults if empty
+        if (blank($payload['proponent_name'] ?? null)) {
+            $payload['proponent_name'] = auth()->user()?->name;
+        }
+        if (blank($payload['proponent_position'] ?? null)) {
+            $payload['proponent_position'] = 'Organization Officer';
+        }
+        if (blank($payload['proponent_organization'] ?? null)) {
+            $payload['proponent_organization'] = $scope->displayName();
+        }
+        if (blank($payload['proponent_email'] ?? null)) {
+            $payload['proponent_email'] = auth()->user()?->email;
+        }
+        if (! array_key_exists('delegate_count', $payload) || $payload['delegate_count'] === null) {
+            $payload['delegate_count'] = 1;
+        }
+        if (blank($payload['source_of_fund'] ?? null)) {
+            $payload['source_of_fund'] = 'Organization Funds';
+        }
+        if (! array_key_exists('budget_cost', $payload) || $payload['budget_cost'] === null) {
+            $payload['budget_cost'] = 0;
         }
 
-        $scope->update($updates);
-        unset($this->ppaSoftcopies[$scopeId]);
+        $file = $this->supportingDocuments[$scopeId] ?? $this->ppaSoftcopies[$scopeId] ?? null;
 
-        $notifications->notifyParticipantScopeSubmitted($scope->fresh(['event.organization', 'organization', 'delegatedOrganization']));
+        try {
+            $participantPackets->submitPacket($scope, auth()->user(), $payload, $file);
+            unset($this->supportingDocuments[$scopeId], $this->ppaSoftcopies[$scopeId]);
+            $this->notice = 'Participant PPA submitted for OSA review.';
+            $this->syncPacketForms($this->eventForDisplay());
+            $this->dispatchUpdates();
+        } catch (DomainException $e) {
+            $this->errorNotice = $e->getMessage();
+        }
+    }
 
-        $this->notice = 'Participant PPA submitted for OSA review.';
-        $this->dispatchUpdates();
+    public function submitParticipantPpa(ParticipantPpaPacketService $participantPackets, string $scopeId): void
+    {
+        $this->submitParticipantPacket($participantPackets, $scopeId);
     }
 
     public function reviewParticipantPpa(EventNotificationService $notifications, string $scopeId): void
@@ -356,10 +416,13 @@ class EventParticipantScopes extends Component
     {
         $event = Event::with([
             'organization',
+            'venue',
+            'canonicalPpaPacket',
             'participationScopes.organization',
             'participationScopes.college',
             'participationScopes.department',
             'participationScopes.delegatedOrganization',
+            'participationScopes.canonicalPpaPacket',
         ])->findOrFail($this->eventId);
 
         $this->authorizeDisplayAccess($event);
@@ -370,8 +433,15 @@ class EventParticipantScopes extends Component
     private function scopeForAction(string $scopeId): EventParticipationScope
     {
         $event = $this->eventForDisplay();
-        $scope = EventParticipationScope::with(['event.organization', 'organization', 'department', 'delegatedOrganization'])
-            ->findOrFail($scopeId);
+        $scope = EventParticipationScope::with([
+            'event.organization',
+            'event.venue',
+            'event.canonicalPpaPacket',
+            'organization',
+            'department',
+            'delegatedOrganization',
+            'canonicalPpaPacket',
+        ])->findOrFail($scopeId);
 
         abort_unless($scope->event_id === $event->id, 404);
 
@@ -548,6 +618,31 @@ class EventParticipantScopes extends Component
     {
         foreach ($this->visibleScopes($event) as $scope) {
             $this->reviewRemarks[$scope->id] ??= $scope->review_remarks ?: 'Returned by OSA for revision.';
+        }
+    }
+
+    private function syncPacketForms(Event $event): void
+    {
+        foreach ($this->visibleScopes($event) as $scope) {
+            $packet = $scope->canonicalPpaPacket;
+            $this->packetForms[$scope->id] = [
+                'proponent_name' => $packet?->proponent_name ?? auth()->user()?->name ?? '',
+                'proponent_position' => $packet?->proponent_position ?? 'Organization Officer',
+                'proponent_organization' => $packet?->proponent_organization ?? $scope->displayName(),
+                'proponent_email' => $packet?->proponent_email ?? auth()->user()?->email ?? '',
+                'proponent_contact_number' => $packet?->proponent_contact_number ?? '',
+                'delegate_count' => $packet?->delegate_count ?? 1,
+                'beneficiaries' => $packet?->beneficiaries ?? '',
+                'source_of_fund' => $packet?->source_of_fund ?? 'Organization Funds',
+                'budget_cost' => $packet?->budget_cost ?? 0,
+                'rationale' => $packet?->rationale ?? '',
+                'has_supporting_document' => (bool) ($packet?->supporting_document_path || $scope->ppa_softcopy_path),
+                'supporting_document_name' => $packet?->supporting_document_original_name ?: $scope->ppa_softcopy_original_name,
+            ];
+
+            $this->budgetBreakdowns[$scope->id] = $packet?->budget_breakdown && count($packet->budget_breakdown) > 0
+                ? $packet->budget_breakdown
+                : [['item' => '', 'amount' => '']];
         }
     }
 
