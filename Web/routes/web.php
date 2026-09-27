@@ -206,9 +206,8 @@ Route::get('/dev/login/{role}', function (string $role) {
 
     // Seed programs
     $program1 = Program::firstOrCreate(
-        ['college_id' => $college->id, 'code' => 'BSIS'],
+        ['code' => 'BSIS'],
         [
-            'college_id' => $college->id,
             'department_id' => $department->id,
             'name' => 'Bachelor of Science in Information Systems',
         ]
@@ -216,9 +215,8 @@ Route::get('/dev/login/{role}', function (string $role) {
     $program1->update(['department_id' => $department->id]);
 
     $program2 = Program::firstOrCreate(
-        ['college_id' => $college->id, 'code' => 'BSCS'],
+        ['code' => 'BSCS'],
         [
-            'college_id' => $college->id,
             'department_id' => $department->id,
             'name' => 'Bachelor of Science in Computer Science',
         ]

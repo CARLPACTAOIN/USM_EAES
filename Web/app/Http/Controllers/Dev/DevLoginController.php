@@ -70,7 +70,7 @@ class DevLoginController extends Controller
         );
 
         $program = Program::firstOrCreate(
-            ['college_id' => $college->id, 'code' => 'BSIS'],
+            ['code' => 'BSIS'],
             [
                 'department_id' => $department->id,
                 'name' => 'BS Information Systems',
@@ -93,7 +93,7 @@ class DevLoginController extends Controller
         $psits->update(['department_id' => $department->id]);
 
         $programIds = Program::query()
-            ->where('college_id', $college->id)
+            ->whereHas('department', fn ($q) => $q->where('college_id', $college->id))
             ->whereIn('code', ['BSIS', 'BSCS'])
             ->pluck('id');
 

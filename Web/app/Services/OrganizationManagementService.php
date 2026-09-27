@@ -257,7 +257,7 @@ class OrganizationManagementService
         if (in_array($type, self::PROGRAM_LINKABLE_TYPES, true) && ! empty($data['program_ids'])) {
             $programs = Program::query()
                 ->whereIn('id', $data['program_ids'])
-                ->when($collegeId, fn ($query) => $query->where('college_id', $collegeId))
+                ->when($collegeId, fn ($query) => $query->whereHas('department', fn ($deptQuery) => $deptQuery->where('college_id', $collegeId)))
                 ->get(['id', 'department_id']);
 
             if ($programs->count() !== count($data['program_ids'])) {

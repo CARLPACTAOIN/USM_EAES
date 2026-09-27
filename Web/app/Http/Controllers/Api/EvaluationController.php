@@ -3,22 +3,22 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\Event;
-use App\Models\Evaluation;
 use App\Models\AttendanceRecord;
-use App\Support\EventEvaluationForm;
+use App\Models\Evaluation;
+use App\Models\Event;
 use App\Support\EvaluationWindow;
+use App\Support\EventEvaluationForm;
+use Carbon\Carbon;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
-use Carbon\Carbon;
 
 class EvaluationController extends Controller
 {
     /**
      * Submit an event evaluation questionnaire (Student action).
      *
-     * @param  \Illuminate\Http\Request  $request
-     * @return \Illuminate\Http\JsonResponse
+     * @return JsonResponse
      */
     public function store(Request $request)
     {
@@ -33,7 +33,7 @@ class EvaluationController extends Controller
         if ($validator->fails()) {
             return response()->json([
                 'success' => false,
-                'errors' => $validator->errors()
+                'errors' => $validator->errors(),
             ], 422);
         }
 
@@ -46,15 +46,15 @@ class EvaluationController extends Controller
             $scoreRules["section_scores.{$key}"] = [
                 $question['required'] ? 'required' : 'nullable',
                 'integer',
-                'min:' . $question['scale_min'],
-                'max:' . $question['scale_max'],
+                'min:'.$question['scale_min'],
+                'max:'.$question['scale_max'],
             ];
         }
 
         $scoreValidator = Validator::make($request->all(), $scoreRules);
         $scoreValidator->after(function ($validator) use ($request, $questionMap): void {
             foreach (array_keys((array) $request->input('section_scores', [])) as $key) {
-                if (!array_key_exists($key, $questionMap)) {
+                if (! array_key_exists($key, $questionMap)) {
                     $validator->errors()->add("section_scores.{$key}", 'This evaluation question does not belong to this event.');
                 }
             }
@@ -63,7 +63,7 @@ class EvaluationController extends Controller
         if ($scoreValidator->fails()) {
             return response()->json([
                 'success' => false,
-                'errors' => $scoreValidator->errors()
+                'errors' => $scoreValidator->errors(),
             ], 422);
         }
 
@@ -71,17 +71,17 @@ class EvaluationController extends Controller
         $event->load('eventDays');
         $windowClosedAt = EvaluationWindow::closesAt($event);
 
-        if (!$windowClosedAt) {
+        if (! $windowClosedAt) {
             return response()->json([
                 'success' => false,
-                'message' => 'Event days not defined.'
+                'message' => 'Event days not defined.',
             ], 422);
         }
 
         if (Carbon::now()->gt($windowClosedAt)) {
             return response()->json([
                 'success' => false,
-                'message' => 'Evaluation window closed. Submissions are no longer accepted for this event.'
+                'message' => 'Evaluation window closed. Submissions are no longer accepted for this event.',
             ], 403);
         }
 
@@ -93,7 +93,7 @@ class EvaluationController extends Controller
         if ($existing) {
             return response()->json([
                 'success' => false,
-                'message' => 'You have already submitted an evaluation for this event.'
+                'message' => 'You have already submitted an evaluation for this event.',
             ], 422);
         }
 
@@ -116,7 +116,7 @@ class EvaluationController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Evaluation submitted successfully. Your attendance has been validated.',
-            'evaluation' => $evaluation
+            'evaluation' => $evaluation,
         ], 201);
     }
 }

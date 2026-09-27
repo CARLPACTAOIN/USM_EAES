@@ -4,9 +4,11 @@ namespace App\Http\Controllers\Web;
 
 use App\Http\Controllers\Controller;
 use App\Models\College;
+use App\Models\Department;
 use App\Models\Event;
 use App\Models\Organization;
 use App\Models\Program;
+use App\Models\SchoolYear;
 use App\Models\User;
 use App\Services\AdminScopeService;
 use App\Services\OrganizationAnalyticsService;
@@ -33,10 +35,11 @@ class AnalyticsOverviewController extends Controller
     public function dataFor(User $user, array $filters = []): array
     {
         $selectedCollegeId = $this->filterValue($filters, 'college_id');
+        $selectedDepartmentId = $this->filterValue($filters, 'department_id');
         $selectedOrgId = $this->filterValue($filters, 'organization_id');
         $selectedProgramId = $this->filterValue($filters, 'program_id');
         $selectedYearLevel = $this->filterValue($filters, 'year_level');
-        $selectedSchoolYear = $this->filterValue($filters, 'school_year');
+        $selectedSchoolYear = $this->filterValue($filters, 'school_year') ?? $this->filterValue($filters, 'school_year_id');
         $selectedSemester = $this->filterValue($filters, 'semester');
         $selectedEventType = $this->filterValue($filters, 'event_type');
         $scope = $this->adminScopes->forUser($user);
@@ -47,51 +50,94 @@ class AnalyticsOverviewController extends Controller
 
         if ($scope->isLsgAdmin()) {
             $selectedCollegeId = $scope->collegeId;
-        } elseif (! $scope->isSuperAdmin()) {
+        } elseif ($scope->isAcademicUnitAdmin()) {
+            $selectedCollegeId = $scope->collegeId;
+            $selectedDepartmentId = $scope->departmentId;
+        } elseif (! $scope->isSuperAdmin() && ! $scope->isUsgAdmin()) {
             $selectedOrgId = $scope->organizationId;
             $selectedCollegeId = $scope->collegeId;
+            if ($scope->departmentId) {
+                $selectedDepartmentId = $scope->departmentId;
+            }
         }
 
         $filterColleges = College::query()
             ->when($selectedCollegeId, fn ($query, $collegeId) => $query->where('id', $collegeId))
             ->orderBy('name')
             ->get();
-        $filterOrganizations = Organization::query()
+
+        $filterDepartments = Department::query()
             ->when($selectedCollegeId, fn ($query, $collegeId) => $query->where('college_id', $collegeId))
-            ->when($selectedOrgId, fn ($query, $organizationId) => $query->where('id', $organizationId))
+            ->when($selectedDepartmentId, fn ($query, $deptId) => $query->where('id', $deptId))
             ->orderBy('name')
             ->get();
+
         $filterPrograms = Program::query()
+            ->when($selectedDepartmentId, fn ($query, $deptId) => $query->where('department_id', $deptId))
+            ->when(! $selectedDepartmentId && $selectedCollegeId, function ($query) use ($selectedCollegeId): void {
+                $query->whereHas('department', fn ($dq) => $dq->where('college_id', $selectedCollegeId));
+            })
             ->when(
                 $selectedOrgId,
                 fn ($query, $organizationId) => $query->whereHas(
                     'organizations',
                     fn ($organizationQuery) => $organizationQuery->where('organization_id', $organizationId),
                 ),
-                fn ($query) => $query->when($selectedCollegeId, fn ($query, $collegeId) => $query->where('college_id', $collegeId)),
             )
+            ->when($selectedProgramId, fn ($query, $programId) => $query->where('id', $programId))
             ->orderBy('name')
             ->get();
-        $schoolYears = Event::query()
-            ->where('status', Event::STATUS_COMPLETED)
-            ->orderByDesc('start_date')
-            ->pluck('start_date')
-            ->map(function ($date): ?string {
-                if (! $date) {
-                    return null;
-                }
 
-                $year = (int) $date->format('Y');
-                $month = (int) $date->format('m');
-
-                return $month < 6 ? ($year - 1).'-'.$year : $year.'-'.($year + 1);
+        $filterOrganizations = Organization::query()
+            ->when($selectedDepartmentId, fn ($query, $deptId) => $query->where('department_id', $deptId))
+            ->when(! $selectedDepartmentId && $selectedCollegeId, fn ($query) => $query->where('college_id', $selectedCollegeId))
+            ->when($selectedProgramId, function ($query, $programId): void {
+                $query->where(function ($sub) use ($programId): void {
+                    $sub->whereHas('programs', fn ($pq) => $pq->where('programs.id', $programId))
+                        ->orWhereIn('department_id', function ($deptQ) use ($programId): void {
+                            $deptQ->select('department_id')->from('programs')->where('id', $programId);
+                        });
+                });
             })
-            ->filter()
-            ->unique()
-            ->values();
+            ->when($selectedOrgId, fn ($query, $organizationId) => $query->where('id', $organizationId))
+            ->orderBy('name')
+            ->get();
+
+        $schoolYearsQuery = SchoolYear::query()->orderByDesc('starts_on')->get();
+        if ($schoolYearsQuery->isNotEmpty()) {
+            $schoolYears = $schoolYearsQuery;
+        } else {
+            $schoolYears = Event::query()
+                ->where('status', Event::STATUS_COMPLETED)
+                ->orderByDesc('start_date')
+                ->pluck('start_date')
+                ->map(function ($date): ?string {
+                    if (! $date) {
+                        return null;
+                    }
+
+                    $year = (int) $date->format('Y');
+                    $month = (int) $date->format('m');
+
+                    return $month < 6 ? ($year - 1).'-'.$year : $year.'-'.($year + 1);
+                })
+                ->filter()
+                ->unique()
+                ->values();
+        }
+
         $organizations = Organization::query()
-            ->with('college')
-            ->when($selectedCollegeId, fn ($query, $collegeId) => $query->where('college_id', $collegeId))
+            ->with(['college', 'department'])
+            ->when($selectedDepartmentId, fn ($query, $deptId) => $query->where('department_id', $deptId))
+            ->when(! $selectedDepartmentId && $selectedCollegeId, fn ($query) => $query->where('college_id', $selectedCollegeId))
+            ->when($selectedProgramId, function ($query, $programId): void {
+                $query->where(function ($sub) use ($programId): void {
+                    $sub->whereHas('programs', fn ($pq) => $pq->where('programs.id', $programId))
+                        ->orWhereIn('department_id', function ($deptQ) use ($programId): void {
+                            $deptQ->select('department_id')->from('programs')->where('id', $programId);
+                        });
+                });
+            })
             ->when($selectedOrgId, fn ($query, $organizationId) => $query->where('id', $organizationId))
             ->orderBy('name')
             ->get();
@@ -109,6 +155,8 @@ class AnalyticsOverviewController extends Controller
                 $selectedSemester,
                 $selectedEventType,
                 $selectedYearLevel,
+                $selectedDepartmentId,
+                $selectedCollegeId,
             );
             $orgMetrics[$organization->id] = $metrics;
             $globalAttendanceSum += $metrics['avg_attendance_rate'];
@@ -141,8 +189,11 @@ class AnalyticsOverviewController extends Controller
             ->values();
 
         $programsForComparison = Program::query()
-            ->with(['college', 'organizations'])
-            ->when($selectedCollegeId, fn ($query, $collegeId) => $query->where('college_id', $collegeId))
+            ->with(['department.college', 'organizations'])
+            ->when($selectedDepartmentId, fn ($query, $deptId) => $query->where('department_id', $deptId))
+            ->when(! $selectedDepartmentId && $selectedCollegeId, function ($query) use ($selectedCollegeId): void {
+                $query->whereHas('department', fn ($dq) => $dq->where('college_id', $selectedCollegeId));
+            })
             ->when($selectedProgramId, fn ($query, $programId) => $query->where('id', $programId))
             ->orderBy('name')
             ->get();
@@ -153,6 +204,8 @@ class AnalyticsOverviewController extends Controller
                 $selectedSemester,
                 $selectedEventType,
                 $selectedYearLevel,
+                $selectedDepartmentId,
+                $selectedCollegeId,
             ))
             ->sortByDesc('composite_score')
             ->values()
@@ -160,7 +213,7 @@ class AnalyticsOverviewController extends Controller
 
         $orgsByCollege = [];
         $programsByOrg = [];
-        $allOrganizations = Organization::query()->with('programs')->orderBy('name')->get();
+        $allOrganizations = Organization::query()->with(['programs', 'department'])->orderBy('name')->get();
 
         foreach ($allOrganizations as $organization) {
             $orgsByCollege[$organization->college_id ?? 'university_wide'][] = [
@@ -179,12 +232,33 @@ class AnalyticsOverviewController extends Controller
         }
 
         $programsByCollege = [];
+        $programsByDepartment = [];
 
-        foreach (Program::query()->orderBy('name')->get() as $program) {
-            $programsByCollege[$program->college_id][] = [
-                'id' => $program->id,
-                'name' => $program->name,
-                'code' => $program->code,
+        foreach (Program::query()->with('department')->orderBy('name')->get() as $program) {
+            $collegeId = $program->department?->college_id;
+            if ($collegeId) {
+                $programsByCollege[$collegeId][] = [
+                    'id' => $program->id,
+                    'name' => $program->name,
+                    'code' => $program->code,
+                ];
+            }
+
+            if ($program->department_id) {
+                $programsByDepartment[$program->department_id][] = [
+                    'id' => $program->id,
+                    'name' => $program->name,
+                    'code' => $program->code,
+                ];
+            }
+        }
+
+        $departmentsByCollege = [];
+        foreach (Department::query()->orderBy('name')->get() as $dept) {
+            $departmentsByCollege[$dept->college_id][] = [
+                'id' => $dept->id,
+                'name' => $dept->name,
+                'code' => $dept->code,
             ];
         }
 
@@ -197,14 +271,18 @@ class AnalyticsOverviewController extends Controller
             'ranked',
             'user',
             'filterColleges',
+            'filterDepartments',
             'filterOrganizations',
             'filterPrograms',
             'schoolYears',
             'programComparison',
             'orgsByCollege',
             'programsByCollege',
+            'programsByDepartment',
+            'departmentsByCollege',
             'programsByOrg',
             'selectedCollegeId',
+            'selectedDepartmentId',
             'selectedOrgId',
             'selectedProgramId',
             'selectedYearLevel',

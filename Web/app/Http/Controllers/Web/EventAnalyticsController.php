@@ -10,9 +10,7 @@ use Illuminate\Http\Request;
 
 class EventAnalyticsController extends Controller
 {
-    public function __construct(private readonly EventAnalyticsService $analytics)
-    {
-    }
+    public function __construct(private readonly EventAnalyticsService $analytics) {}
 
     public function show(Request $request, Event $event)
     {

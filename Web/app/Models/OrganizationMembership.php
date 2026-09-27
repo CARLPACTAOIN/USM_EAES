@@ -22,7 +22,6 @@ class OrganizationMembership extends Model
         'year_level',
         'membership_type',
         'status',
-        'academic_year',
         'school_year_id',
         'source',
         'verified_by',

@@ -33,7 +33,7 @@ class YearLevels
 
     public static function label(?string $value): string
     {
-        if (!$value) {
+        if (! $value) {
             return 'N/A';
         }
 

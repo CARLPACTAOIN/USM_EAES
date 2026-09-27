@@ -73,7 +73,7 @@ return new class extends Migration
                     DB::table('evaluation_form_versions')->insert([
                         'id' => $formId,
                         'event_id' => $event->id,
-                        'title' => 'Evaluation - ' . $event->title,
+                        'title' => 'Evaluation - '.$event->title,
                         'questions' => $questions,
                         'created_by' => null,
                         'locked_at' => $now,

@@ -2,8 +2,8 @@
 
 namespace Tests\Feature;
 
-use App\Models\Event;
 use App\Models\College;
+use App\Models\Event;
 use App\Models\Organization;
 use App\Models\University;
 use App\Models\User;

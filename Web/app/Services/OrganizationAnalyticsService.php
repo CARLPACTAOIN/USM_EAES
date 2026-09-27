@@ -7,7 +7,9 @@ use App\Models\Evaluation;
 use App\Models\Event;
 use App\Models\EventParticipationScope;
 use App\Models\Organization;
+use App\Models\OrganizationMembership;
 use App\Models\Program;
+use App\Models\SchoolYear;
 use App\Models\User;
 use App\Support\EventEvaluationForm;
 use Illuminate\Database\Eloquent\Builder;
@@ -16,6 +18,18 @@ use Illuminate\Support\Collection;
 class OrganizationAnalyticsService
 {
     public function __construct(private readonly ParticipationScopeService $participationScopes) {}
+
+    public function resolveSchoolYear(?string $schoolYear = null): ?SchoolYear
+    {
+        if (filled($schoolYear)) {
+            return SchoolYear::query()
+                ->where('id', $schoolYear)
+                ->orWhere('label', $schoolYear)
+                ->first();
+        }
+
+        return SchoolYear::active();
+    }
 
     /**
      * @return array{
@@ -43,14 +57,35 @@ class OrganizationAnalyticsService
         ?string $semester = null,
         ?string $eventType = null,
         ?string $yearLevel = null,
+        ?string $departmentId = null,
+        ?string $collegeId = null,
     ): array {
-        $events = $this->eligibleOrganizationEventsQuery($organization, $schoolYear, $semester, $eventType)
+        $resolvedSchoolYear = $this->resolveSchoolYear($schoolYear);
+        $events = $this->eligibleOrganizationEventsQuery($organization, $schoolYear, $semester, $eventType, $departmentId)
             ->with(['evaluationFormVersion', 'organization', 'participationScopes.organization'])
             ->get();
         $eventIds = $events->pluck('id');
-        $memberIds = $this->organizationMemberIds($organization, $programId, $yearLevel);
+        $memberIds = $this->organizationMemberIds(
+            $organization,
+            $programId,
+            $yearLevel,
+            $departmentId,
+            $collegeId,
+            $resolvedSchoolYear,
+            $schoolYear,
+        );
         $audienceIdsByEvent = $events->mapWithKeys(
-            fn (Event $event): array => [$event->id => $this->audienceIdsForEvent($event, $programId, $yearLevel)]
+            fn (Event $event): array => [
+                $event->id => $this->audienceIdsForEvent(
+                    $event,
+                    $programId,
+                    $yearLevel,
+                    $departmentId,
+                    $collegeId,
+                    $resolvedSchoolYear,
+                    $schoolYear,
+                ),
+            ]
         );
         $allAudienceIds = $audienceIdsByEvent
             ->flatMap(fn (Collection $audienceIds): Collection => $audienceIds)
@@ -144,6 +179,9 @@ class OrganizationAnalyticsService
 
         if ($programId === null) {
             foreach ($organization->programs()->orderBy('name')->get() as $program) {
+                if ($departmentId && $program->department_id && $program->department_id !== $departmentId) {
+                    continue;
+                }
                 $programMetrics = $this->organizationMetrics(
                     $organization,
                     $program->id,
@@ -151,6 +189,8 @@ class OrganizationAnalyticsService
                     $semester,
                     $eventType,
                     $yearLevel,
+                    $departmentId,
+                    $collegeId,
                 );
                 $linkedProgramsMetrics[] = [
                     'program' => $program,
@@ -202,20 +242,58 @@ class OrganizationAnalyticsService
         ?string $semester = null,
         ?string $eventType = null,
         ?string $yearLevel = null,
+        ?string $departmentId = null,
+        ?string $collegeId = null,
     ): array {
+        $resolvedSchoolYear = $this->resolveSchoolYear($schoolYear);
+        $hasSchoolYearsInDb = SchoolYear::query()->exists();
+        $hasSchoolYearOnMemberships = OrganizationMembership::whereNotNull('school_year_id')->exists();
+
         $eventsQuery = Event::query()
             ->where('status', Event::STATUS_COMPLETED)
             ->where(function (Builder $query): void {
                 $query->whereNull('event_domain')->orWhere('event_domain', '!=', 'hr');
             })
             ->whereHas('organization', fn (Builder $query): Builder => $query->where('type', '!=', 'hr_unit'));
+
+        if ($departmentId) {
+            $eventsQuery->where(function (Builder $q) use ($departmentId): void {
+                $q->where('department_id', $departmentId)
+                    ->orWhereHas('organization', fn ($oq) => $oq->where('department_id', $departmentId));
+            });
+        }
+
         $this->applyEventFilters($eventsQuery, $schoolYear, $semester, $eventType);
         $events = $eventsQuery->with('evaluationFormVersion')->get();
-        $studentIds = User::role('Student')
-            ->where('program_id', $program->id)
-            ->when($yearLevel, fn (Builder $query, string $value): Builder => $query->where('year_level', $value))
-            ->distinct()
-            ->pluck('users.id');
+
+        $studentQuery = User::role('Student')
+            ->where('program_id', $program->id);
+
+        if ($resolvedSchoolYear && ($hasSchoolYearsInDb || $hasSchoolYearOnMemberships)) {
+            $studentQuery->whereIn('users.id', function ($mq) use ($program, $resolvedSchoolYear): void {
+                $mq->select('user_id')
+                    ->from('organization_memberships')
+                    ->where('status', OrganizationMembership::STATUS_ACTIVE)
+                    ->where('school_year_id', $resolvedSchoolYear->id)
+                    ->where(function ($sub) use ($program): void {
+                        $sub->where('program_id', $program->id)
+                            ->orWhereIn('organization_id', function ($oq) use ($program): void {
+                                $oq->select('organization_id')->from('organization_programs')->where('program_id', $program->id);
+                            });
+                    });
+            });
+        } elseif (filled($schoolYear) && ($hasSchoolYearsInDb || $hasSchoolYearOnMemberships)) {
+            $studentQuery->whereIn('users.id', function ($mq) use ($schoolYear): void {
+                $mq->select('user_id')
+                    ->from('organization_memberships')
+                    ->where('status', OrganizationMembership::STATUS_ACTIVE)
+                    ->where('school_year_id', $schoolYear);
+            });
+        }
+
+        $this->applyStudentFilters($studentQuery, null, $yearLevel, $departmentId, $collegeId);
+
+        $studentIds = $studentQuery->distinct()->pluck('users.id')->unique()->values();
         $totalMembers = $studentIds->count();
         $attendanceByEvent = AttendanceRecord::query()
             ->whereIn('event_id', $events->pluck('id'))
@@ -293,6 +371,7 @@ class OrganizationAnalyticsService
         ?string $schoolYear,
         ?string $semester,
         ?string $eventType,
+        ?string $departmentId = null,
     ): Builder {
         $query = Event::query()
             ->whereBelongsTo($organization)
@@ -305,30 +384,73 @@ class OrganizationAnalyticsService
             $query->whereRaw('1 = 0');
         }
 
+        if ($departmentId) {
+            $query->where(function (Builder $q) use ($departmentId): void {
+                $q->where('department_id', $departmentId)
+                    ->orWhereHas('organization', fn ($oq) => $oq->where('department_id', $departmentId));
+            });
+        }
+
         $this->applyEventFilters($query, $schoolYear, $semester, $eventType);
 
         return $query;
     }
 
-    private function organizationMemberIds(Organization $organization, ?string $programId, ?string $yearLevel): Collection
-    {
+    private function organizationMemberIds(
+        Organization $organization,
+        ?string $programId,
+        ?string $yearLevel,
+        ?string $departmentId = null,
+        ?string $collegeId = null,
+        ?SchoolYear $resolvedSchoolYear = null,
+        ?string $schoolYearString = null,
+    ): Collection {
+        $hasSchoolYearsInDb = SchoolYear::query()->exists();
+        $hasSchoolYearOnMemberships = OrganizationMembership::whereNotNull('school_year_id')->exists();
+
         $query = User::role('Student')
-            ->where(function (Builder $query) use ($organization): void {
-                $query->where('organization_id', $organization->id)
-                    ->orWhereIn('id', function ($membershipQuery) use ($organization): void {
-                        $membershipQuery->select('user_id')
-                            ->from('organization_memberships')
-                            ->where('organization_id', $organization->id)
-                            ->where('status', 'active');
-                    });
+            ->whereIn('users.id', function ($membershipQuery) use ($organization, $resolvedSchoolYear, $schoolYearString, $hasSchoolYearsInDb, $hasSchoolYearOnMemberships, $departmentId, $collegeId): void {
+                $membershipQuery->select('user_id')
+                    ->from('organization_memberships')
+                    ->where('organization_id', $organization->id)
+                    ->where('status', OrganizationMembership::STATUS_ACTIVE);
+
+                if ($resolvedSchoolYear && ($hasSchoolYearsInDb || $hasSchoolYearOnMemberships)) {
+                    $membershipQuery->where('school_year_id', $resolvedSchoolYear->id);
+                } elseif (filled($schoolYearString) && ($hasSchoolYearsInDb || $hasSchoolYearOnMemberships)) {
+                    $membershipQuery->where('school_year_id', $schoolYearString);
+                }
+
+                if ($departmentId) {
+                    $membershipQuery->where('department_id', $departmentId);
+                }
+
+                if ($collegeId) {
+                    $membershipQuery->where('college_id', $collegeId);
+                }
             });
-        $this->applyStudentFilters($query, $programId, $yearLevel);
+
+        // Legacy fallback: if no OrganizationMembership records exist at all for this org
+        // and no SchoolYear exists in DB, fallback to users.organization_id
+        if (! OrganizationMembership::where('organization_id', $organization->id)->exists()
+            && ! $hasSchoolYearsInDb) {
+            $query = User::role('Student')->where('organization_id', $organization->id);
+        }
+
+        $this->applyStudentFilters($query, $programId, $yearLevel, $departmentId, $collegeId);
 
         return $query->distinct()->pluck('users.id')->unique()->values();
     }
 
-    private function audienceIdsForEvent(Event $event, ?string $programId, ?string $yearLevel): Collection
-    {
+    private function audienceIdsForEvent(
+        Event $event,
+        ?string $programId,
+        ?string $yearLevel,
+        ?string $departmentId = null,
+        ?string $collegeId = null,
+        ?SchoolYear $resolvedSchoolYear = null,
+        ?string $schoolYearString = null,
+    ): Collection {
         $organizerScope = $event->participationScopes->first(
             fn (EventParticipationScope $scope): bool => $scope->participation_role === EventParticipationScope::ROLE_ORGANIZER
                 && $scope->status === EventParticipationScope::STATUS_ACTIVE
@@ -337,7 +459,21 @@ class OrganizationAnalyticsService
         $query = $organizerScope
             ? $this->participationScopes->audienceQuery($organizerScope, requireRuntimeApproval: false)
             : $this->legacyAudienceQuery($event);
-        $this->applyStudentFilters($query, $programId, $yearLevel);
+
+        $this->applyStudentFilters($query, $programId, $yearLevel, $departmentId, $collegeId);
+
+        $targetSchoolYear = $resolvedSchoolYear ?? ($event->school_year_id ? SchoolYear::find($event->school_year_id) : null);
+        $hasSchoolYearsInDb = SchoolYear::query()->exists();
+        $hasSchoolYearOnMemberships = OrganizationMembership::whereNotNull('school_year_id')->orWhereNotNull('academic_year')->exists();
+
+        if ($targetSchoolYear && ($hasSchoolYearsInDb || $hasSchoolYearOnMemberships)) {
+            $query->whereIn('users.id', function ($mq) use ($targetSchoolYear): void {
+                $mq->select('user_id')
+                    ->from('organization_memberships')
+                    ->where('status', OrganizationMembership::STATUS_ACTIVE)
+                    ->where('school_year_id', $targetSchoolYear->id);
+            });
+        }
 
         return $query->distinct()->pluck('users.id')->unique()->values();
     }
@@ -368,11 +504,28 @@ class OrganizationAnalyticsService
         return $query->where('organization_id', $organization->id);
     }
 
-    private function applyStudentFilters(Builder $query, ?string $programId, ?string $yearLevel): void
-    {
+    private function applyStudentFilters(
+        Builder $query,
+        ?string $programId,
+        ?string $yearLevel,
+        ?string $departmentId = null,
+        ?string $collegeId = null,
+    ): void {
         $query
-            ->when($programId, fn (Builder $query, string $value): Builder => $query->where('program_id', $value))
-            ->when($yearLevel, fn (Builder $query, string $value): Builder => $query->where('year_level', $value));
+            ->when($programId, fn (Builder $query, string $value): Builder => $query->where('users.program_id', $value))
+            ->when($yearLevel, fn (Builder $query, string $value): Builder => $query->where('users.year_level', $value))
+            ->when($departmentId, fn (Builder $query, string $value): Builder => $query->where(function (Builder $q) use ($value): void {
+                $q->where('users.department_id', $value)
+                    ->orWhereIn('users.program_id', function ($pq) use ($value): void {
+                        $pq->select('id')->from('programs')->where('department_id', $value);
+                    });
+            }))
+            ->when($collegeId, fn (Builder $query, string $value): Builder => $query->where(function (Builder $q) use ($value): void {
+                $q->where('users.college_id', $value)
+                    ->orWhereIn('users.department_id', function ($dq) use ($value): void {
+                        $dq->select('id')->from('departments')->where('college_id', $value);
+                    });
+            }));
     }
 
     private function applyEventFilters(
@@ -381,7 +534,30 @@ class OrganizationAnalyticsService
         ?string $semester,
         ?string $eventType,
     ): void {
-        if ($schoolYear && preg_match('/^(\d{4})-(\d{4})$/', $schoolYear, $matches) === 1) {
+        $resolvedSchoolYear = $this->resolveSchoolYear($schoolYear);
+
+        if ($resolvedSchoolYear) {
+            $query->where(function (Builder $q) use ($resolvedSchoolYear, $semester): void {
+                $q->where('school_year_id', $resolvedSchoolYear->id)
+                    ->orWhere(function (Builder $dateQuery) use ($resolvedSchoolYear, $semester): void {
+                        $dateQuery->whereNull('school_year_id');
+                        $this->applyDateFilterForSchoolYear($dateQuery, $resolvedSchoolYear->label, $semester);
+                    });
+            });
+        } elseif ($schoolYear) {
+            $this->applyDateFilterForSchoolYear($query, $schoolYear, $semester);
+        } elseif ($semester) {
+            $this->applySemesterOnlyFilter($query, $semester);
+        }
+
+        if ($eventType) {
+            $query->where('proposal_category', $eventType);
+        }
+    }
+
+    private function applyDateFilterForSchoolYear(Builder $query, string $schoolYearLabel, ?string $semester): void
+    {
+        if (preg_match('/^(\d{4})-(\d{4})$/', $schoolYearLabel, $matches) === 1) {
             $startYear = $matches[1];
             $endYear = $matches[2];
 
@@ -394,7 +570,12 @@ class OrganizationAnalyticsService
             } else {
                 $query->whereBetween('start_date', ["{$startYear}-06-01", "{$endYear}-05-31"]);
             }
-        } elseif ($semester === '1st Semester') {
+        }
+    }
+
+    private function applySemesterOnlyFilter(Builder $query, string $semester): void
+    {
+        if ($semester === '1st Semester') {
             $query->whereMonth('start_date', '>=', 6)->whereMonth('start_date', '<=', 10);
         } elseif ($semester === '2nd Semester') {
             $query->where(function (Builder $query): void {
@@ -402,10 +583,6 @@ class OrganizationAnalyticsService
             });
         } elseif ($semester === 'Summer') {
             $query->whereMonth('start_date', '>=', 4)->whereMonth('start_date', '<=', 5);
-        }
-
-        if ($eventType) {
-            $query->where('proposal_category', $eventType);
         }
     }
 

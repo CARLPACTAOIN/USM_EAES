@@ -43,8 +43,9 @@ class EventSentimentAction extends Component
         $event = Event::findOrFail($this->eventId);
         EventTenantScope::authorize($event, auth()->user());
 
-        if (!EvaluationWindow::isClosed($event)) {
+        if (! EvaluationWindow::isClosed($event)) {
             $this->errorNotice = 'Sentiment analysis is available after the evaluation window closes.';
+
             return;
         }
 
@@ -53,6 +54,7 @@ class EventSentimentAction extends Component
         if ($pendingComments === 0) {
             $this->pendingComments = 0;
             $this->notice = 'No unprocessed evaluation comments found for this event.';
+
             return;
         }
 

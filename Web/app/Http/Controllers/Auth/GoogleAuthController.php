@@ -74,7 +74,7 @@ class GoogleAuthController extends Controller
             if (empty($user->google_sub)) {
                 $updates['google_sub'] = $googleUser->getId();
             }
-            if (!$user->user_type) {
+            if (! $user->user_type) {
                 $updates['user_type'] = $this->userTypeForEmail($email);
             }
             if ($updates !== []) {
@@ -89,7 +89,7 @@ class GoogleAuthController extends Controller
             return redirect('/dashboard');
         }
 
-        if (!$user->hasRole('Student')) {
+        if (! $user->hasRole('Student')) {
             Auth::logout();
             $request->session()->invalidate();
             $request->session()->regenerateToken();

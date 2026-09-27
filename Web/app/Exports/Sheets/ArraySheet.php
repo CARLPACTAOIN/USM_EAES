@@ -7,18 +7,18 @@ use Maatwebsite\Excel\Concerns\FromArray;
 use Maatwebsite\Excel\Concerns\ShouldAutoSize;
 use Maatwebsite\Excel\Concerns\WithStyles;
 use Maatwebsite\Excel\Concerns\WithTitle;
+use PhpOffice\PhpSpreadsheet\Style\Fill;
 use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 
 class ArraySheet implements FromArray, ShouldAutoSize, WithStyles, WithTitle
 {
     /**
-     * @param list<list<string>> $rows
+     * @param  list<list<string>>  $rows
      */
     public function __construct(
         private readonly string $title,
         private readonly array $rows
-    ) {
-    }
+    ) {}
 
     /**
      * @return list<list<string>>
@@ -40,7 +40,7 @@ class ArraySheet implements FromArray, ShouldAutoSize, WithStyles, WithTitle
     {
         $sheet->getStyle('1:1')->getFont()->setBold(true);
         $sheet->getStyle('1:1')->getFill()
-            ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
+            ->setFillType(Fill::FILL_SOLID)
             ->getStartColor()
             ->setARGB('FFE6F4EA');
 

@@ -10,6 +10,7 @@ use App\Models\User;
 use Database\Seeders\RolePermissionSeeder;
 use Database\Seeders\UsmInstitutionalDataSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
 
 class DepartmentMasterDataTest extends TestCase
@@ -160,7 +161,8 @@ class DepartmentMasterDataTest extends TestCase
 
         $program = Program::where('code', 'BSIS')->firstOrFail();
 
-        $this->assertSame($ceit->id, $program->college_id);
+        $this->assertFalse(Schema::hasColumn('programs', 'college_id'));
+        $this->assertSame($ceit->id, $program->department?->college_id);
         $this->assertSame('ICT', $program->department?->code);
         $this->assertTrue($program->college->is($ceit));
         $this->assertTrue($program->resolvedCollege()?->is($ceit));

@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\AttendanceRecord;
 use App\Models\College;
+use App\Models\Department;
 use App\Models\Evaluation;
 use App\Models\Event;
 use App\Models\EventParticipationScope;
@@ -185,7 +186,7 @@ class OrganizationAnalyticsTest extends TestCase
     {
         $hierarchy = $this->createHierarchy('Filtered Society', 'FLT');
         $secondProgram = Program::create([
-            'college_id' => $hierarchy['college']->id,
+            'department_id' => $hierarchy['department']->id,
             'name' => 'BS Secondary Program',
             'code' => 'BSSP',
         ]);
@@ -264,6 +265,12 @@ class OrganizationAnalyticsTest extends TestCase
             'name' => "Analytics College {$sequence}",
             'code' => "AC{$sequence}",
         ]);
+        $department = Department::create([
+            'college_id' => $college->id,
+            'name' => "Analytics Department {$sequence}",
+            'code' => "AD{$sequence}",
+            'status' => 'active',
+        ]);
         $organization = Organization::create([
             'college_id' => $college->id,
             'name' => $organizationName,
@@ -272,13 +279,13 @@ class OrganizationAnalyticsTest extends TestCase
             'status' => 'active',
         ]);
         $program = Program::create([
-            'college_id' => $college->id,
+            'department_id' => $department->id,
             'name' => "BS Analytics {$sequence}",
             'code' => "BSA{$sequence}",
         ]);
         $organization->programs()->attach($program->id);
 
-        return compact('university', 'college', 'organization', 'program');
+        return compact('university', 'college', 'department', 'organization', 'program');
     }
 
     private function createStudent(Organization $organization, Program $program, string $name, string $yearLevel): User

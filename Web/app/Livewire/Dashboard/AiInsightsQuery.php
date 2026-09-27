@@ -23,15 +23,18 @@ class AiInsightsQuery extends Component
 
     public string $query = '';
 
+    public ?string $schoolYearId = null;
+
     public ?string $queryText = null;
 
     public ?array $queryResult = null;
 
     public ?string $aiError = null;
 
-    public function mount(string $queryText = '', ?array $queryResult = null, ?string $aiError = null): void
+    public function mount(string $queryText = '', ?array $queryResult = null, ?string $aiError = null, ?string $schoolYearId = null): void
     {
         $this->query = $queryText;
+        $this->schoolYearId = $schoolYearId;
         $this->queryText = $queryText !== '' ? $queryText : null;
         $this->queryResult = $queryResult;
         $this->aiError = $aiError;
@@ -60,14 +63,16 @@ class AiInsightsQuery extends Component
         $parsedQuery = app(AiServiceInterface::class)->parseNaturalLanguageQuery($this->query, $user);
 
         if (isset($parsedQuery['error'])) {
-            $this->aiError = 'NLP Query parsing failed: ' . $parsedQuery['error'];
+            $this->aiError = 'NLP Query parsing failed: '.$parsedQuery['error'];
+
             return;
         }
 
         try {
-            $queryResult = app(NlpQueryExecutor::class)->execute($user, $parsedQuery);
+            $queryResult = app(NlpQueryExecutor::class)->execute($user, $parsedQuery, $this->schoolYearId);
         } catch (HttpException $exception) {
             $this->aiError = $exception->getMessage() ?: 'Query target table is unauthorized or invalid.';
+
             return;
         }
 

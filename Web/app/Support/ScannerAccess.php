@@ -2,8 +2,8 @@
 
 namespace App\Support;
 
-use App\Models\EventScannerAssignment;
 use App\Models\Event;
+use App\Models\EventScannerAssignment;
 use App\Models\ScannerSession;
 use App\Models\User;
 use App\Services\AdminScopeService;
@@ -33,7 +33,7 @@ class ScannerAccess
             return true;
         }
 
-        if (!in_array($permission, self::SCANNER_TOKEN_PERMISSIONS, true)) {
+        if (! in_array($permission, self::SCANNER_TOKEN_PERMISSIONS, true)) {
             return false;
         }
 
@@ -102,12 +102,12 @@ class ScannerAccess
 
     public static function hasScannerSessionForEvent(User $user, Event $event, ?HasAbilities $token): bool
     {
-        if (!$token) {
+        if (! $token) {
             return false;
         }
 
         $tokenId = $token->id ?? (method_exists($token, 'getKey') ? $token->getKey() : null);
-        if (!$tokenId) {
+        if (! $tokenId) {
             return false;
         }
 
@@ -120,12 +120,12 @@ class ScannerAccess
 
     private static function hasScannerSessionToken(User $user, ?HasAbilities $token): bool
     {
-        if (!$token) {
+        if (! $token) {
             return false;
         }
 
         $tokenId = $token->id ?? (method_exists($token, 'getKey') ? $token->getKey() : null);
-        if (!$tokenId) {
+        if (! $tokenId) {
             return false;
         }
 

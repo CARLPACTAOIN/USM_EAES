@@ -12,7 +12,7 @@ class SecurityHeaders
     {
         $response = $next($request);
 
-        if (!config('services.eaes.security_headers', true)) {
+        if (! config('services.eaes.security_headers', true)) {
             return $response;
         }
 

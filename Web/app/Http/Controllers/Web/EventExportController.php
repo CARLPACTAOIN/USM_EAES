@@ -16,9 +16,7 @@ use Maatwebsite\Excel\Facades\Excel;
 
 class EventExportController extends Controller
 {
-    public function __construct(private readonly AdminScopeService $adminScopes)
-    {
-    }
+    public function __construct(private readonly AdminScopeService $adminScopes) {}
 
     public function attendancePdf(Request $request, Event $event)
     {
@@ -70,7 +68,7 @@ class EventExportController extends Controller
     {
         $scope = $this->adminScopes->forUser($user);
 
-        if (!$scope) {
+        if (! $scope) {
             abort(403, 'Access denied. No active admin assignment found.');
         }
 

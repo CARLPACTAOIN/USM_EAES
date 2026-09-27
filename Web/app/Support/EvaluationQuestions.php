@@ -60,7 +60,7 @@ class EvaluationQuestions
     }
 
     /**
-     * @param array<int|string, mixed> $questions
+     * @param  array<int|string, mixed>  $questions
      * @return list<array{id: string, label: string, description: string, required: bool, scale_min: int, scale_max: int, scale_labels: array<string, string>}>
      */
     public static function normalize(array $questions): array
@@ -69,7 +69,7 @@ class EvaluationQuestions
         $seen = [];
 
         foreach (array_values($questions) as $index => $question) {
-            if (!is_array($question)) {
+            if (! is_array($question)) {
                 continue;
             }
 
@@ -84,7 +84,7 @@ class EvaluationQuestions
             $counter = 2;
 
             while (isset($seen[$id])) {
-                $id = $baseId . '_' . $counter;
+                $id = $baseId.'_'.$counter;
                 $counter++;
             }
 
@@ -101,7 +101,7 @@ class EvaluationQuestions
     }
 
     /**
-     * @param list<array{id: string, label: string, description: string, required: bool, scale_min: int, scale_max: int, scale_labels: array<string, string>}> $questions
+     * @param  list<array{id: string, label: string, description: string, required: bool, scale_min: int, scale_max: int, scale_labels: array<string, string>}>  $questions
      * @return array<string, array{label: string, description: string, required: bool, scale_min: int, scale_max: int, scale_labels: array<string, string>}>
      */
     public static function toQuestionMap(array $questions): array
@@ -147,6 +147,6 @@ class EvaluationQuestions
             ->trim('_')
             ->toString();
 
-        return $candidate !== '' ? $candidate : 'question_' . ($index + 1);
+        return $candidate !== '' ? $candidate : 'question_'.($index + 1);
     }
 }

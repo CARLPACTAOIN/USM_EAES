@@ -153,21 +153,18 @@ class DepartmentBackedOrganizationTest extends TestCase
         ]);
 
         $bsis = Program::create([
-            'college_id' => $college->id,
             'department_id' => $ict->id,
             'name' => 'BS Information Systems',
             'code' => 'BSIS',
         ]);
 
         $bscs = Program::create([
-            'college_id' => $college->id,
             'department_id' => $ict->id,
             'name' => 'BS Computer Science',
             'code' => 'BSCS',
         ]);
 
         $civilEngineering = Program::create([
-            'college_id' => $college->id,
             'department_id' => $civil->id,
             'name' => 'BS Civil Engineering',
             'code' => 'BSCE',

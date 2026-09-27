@@ -69,11 +69,6 @@ class User extends Authenticatable
         return $this->belongsTo(Organization::class);
     }
 
-    public function adminApplications()
-    {
-        return $this->hasMany(AdminApplication::class, 'applicant_id');
-    }
-
     public function adminAssignments()
     {
         return $this->hasMany(AdminAssignment::class);

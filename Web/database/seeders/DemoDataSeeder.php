@@ -384,7 +384,7 @@ class DemoDataSeeder extends Seeder
                     : null;
 
                 $program = Program::updateOrCreate(
-                    ['college_id' => $college->id, 'code' => $pCode],
+                    ['code' => $pCode],
                     [
                         'name' => $pName,
                         'department_id' => $department?->id,
@@ -453,7 +453,7 @@ class DemoDataSeeder extends Seeder
 
         for ($i = 1; $i <= $studentCount; $i++) {
             $program = $allPrograms->random();
-            $college = College::find($program->college_id);
+            $college = $program->department?->college;
 
             // Find organization matching this program (if any)
             $org = $program->organizations()->first() ?? $orgsMap['PSITS'];

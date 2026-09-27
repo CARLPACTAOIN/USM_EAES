@@ -121,6 +121,7 @@ return new class extends Migration
             DB::statement("CREATE UNIQUE INDEX organizations_type_college_acronym_unique ON organizations (type, COALESCE(college_id::text, '{$uuidZero}'), acronym)");
             DB::statement("CREATE UNIQUE INDEX admin_applications_pending_target_unique ON admin_applications (applicant_id, role_name, COALESCE(organization_id::text, '{$uuidZero}'), COALESCE(college_id::text, '{$uuidZero}'), COALESCE(organization_acronym, '')) WHERE status = 'pending'");
             DB::statement("CREATE UNIQUE INDEX admin_assignments_active_primary_unique ON admin_assignments (role_name, COALESCE(organization_id::text, '{$uuidZero}'), COALESCE(college_id::text, '{$uuidZero}'), academic_year) WHERE status = 'active' AND is_primary_admin = true");
+
             return;
         }
 
@@ -137,11 +138,13 @@ return new class extends Migration
 
         if ($driver === 'pgsql') {
             DB::statement('ALTER TABLE programs DROP CONSTRAINT IF EXISTS programs_code_unique');
+
             return;
         }
 
         if ($driver === 'sqlite') {
             DB::statement('DROP INDEX IF EXISTS programs_code_unique');
+
             return;
         }
 

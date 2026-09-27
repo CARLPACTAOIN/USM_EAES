@@ -18,6 +18,9 @@ class AnalyticsOverviewFilters extends Component
     #[Url(as: 'college_id', except: '')]
     public string $collegeId = '';
 
+    #[Url(as: 'department_id', except: '')]
+    public string $departmentId = '';
+
     #[Url(as: 'organization_id', except: '')]
     public string $organizationId = '';
 
@@ -34,6 +37,7 @@ class AnalyticsOverviewFilters extends Component
         ?string $selectedSchoolYear = '',
         ?string $selectedSemester = '',
         ?string $selectedCollegeId = '',
+        ?string $selectedDepartmentId = '',
         ?string $selectedOrgId = '',
         ?string $selectedProgramId = '',
         ?string $selectedYearLevel = '',
@@ -42,6 +46,7 @@ class AnalyticsOverviewFilters extends Component
         $this->schoolYear = (string) $selectedSchoolYear;
         $this->semester = (string) $selectedSemester;
         $this->collegeId = (string) $selectedCollegeId;
+        $this->departmentId = (string) $selectedDepartmentId;
         $this->organizationId = (string) $selectedOrgId;
         $this->programId = (string) $selectedProgramId;
         $this->yearLevel = (string) $selectedYearLevel;
@@ -50,16 +55,34 @@ class AnalyticsOverviewFilters extends Component
         $this->normalizeLockedScope();
     }
 
+    public function updatedSchoolYear(): void
+    {
+        $this->normalizeLockedScope();
+    }
+
     public function updatedCollegeId(): void
     {
-        $this->organizationId = '';
+        $this->departmentId = '';
         $this->programId = '';
+        $this->organizationId = '';
+        $this->normalizeLockedScope();
+    }
+
+    public function updatedDepartmentId(): void
+    {
+        $this->programId = '';
+        $this->organizationId = '';
+        $this->normalizeLockedScope();
+    }
+
+    public function updatedProgramId(): void
+    {
+        $this->organizationId = '';
         $this->normalizeLockedScope();
     }
 
     public function updatedOrganizationId(): void
     {
-        $this->programId = '';
         $this->normalizeLockedScope();
     }
 
@@ -68,6 +91,7 @@ class AnalyticsOverviewFilters extends Component
         $this->schoolYear = '';
         $this->semester = '';
         $this->collegeId = '';
+        $this->departmentId = '';
         $this->organizationId = '';
         $this->programId = '';
         $this->yearLevel = '';
@@ -84,6 +108,7 @@ class AnalyticsOverviewFilters extends Component
         $this->schoolYear = trim($this->schoolYear);
         $this->semester = trim($this->semester);
         $this->collegeId = trim($this->collegeId);
+        $this->departmentId = trim($this->departmentId);
         $this->organizationId = trim($this->organizationId);
         $this->programId = trim($this->programId);
         $this->yearLevel = trim($this->yearLevel);
@@ -99,14 +124,18 @@ class AnalyticsOverviewFilters extends Component
         $analytics = app(AnalyticsOverviewController::class)->dataFor($user, $this->filters());
         $scope = $analytics['scope'];
         $filterColleges = $analytics['filterColleges'];
+        $filterDepartments = $analytics['filterDepartments'];
         $filterOrganizations = $analytics['filterOrganizations'];
         $filterPrograms = $analytics['filterPrograms'];
 
         return view('livewire.dashboard.analytics-overview-filters', $analytics + [
             'activeFilterCount' => $this->activeFilterCount(),
-            'canSelectCollege' => $scope->isSuperAdmin(),
-            'canSelectOrganization' => $scope->isSuperAdmin() || $scope->isLsgAdmin(),
+            'canSelectCollege' => $scope->isSuperAdmin() || $scope->isUsgAdmin(),
+            'canSelectDepartment' => $scope->isSuperAdmin() || $scope->isUsgAdmin() || $scope->isLsgAdmin(),
+            'canSelectProgram' => $scope->isSuperAdmin() || $scope->isUsgAdmin() || $scope->isLsgAdmin() || $scope->isAcademicUnitAdmin() || ($scope->organization && $filterPrograms->count() > 1),
+            'canSelectOrganization' => $scope->isSuperAdmin() || $scope->isUsgAdmin() || $scope->isLsgAdmin() || $scope->isAcademicUnitAdmin(),
             'selectedCollege' => $filterColleges->firstWhere('id', $this->collegeId),
+            'selectedDepartment' => $filterDepartments->firstWhere('id', $this->departmentId),
             'selectedOrganization' => $filterOrganizations->firstWhere('id', $this->organizationId),
             'selectedProgram' => $filterPrograms->firstWhere('id', $this->programId),
         ]);
@@ -118,12 +147,23 @@ class AnalyticsOverviewFilters extends Component
 
         if ($scope->isLsgAdmin()) {
             $this->collegeId = (string) $scope->collegeId;
+
             return;
         }
 
-        if (!$scope->isSuperAdmin()) {
+        if ($scope->isAcademicUnitAdmin()) {
+            $this->collegeId = (string) $scope->collegeId;
+            $this->departmentId = (string) $scope->departmentId;
+
+            return;
+        }
+
+        if (! $scope->isSuperAdmin() && ! $scope->isUsgAdmin()) {
             $this->organizationId = (string) $scope->organizationId;
             $this->collegeId = (string) $scope->collegeId;
+            if ($scope->departmentId) {
+                $this->departmentId = (string) $scope->departmentId;
+            }
         }
     }
 
@@ -142,6 +182,7 @@ class AnalyticsOverviewFilters extends Component
             'school_year' => filled($this->schoolYear) ? $this->schoolYear : null,
             'semester' => filled($this->semester) ? $this->semester : null,
             'college_id' => filled($this->collegeId) ? $this->collegeId : null,
+            'department_id' => filled($this->departmentId) ? $this->departmentId : null,
             'organization_id' => filled($this->organizationId) ? $this->organizationId : null,
             'program_id' => filled($this->programId) ? $this->programId : null,
             'year_level' => filled($this->yearLevel) ? $this->yearLevel : null,
@@ -155,6 +196,7 @@ class AnalyticsOverviewFilters extends Component
             $this->schoolYear,
             $this->semester,
             $this->collegeId,
+            $this->departmentId,
             $this->organizationId,
             $this->programId,
             $this->yearLevel,

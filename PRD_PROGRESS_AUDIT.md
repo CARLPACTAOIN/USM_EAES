@@ -79,8 +79,7 @@
 | Feature | Status | Evidence / Notes |
 |---------|--------|------------------|
 | 1.1 Google OAuth + `@usm.edu.ph` + Sanctum tokens | Done | `GoogleAuthController` redirects with account selection + USM domain hint, checks domain, clears rejected sessions, and issues web auth |
-| 1.2 Student profile + QR registration | Done | Student profile onboarding/edit mode supports dependent College -> Department -> Program -> eligible Organization/Society -> Year Level selects, webcam/manual QR capture, backend cascade validation, user profile projections, and active-School-Year primary `organization_memberships` persistence. |
-| 1.3 School Year and officer governance | Partial | OSA-controlled School Years and transition periods, registered-member Officer Rosters, Adviser Verification, Officer Change Requests, automatic President/Secretary Authority Projections, replacement/revocation synchronization, explicit multi-organization authority selection, and OSA-only reasoned authority overrides are implemented. Verified Officer Rosters are now the normal authority source and `admin_assignments` are the permission-facing projection. Removal of the legacy direct-assignment surface remains outstanding. |
+| 1.3 School Year and officer governance | Done | OSA-controlled School Years and transition periods, registered-member Officer Rosters, Adviser Verification, Officer Change Requests, automatic President/Secretary Authority Projections, replacement/revocation synchronization, explicit multi-organization authority selection, and OSA-only reasoned authority overrides are implemented. Verified Officer Rosters are the normal authority source and `admin_assignments` are the permission-facing projection. Legacy `admin_applications` tables, direct College-to-Program foreign keys, and obsolete free-form academic-year columns have been contracted and dropped (Issue #33). |
 
 ### Epic 2: PPA
 
@@ -651,3 +650,15 @@
   - Hardened pending QR resolution fallback so explicit `pending_student_links.organization_id` boundaries are enforced before broad event organizer scopes for legacy links without a participant-scope id.
   - Verified offline sync idempotency (`idempotency_key = md5(...)`) and SQLite latency targets (<100ms) remain uncompromised.
   - Covered with dedicated test suite `CorrectedAudienceAttendanceProcessingTest` (5 passed, 42 assertions), regression tests in `SchoolYearAwareScannerAssignmentTest` (7 passed, 23 assertions), `AttendanceSyncConcurrencyTest` (9 passed, 36 assertions), `WebPortalTest` pending QR tests (4 passed, 17 assertions), and the full backend suite on 2026-09-26 (354 passed, 2315 assertions).
+- **2026-09-27 (Issue #33 - Pre-deployment domain contraction after consumers migrated to Departments, School Years, Officer Rosters, and Authority Projections):**
+  - Contracted legacy schema and application pathways via migration `2026_09_27_010000_contract_legacy_hierarchy_and_authority_paths`:
+    - Removed `programs.college_id` column and dropped direct College-to-Program foreign key and unique constraints. Programs now resolve colleges strictly through their department (`programs.department_id -> departments.id`, `departments.college_id -> colleges.id`).
+    - Updated `College::programs()` to a `HasManyThrough(Program::class, Department::class)` relationship.
+    - Dropped legacy `admin_applications` and `admin_application_programs` tables and `admin_applications_pending_target_unique` index.
+    - Deleted `AdminApplication` model and cleaned up deprecated `adminApplications()` relations from `User` and `Organization`.
+    - Removed legacy application approval/rejection methods from `AdminAssignmentService`.
+    - Dropped obsolete free-form `organization_memberships.academic_year` column; students and memberships now resolve academic year strictly via `school_year_id` (`SchoolYear`).
+    - Replaced `latestOfMany('version_number')` in `ProposalProcessTemplate` and `Event` with `orderByDesc('version_number')` to resolve Postgres UUID aggregate limitation.
+    - Verified deterministic database rebuild via `php artisan migrate:fresh --seed` across all seeders and migrations.
+    - Added comprehensive contract test suite `ContractLegacyHierarchyAndAuthorityTest` (6 passed, 15 assertions) and verified full test suite passes with 379 tests (2,570 assertions).
+

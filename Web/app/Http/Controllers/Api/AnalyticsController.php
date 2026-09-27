@@ -44,7 +44,7 @@ class AnalyticsController extends Controller
      */
     public function gawadParangalMetrics(Request $request, string $orgId): JsonResponse
     {
-        $org = Organization::findOrFail($orgId);
+        $org = Organization::with(['college', 'department'])->findOrFail($orgId);
 
         // Tenancy Check
         $user = $request->user();
@@ -53,13 +53,45 @@ class AnalyticsController extends Controller
             abort(403, 'Unauthorized.');
         }
 
+        $collegeId = $this->queryFilter($request, 'college_id');
+        $departmentId = $this->queryFilter($request, 'department_id');
+        $programId = $this->queryFilter($request, 'program_id');
+        $schoolYear = $this->queryFilter($request, 'school_year') ?? $this->queryFilter($request, 'school_year_id');
+
+        if ($scope->isLsgAdmin() && $scope->collegeId) {
+            $collegeId = $scope->collegeId;
+        } elseif ($scope->isAcademicUnitAdmin()) {
+            if ($scope->collegeId) {
+                $collegeId = $scope->collegeId;
+            }
+            if ($scope->departmentId) {
+                $departmentId = $scope->departmentId;
+            }
+        } elseif (! $scope->isSuperAdmin() && ! $scope->isUsgAdmin()) {
+            if ($scope->collegeId) {
+                $collegeId = $scope->collegeId;
+            }
+            if ($scope->departmentId) {
+                $departmentId = $scope->departmentId;
+            }
+        }
+
+        if ($collegeId && $org->college_id && $org->college_id !== $collegeId) {
+            abort(403, 'Organization does not belong to specified college.');
+        }
+        if ($departmentId && $org->department_id && $org->department_id !== $departmentId) {
+            abort(403, 'Organization does not belong to specified department.');
+        }
+
         $metrics = $this->organizationAnalytics->organizationMetrics(
             $org,
-            $this->queryFilter($request, 'program_id'),
-            $this->queryFilter($request, 'school_year'),
+            $programId,
+            $schoolYear,
             $this->queryFilter($request, 'semester'),
             $this->queryFilter($request, 'event_type'),
             $this->queryFilter($request, 'year_level'),
+            $departmentId,
+            $collegeId,
         );
 
         return response()->json([

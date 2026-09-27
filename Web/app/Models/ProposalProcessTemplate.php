@@ -54,6 +54,6 @@ class ProposalProcessTemplate extends Model
     {
         return $this->hasOne(ProposalProcessTemplateVersion::class, 'template_id')
             ->where('status', ProposalProcessTemplateVersion::STATUS_PUBLISHED)
-            ->latestOfMany('version_number');
+            ->orderByDesc('version_number');
     }
 }

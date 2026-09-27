@@ -3,8 +3,8 @@
 namespace App\Support;
 
 use App\Models\AttendanceRecord;
-use App\Models\Event;
 use App\Models\Evaluation;
+use App\Models\Event;
 use App\Models\User;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Collection;
@@ -21,6 +21,7 @@ class EventExportData
     public static function build(Event $event, User $generatedBy): array
     {
         $event->load([
+            'schoolYear',
             'organization.college',
             'parentEvent.organization',
             'evaluationFormVersion',
@@ -28,10 +29,10 @@ class EventExportData
             'participationScopes.college',
             'eventDays' => fn ($query) => $query->orderBy('day_number'),
             'attendanceRecords' => fn ($query) => $query
-                ->with(['student.organization', 'eventDay', 'participationScope.organization', 'validatedBy'])
+                ->with(['student.organization', 'student.organizationMemberships.program', 'student.organizationMemberships.department', 'student.organizationMemberships.organization', 'eventDay', 'participationScope.organization', 'validatedBy'])
                 ->orderBy('created_at'),
             'evaluations' => fn ($query) => $query
-                ->with('student.organization')
+                ->with(['student.organization', 'student.organizationMemberships.program', 'student.organizationMemberships.department', 'student.organizationMemberships.organization'])
                 ->orderBy('submitted_at'),
         ]);
 
@@ -42,7 +43,7 @@ class EventExportData
 
         $summaryRows = self::summaryRows($event, $generatedBy, $generatedAt);
         $attendanceRows = self::attendanceRows($event, $event->attendanceRecords, $evaluationsByStudent);
-        $evaluationRows = self::evaluationRows($event->evaluations, $attendanceByStudent, $questions);
+        $evaluationRows = self::evaluationRows($event, $event->evaluations, $attendanceByStudent, $questions);
 
         return [
             'event' => $event,
@@ -67,7 +68,7 @@ class EventExportData
     {
         $slug = Str::slug($event->title) ?: 'event';
 
-        return "{$slug}-{$suffix}-" . now()->format('Ymd-His') . ".{$extension}";
+        return "{$slug}-{$suffix}-".now()->format('Ymd-His').".{$extension}";
     }
 
     /**
@@ -78,11 +79,38 @@ class EventExportData
         $target = $event->target_demographics ?? [];
         $budget = $event->budget_allocations ?? [];
 
+        $schoolYearLabel = data_get($event->governance_snapshots, 'metadata.school_year_label')
+            ?: $event->schoolYear?->label
+            ?: 'N/A';
+        $collegeName = $event->college_name_snapshot
+            ?: data_get($event->governance_snapshots, 'college_name_snapshot')
+            ?: $event->organization?->college?->name
+            ?: 'N/A';
+        $departmentName = $event->department_name_snapshot
+            ?: data_get($event->governance_snapshots, 'department_name_snapshot')
+            ?: $event->department?->name
+            ?: $event->organization?->department?->name
+            ?: 'N/A';
+        $programName = $event->program_name_snapshot
+            ?: data_get($event->governance_snapshots, 'program_name_snapshot')
+            ?: $event->program?->name
+            ?: 'N/A';
+        $organizerName = $event->organization_name_snapshot
+            ?: data_get($event->governance_snapshots, 'organization_name_snapshot')
+            ?: trim(($event->organization?->acronym ? "{$event->organization->acronym} - " : '').($event->organization?->name ?? 'N/A'));
+        $proponentName = $event->proponent_name_snapshot
+            ?: data_get($event->governance_snapshots, 'proponent_name_snapshot')
+            ?: 'N/A';
+
         return [
             ['Field', 'Value'],
             ['Event', $event->title],
-            ['Organizer', trim(($event->organization?->acronym ? "{$event->organization->acronym} - " : '') . ($event->organization?->name ?? 'N/A'))],
-            ['College', $event->organization?->college?->name ?? 'N/A'],
+            ['School Year', $schoolYearLabel],
+            ['Organizer', $organizerName],
+            ['College', $collegeName],
+            ['Department', $departmentName],
+            ['Program', $programName],
+            ['Proponent', $proponentName],
             ['Parent permit', $event->parentEvent ? "{$event->parentEvent->organization?->acronym} - {$event->parentEvent->title}" : 'None'],
             ['Status', self::label($event->status)],
             ['PPA category', self::label($event->proposal_category ?? 'activity')],
@@ -97,12 +125,12 @@ class EventExportData
             ['Budget / cost', isset($budget['budget_cost']) ? Number::currency((float) $budget['budget_cost'], 'PHP') : 'N/A'],
             ['Resolution number', $event->resolution_number ?: 'N/A'],
             ['Proposal softcopy', $event->proposal_document_original_name ?: 'Not attached'],
-            ['Hardcopy submitted', self::yesNo($event->hardcopy_submitted) . ($event->hardcopy_submitted_at ? ' at ' . self::formatDateTime($event->hardcopy_submitted_at) : '')],
+            ['Hardcopy submitted', self::yesNo($event->hardcopy_submitted).($event->hardcopy_submitted_at ? ' at '.self::formatDateTime($event->hardcopy_submitted_at) : '')],
             ['Organization head signed', self::yesNo($event->head_organization_signed)],
             ['Adviser signed', self::yesNo($event->adviser_signed)],
-            ['Late cutoff policy', $event->event_late_cutoff_min !== null ? $event->event_late_cutoff_min . ' minute(s) after start' : 'Participant scope fallback'],
+            ['Late cutoff policy', $event->event_late_cutoff_min !== null ? $event->event_late_cutoff_min.' minute(s) after start' : 'Participant scope fallback'],
             ['Participant scopes', (string) $event->participationScopes->count()],
-            ['Approved runtime scopes', (string) $event->participationScopes->filter(fn ($scope) => $scope->status === 'active' && (!$scope->ppa_required || $scope->ppa_status === 'approved'))->count()],
+            ['Approved runtime scopes', (string) $event->participationScopes->filter(fn ($scope) => $scope->status === 'active' && (! $scope->ppa_required || $scope->ppa_status === 'approved'))->count()],
             ['Attendance records', (string) $event->attendanceRecords->count()],
             ['Valid attendance records', (string) $event->attendanceRecords->where('valid', true)->count()],
             ['Evaluation submissions', (string) $event->evaluations->count()],
@@ -112,8 +140,8 @@ class EventExportData
     }
 
     /**
-     * @param Collection<int, AttendanceRecord> $records
-     * @param Collection<string, Evaluation> $evaluationsByStudent
+     * @param  Collection<int, AttendanceRecord>  $records
+     * @param  Collection<string, Evaluation>  $evaluationsByStudent
      * @return list<list<string>>
      */
     private static function attendanceRows(Event $event, Collection $records, Collection $evaluationsByStudent): array
@@ -145,15 +173,21 @@ class EventExportData
             ))
             ->each(function (AttendanceRecord $record) use (&$rows, $evaluationsByStudent, $event): void {
                 $student = $record->student;
+                $membership = $event->school_year_id && $student
+                    ? $student->organizationMemberships->firstWhere('school_year_id', $event->school_year_id)
+                    : null;
+                $programCode = $membership?->program?->code ?: $student?->program_code ?: 'N/A';
+                $yearLevel = YearLevels::label($membership?->year_level ?: $student?->year_level);
+                $orgAcronym = $membership?->organization?->acronym ?: $student?->organization?->acronym ?: 'N/A';
 
                 $rows[] = [
-                    $record->eventDay ? 'Day ' . $record->eventDay->day_number : 'N/A',
+                    $record->eventDay ? 'Day '.$record->eventDay->day_number : 'N/A',
                     $record->participationScope?->displayName() ?? 'N/A',
                     $student?->name ?? 'N/A',
                     $student?->student_id_number ?? 'N/A',
-                    $student?->program_code ?? 'N/A',
-                    YearLevels::label($student?->year_level),
-                    $student?->organization?->acronym ?? 'N/A',
+                    $programCode,
+                    $yearLevel,
+                    $orgAcronym,
                     self::formatDateTime($record->time_in),
                     self::formatDateTime($record->time_out),
                     self::label($record->society_status),
@@ -174,12 +208,12 @@ class EventExportData
     }
 
     /**
-     * @param Collection<int, Evaluation> $evaluations
-     * @param Collection<string, Collection<int, AttendanceRecord>> $attendanceByStudent
-     * @param array<string, array{label: string, description: string}> $questions
+     * @param  Collection<int, Evaluation>  $evaluations
+     * @param  Collection<string, Collection<int, AttendanceRecord>>  $attendanceByStudent
+     * @param  array<string, array{label: string, description: string}>  $questions
      * @return list<list<string>>
      */
-    private static function evaluationRows(Collection $evaluations, Collection $attendanceByStudent, array $questions): array
+    private static function evaluationRows(Event $event, Collection $evaluations, Collection $attendanceByStudent, array $questions): array
     {
         $rows = [[
             'Student name',
@@ -196,8 +230,15 @@ class EventExportData
             'Comment',
         ]];
 
-        $evaluations->each(function (Evaluation $evaluation) use (&$rows, $attendanceByStudent, $questions): void {
+        $evaluations->each(function (Evaluation $evaluation) use (&$rows, $attendanceByStudent, $questions, $event): void {
             $student = $evaluation->student;
+            $membership = $event->school_year_id && $student
+                ? $student->organizationMemberships->firstWhere('school_year_id', $event->school_year_id)
+                : null;
+            $programCode = $membership?->program?->code ?: $student?->program_code ?: 'N/A';
+            $yearLevel = YearLevels::label($membership?->year_level ?: $student?->year_level);
+            $orgAcronym = $membership?->organization?->acronym ?: $student?->organization?->acronym ?: 'N/A';
+
             $scores = $evaluation->section_scores ?? [];
             $studentAttendance = $student ? $attendanceByStudent->get($student->id, collect()) : collect();
 
@@ -209,9 +250,9 @@ class EventExportData
             $rows[] = [
                 $student?->name ?? 'N/A',
                 $student?->student_id_number ?? 'N/A',
-                $student?->program_code ?? 'N/A',
-                YearLevels::label($student?->year_level),
-                $student?->organization?->acronym ?? 'N/A',
+                $programCode,
+                $yearLevel,
+                $orgAcronym,
                 self::yesNo($studentAttendance->contains('valid', true)),
                 self::formatDateTime($evaluation->submitted_at),
                 ...$questionScores,
@@ -230,8 +271,8 @@ class EventExportData
     }
 
     /**
-     * @param Collection<int, Evaluation> $evaluations
-     * @param array<string, array{label: string, description: string}> $questions
+     * @param  Collection<int, Evaluation>  $evaluations
+     * @param  array<string, array{label: string, description: string}>  $questions
      * @return array<string, string>
      */
     private static function evaluationAverages(Collection $evaluations, array $questions): array
@@ -252,8 +293,8 @@ class EventExportData
     }
 
     /**
-     * @param array<string, mixed> $scores
-     * @param list<string> $keys
+     * @param  array<string, mixed>  $scores
+     * @param  list<string>  $keys
      */
     private static function scoreAverage(array $scores, array $keys): string
     {

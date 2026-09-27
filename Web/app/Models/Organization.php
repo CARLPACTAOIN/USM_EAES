@@ -58,11 +58,6 @@ class Organization extends Model
         return $this->hasMany(EventParticipationScope::class);
     }
 
-    public function adminApplications()
-    {
-        return $this->hasMany(AdminApplication::class);
-    }
-
     public function adminAssignments()
     {
         return $this->hasMany(AdminAssignment::class);

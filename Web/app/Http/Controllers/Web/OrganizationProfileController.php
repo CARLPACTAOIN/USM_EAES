@@ -12,9 +12,7 @@ use Illuminate\Validation\Rules\File;
 
 class OrganizationProfileController extends Controller
 {
-    public function __construct(private readonly AdminScopeService $adminScopes)
-    {
-    }
+    public function __construct(private readonly AdminScopeService $adminScopes) {}
 
     public function show(Request $request)
     {
@@ -102,7 +100,7 @@ class OrganizationProfileController extends Controller
     {
         $scope = $this->adminScopes->forUser($request->user());
 
-        abort_unless($scope && !$scope->isSuperAdmin() && $scope->organization, 403);
+        abort_unless($scope && ! $scope->isSuperAdmin() && $scope->organization, 403);
 
         return $scope->organization->loadMissing(['college', 'programs']);
     }

@@ -12,25 +12,24 @@ class Program extends Model
     use HasFactory, HasUuids;
 
     protected $fillable = [
-        'college_id',
         'department_id',
         'name',
         'code',
     ];
-
-    public function college(): BelongsTo
-    {
-        return $this->belongsTo(College::class);
-    }
 
     public function department(): BelongsTo
     {
         return $this->belongsTo(Department::class);
     }
 
+    public function getCollegeAttribute(): ?College
+    {
+        return $this->department?->college;
+    }
+
     public function resolvedCollege(): ?College
     {
-        return $this->department?->college ?? $this->college;
+        return $this->department?->college;
     }
 
     public function organizations()

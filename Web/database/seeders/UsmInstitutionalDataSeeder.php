@@ -74,7 +74,7 @@ class UsmInstitutionalDataSeeder extends Seeder
                 $departmentCode = $programDepartments[$code][$programCode] ?? null;
 
                 Program::updateOrCreate(
-                    ['college_id' => $college->id, 'code' => $programCode],
+                    ['code' => $programCode],
                     [
                         'name' => $programName,
                         'department_id' => $departmentCode ? ($departmentModels[$code][$departmentCode]?->id ?? null) : null,

@@ -169,7 +169,7 @@ class Event extends Model
     {
         return $this->hasOne(EventPermitVersion::class)
             ->whereNull('superseded_at')
-            ->latestOfMany('version_number');
+            ->orderByDesc('version_number');
     }
 
     public function canonicalPpaPacket(): HasOne

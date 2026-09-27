@@ -1787,6 +1787,7 @@ class WebPortalTest extends TestCase
                 'status' => $index === 1 ? 'submitted' : 'draft',
                 'start_date' => today()->addDays($index),
                 'end_date' => today()->addDays($index),
+                'created_at' => now()->subMinutes($index),
             ]);
         }
 

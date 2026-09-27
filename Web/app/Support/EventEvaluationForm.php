@@ -48,7 +48,7 @@ class EventEvaluationForm
     }
 
     /**
-     * @param array<int|string, mixed>|null $questions
+     * @param  array<int|string, mixed>|null  $questions
      */
     public static function createForEvent(
         Event $event,

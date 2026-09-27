@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 
 class College extends Model
 {
@@ -27,9 +28,9 @@ class College extends Model
         return $this->hasMany(Organization::class);
     }
 
-    public function programs()
+    public function programs(): HasManyThrough
     {
-        return $this->hasMany(Program::class);
+        return $this->hasManyThrough(Program::class, Department::class);
     }
 
     public function departments(): HasMany

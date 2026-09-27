@@ -25,6 +25,8 @@ class AiInsightsController extends Controller
     {
         $validator = Validator::make($request->all(), [
             'query' => 'required|string|max:500',
+            'school_year_id' => 'nullable|string',
+            'school_year' => 'nullable|string',
         ]);
 
         if ($validator->fails()) {
@@ -32,17 +34,18 @@ class AiInsightsController extends Controller
         }
 
         $queryText = $request->input('query');
+        $selectedSchoolYear = $request->input('school_year_id') ?: $request->input('school_year');
         $parsedQuery = $aiService->parseNaturalLanguageQuery($queryText, $request->user());
 
         if (isset($parsedQuery['error'])) {
             return view('dashboard.ai.index', $this->viewData($request, [
                 'queryText' => $queryText,
-                'aiError' => 'NLP Query parsing failed: ' . $parsedQuery['error'],
+                'aiError' => 'NLP Query parsing failed: '.$parsedQuery['error'],
             ]));
         }
 
         try {
-            $queryResult = $queryExecutor->execute($request->user(), $parsedQuery);
+            $queryResult = $queryExecutor->execute($request->user(), $parsedQuery, $selectedSchoolYear);
         } catch (HttpException $exception) {
             return view('dashboard.ai.index', $this->viewData($request, [
                 'queryText' => $queryText,
@@ -64,7 +67,7 @@ class AiInsightsController extends Controller
     {
         EventTenantScope::authorize($event, $request->user());
 
-        if (!EvaluationWindow::isClosed($event)) {
+        if (! EvaluationWindow::isClosed($event)) {
             return redirect()->back()->with('error', 'Sentiment analysis is available after the evaluation window closes.');
         }
 
