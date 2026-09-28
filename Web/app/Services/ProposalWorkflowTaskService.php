@@ -22,7 +22,10 @@ use Illuminate\Validation\ValidationException;
 
 class ProposalWorkflowTaskService
 {
-    public function __construct(private readonly EventNotificationService $notifications) {}
+    public function __construct(
+        private readonly EventNotificationService $notifications,
+        private readonly LegacyProposalCompatibilityProjection $legacyProjection,
+    ) {}
 
     private const ACTIVE_STATUSES = [
         ProposalWorkflowTask::STATUS_BLOCKED,
@@ -248,6 +251,8 @@ class ProposalWorkflowTaskService
             } elseif ($resultingStatus === ProposalWorkflowTask::STATUS_REVISION_REQUESTED) {
                 $this->markRunAndProposalRevisionRequested($lockedTask->workflowRun, $event, $actor, $remarks);
             }
+
+            $this->syncLegacyProjection($lockedTask->workflowRun);
 
             return $trail;
         });
@@ -601,5 +606,18 @@ class ProposalWorkflowTaskService
         }
 
         return $run->participationScope()->first();
+    }
+
+    private function syncLegacyProjection(ProposalWorkflowRun $run): void
+    {
+        $run->loadMissing(['event', 'participationScope']);
+
+        if ($run->participationScope) {
+            $this->legacyProjection->syncParticipantScope($run->participationScope);
+
+            return;
+        }
+
+        $this->legacyProjection->syncOrganizer($run->event);
     }
 }

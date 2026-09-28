@@ -70,8 +70,6 @@ class EventProposalDraftService
 
         try {
             return DB::transaction(function () use ($actor, $confirmationDocument, $confirmationPath, $data, $documentPath, $govContext, $isHrEvent, $organization, $proposalDocument, $snapshots, $venueData): Event {
-                $hardcopySubmitted = $isHrEvent ? false : $data['hardcopy_submitted'];
-
                 $event = Event::create([
                     'organization_id' => $data['organization_id'],
                     'school_year_id' => $govContext['school_year_id'],
@@ -105,10 +103,10 @@ class EventProposalDraftService
                     'proposal_document_path' => $documentPath,
                     'proposal_document_original_name' => $proposalDocument?->getClientOriginalName(),
                     'resolution_number' => $data['resolution_number'],
-                    'hardcopy_submitted' => $hardcopySubmitted,
-                    'hardcopy_submitted_at' => $hardcopySubmitted ? now() : null,
-                    'head_organization_signed' => $isHrEvent ? false : $data['head_organization_signed'],
-                    'adviser_signed' => $isHrEvent ? false : $data['adviser_signed'],
+                    'hardcopy_submitted' => false,
+                    'hardcopy_submitted_at' => null,
+                    'head_organization_signed' => false,
+                    'adviser_signed' => false,
                 ]);
 
                 $this->replaceEventDays($event, $this->sessionSchedules->normalizeEventDays($data['event_days']));
@@ -165,7 +163,6 @@ class EventProposalDraftService
 
         try {
             $updatedEvent = DB::transaction(function () use ($actor, $confirmationDocument, $data, $event, $isHrEvent, $newConfirmationPath, $newDocumentPath, $oldConfirmationPath, $proposalDocument, $venueData): Event {
-                $hardcopySubmitted = $isHrEvent ? false : $data['hardcopy_submitted'];
                 $documentPath = $newDocumentPath ?: $event->proposal_document_path;
                 $documentOriginalName = $proposalDocument
                     ? $proposalDocument->getClientOriginalName()
@@ -193,12 +190,6 @@ class EventProposalDraftService
                     'proposal_document_path' => $documentPath,
                     'proposal_document_original_name' => $documentOriginalName,
                     'resolution_number' => $data['resolution_number'],
-                    'hardcopy_submitted' => $hardcopySubmitted,
-                    'hardcopy_submitted_at' => $hardcopySubmitted
-                        ? ($event->hardcopy_submitted_at ?: now())
-                        : null,
-                    'head_organization_signed' => $isHrEvent ? false : $data['head_organization_signed'],
-                    'adviser_signed' => $isHrEvent ? false : $data['adviser_signed'],
                 ]);
 
                 $this->replaceEventDays($event, $this->sessionSchedules->normalizeEventDays($data['event_days']));
@@ -215,9 +206,6 @@ class EventProposalDraftService
                     'ppa_status' => $this->participationScopes->ppaStatusFromEventStatus($event->status),
                     'ppa_softcopy_path' => $documentPath,
                     'ppa_softcopy_original_name' => $documentOriginalName,
-                    'hardcopy_submitted' => $hardcopySubmitted,
-                    'org_head_signed' => $isHrEvent ? false : $data['head_organization_signed'],
-                    'adviser_signed' => $isHrEvent ? false : $data['adviser_signed'],
                 ]);
 
                 if ($newConfirmationPath) {
@@ -372,9 +360,6 @@ class EventProposalDraftService
         $data['packet_event_days'] = is_array($data['event_days'] ?? null) ? $data['event_days'] : [];
         $data['event_days'] = $this->completeEventDays($data['packet_event_days']);
         $data['evaluation_questions'] = is_array($data['evaluation_questions'] ?? null) ? $data['evaluation_questions'] : [];
-        $data['hardcopy_submitted'] = (bool) ($data['hardcopy_submitted'] ?? false);
-        $data['head_organization_signed'] = (bool) ($data['head_organization_signed'] ?? false);
-        $data['adviser_signed'] = (bool) ($data['adviser_signed'] ?? false);
 
         return $data;
     }

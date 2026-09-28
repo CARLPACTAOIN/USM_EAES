@@ -7,7 +7,6 @@ use App\Models\EventParticipationScope;
 use App\Services\AdminScopeService;
 use App\Services\EventNotificationService;
 use App\Services\EventPermitService;
-use App\Services\ParticipationScopeService;
 use DomainException;
 use Livewire\Attributes\Locked;
 use Livewire\Attributes\On;
@@ -45,7 +44,7 @@ class EventProposalWorkflow extends Component
         // Listener method intentionally empty; Livewire re-renders the action set.
     }
 
-    public function markHardcopy(ParticipationScopeService $participationScopes): void
+    public function markHardcopy(): void
     {
         $this->resetFeedback();
 
@@ -55,26 +54,7 @@ class EventProposalWorkflow extends Component
         $this->authorizeEventAccess($event);
         $this->authorizeOrganizerMutation($event);
 
-        if (! in_array($event->status, [Event::STATUS_DRAFT, Event::STATUS_SUBMITTED, Event::STATUS_UNDER_REVIEW, Event::STATUS_REVISION_REQUESTED], true)) {
-            $this->errorNotice = 'Hardcopy tracking can only be updated before approval or rejection.';
-
-            return;
-        }
-
-        $event->update([
-            'hardcopy_submitted' => true,
-            'hardcopy_submitted_at' => now(),
-            'head_organization_signed' => true,
-            'adviser_signed' => true,
-        ]);
-
-        $participationScopes->ensureOrganizerScope($event->fresh())->update([
-            'hardcopy_submitted' => true,
-            'org_head_signed' => true,
-            'adviser_signed' => true,
-        ]);
-
-        $this->notice = 'Hardcopy status recorded.';
+        $this->errorNotice = 'Legacy hardcopy and signature fields are read-only workflow projections.';
         $this->dispatchWorkflowUpdated();
     }
 

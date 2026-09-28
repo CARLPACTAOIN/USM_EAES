@@ -506,9 +506,6 @@ class DashboardController extends Controller
                 'budget_cost' => $request->input('budget_cost'),
             ],
             'resolution_number' => $request->input('resolution_number'),
-            'hardcopy_submitted' => $request->boolean('hardcopy_submitted'),
-            'head_organization_signed' => $request->boolean('head_organization_signed'),
-            'adviser_signed' => $request->boolean('adviser_signed'),
             'event_days' => $request->input('event_days', []),
             'evaluation_questions' => $request->input('evaluation_questions', []),
         ];
@@ -553,24 +550,7 @@ class DashboardController extends Controller
         $event = Event::findOrFail($eventId);
         $this->authorizeEventAccess($event, $request->user());
 
-        if (! in_array($event->status, [Event::STATUS_DRAFT, Event::STATUS_SUBMITTED, Event::STATUS_UNDER_REVIEW, Event::STATUS_REVISION_REQUESTED], true)) {
-            return redirect()->back()->with('error', 'Hardcopy tracking can only be updated before approval or rejection.');
-        }
-
-        $event->update([
-            'hardcopy_submitted' => true,
-            'hardcopy_submitted_at' => now(),
-            'head_organization_signed' => $request->boolean('head_organization_signed', $event->head_organization_signed),
-            'adviser_signed' => $request->boolean('adviser_signed', $event->adviser_signed),
-            'resolution_number' => $request->filled('resolution_number') ? $request->resolution_number : $event->resolution_number,
-        ]);
-        $this->participationScopes->ensureOrganizerScope($event->fresh())->update([
-            'hardcopy_submitted' => true,
-            'org_head_signed' => $request->boolean('head_organization_signed', $event->head_organization_signed),
-            'adviser_signed' => $request->boolean('adviser_signed', $event->adviser_signed),
-        ]);
-
-        return redirect()->back()->with('success', 'Hardcopy submission status updated.');
+        return redirect()->back()->with('error', 'Legacy hardcopy and signature fields are read-only workflow projections.');
     }
 
     /**
@@ -1052,10 +1032,6 @@ class DashboardController extends Controller
 
         if (! in_array($participationScope->ppa_status, [EventParticipationScope::PPA_SUBMITTED, EventParticipationScope::PPA_UNDER_REVIEW], true)) {
             return redirect()->back()->with('error', 'Participant PPA must be submitted or under review before approval.');
-        }
-
-        if ($participationScope->ppa_required && (! $participationScope->ppa_softcopy_path || ! $participationScope->hardcopy_submitted)) {
-            return redirect()->back()->with('error', 'Participant PPA softcopy and hardcopy submission are required before approval.');
         }
 
         if ($message = $this->participantWorkflowReviewMessage($participationScope)) {

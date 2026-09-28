@@ -16,6 +16,7 @@ class ParticipantPpaPacketService
         private readonly EventProposalSubmissionGuard $submissionGuard,
         private readonly EventNotificationService $notifications,
         private readonly ProposalWorkflowService $workflows,
+        private readonly LegacyProposalCompatibilityProjection $legacyProjection,
     ) {}
 
     public function getOrCreatePacket(EventParticipationScope $scope, ?User $actor = null): CanonicalPpaPacket
@@ -161,9 +162,6 @@ class ParticipantPpaPacketService
                 'ppa_status' => EventParticipationScope::PPA_SUBMITTED,
                 'submitted_by' => $actor->id,
                 'submitted_at' => now(),
-                'hardcopy_submitted' => true,
-                'org_head_signed' => true,
-                'adviser_signed' => true,
                 'review_remarks' => null,
                 'ppa_softcopy_path' => $packet->supporting_document_path,
                 'ppa_softcopy_original_name' => $packet->supporting_document_original_name,
@@ -173,6 +171,8 @@ class ParticipantPpaPacketService
                 $scope->fresh(['event.organization', 'organization']),
                 $actor
             );
+
+            $this->legacyProjection->syncParticipantScope($scope->fresh());
         });
 
         $this->notifications->notifyParticipantScopeSubmitted(

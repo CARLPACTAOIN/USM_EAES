@@ -313,12 +313,6 @@ class EventParticipantScopes extends Component
             return;
         }
 
-        if ($scope->ppa_required && (! $scope->ppa_softcopy_path || ! $scope->hardcopy_submitted)) {
-            $this->errorNotice = 'Participant PPA softcopy and hardcopy submission are required before approval.';
-
-            return;
-        }
-
         if ($this->workflowReviewLocked($scope)) {
             $this->errorNotice = 'Participant PPA review must be completed through the assigned workflow task.';
 

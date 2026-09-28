@@ -1473,7 +1473,7 @@ class WebPortalTest extends TestCase
         ]);
     }
 
-    public function test_livewire_event_proposal_workflow_records_hardcopy_and_refreshes_packet_status(): void
+    public function test_livewire_event_proposal_workflow_keeps_legacy_hardcopy_projection_read_only(): void
     {
         $h = $this->createHierarchy();
         $societyAdmin = $this->createAdmin('Society Admin', $h['org']);
@@ -1494,16 +1494,15 @@ class WebPortalTest extends TestCase
 
         Livewire::actingAs($societyAdmin)
             ->test(EventProposalWorkflow::class, ['eventId' => $event->id])
-            ->assertSee('Hardcopy')
             ->call('markHardcopy')
-            ->assertSet('notice', 'Hardcopy status recorded.');
+            ->assertSet('errorNotice', 'Legacy hardcopy and signature fields are read-only workflow projections.');
 
-        $this->assertTrue((bool) $event->fresh()->hardcopy_submitted);
+        $this->assertFalse((bool) $event->fresh()->hardcopy_submitted);
 
         Livewire::actingAs($societyAdmin)
             ->test(EventsWorkspace::class)
             ->assertSee('Hardcopy')
-            ->assertSee('ppa-status-item--ok', false);
+            ->assertSee('ppa-status-item--warn', false);
     }
 
     public function test_livewire_event_proposal_workflow_osa_reviews_and_approves_without_page_reload(): void
@@ -2307,9 +2306,9 @@ class WebPortalTest extends TestCase
         $event = Event::with('canonicalPpaPacket')->where('title', 'Documented PPA Event')->first();
         $this->assertNotNull($event);
         $this->assertSame('activity', $event->proposal_category);
-        $this->assertTrue($event->hardcopy_submitted);
-        $this->assertTrue($event->head_organization_signed);
-        $this->assertTrue($event->adviser_signed);
+        $this->assertFalse($event->hardcopy_submitted);
+        $this->assertFalse($event->head_organization_signed);
+        $this->assertFalse($event->adviser_signed);
         $this->assertSame('official-ppa.docx', $event->proposal_document_original_name);
         $this->assertNotNull($event->canonicalPpaPacket);
         $this->assertSame(CanonicalPpaPacket::ROLE_ORGANIZER, $event->canonicalPpaPacket->activity_role);
@@ -2501,9 +2500,9 @@ class WebPortalTest extends TestCase
         $this->assertSame($h['org']->id, $event->organization_id);
         $this->assertSame('draft', $event->status);
         $this->assertSame('student_affairs', $event->event_domain);
-        $this->assertTrue($event->hardcopy_submitted);
-        $this->assertTrue($event->head_organization_signed);
-        $this->assertTrue($event->adviser_signed);
+        $this->assertFalse($event->hardcopy_submitted);
+        $this->assertFalse($event->head_organization_signed);
+        $this->assertFalse($event->adviser_signed);
         $this->assertSame('livewire-official-ppa.docx', $event->proposal_document_original_name);
         $this->assertNotNull($event->evaluation_form_version_id);
         $this->assertDatabaseHas('event_days', [
@@ -4000,9 +3999,9 @@ class WebPortalTest extends TestCase
 
         $this->assertSame(EventParticipationScope::PPA_SUBMITTED, $scope->ppa_status);
         $this->assertSame($partnerAdmin->id, $scope->submitted_by);
-        $this->assertTrue($scope->hardcopy_submitted);
-        $this->assertTrue($scope->org_head_signed);
-        $this->assertTrue($scope->adviser_signed);
+        $this->assertFalse($scope->hardcopy_submitted);
+        $this->assertFalse($scope->org_head_signed);
+        $this->assertFalse($scope->adviser_signed);
         $this->assertNotNull($scope->ppa_softcopy_path);
     }
 

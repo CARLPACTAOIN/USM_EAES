@@ -43,24 +43,12 @@
     @endif
 
     @if(!$isParticipatingWorkspace && $user?->can('create-proposals') && in_array($event->status, ['draft', 'revision_requested'], true))
-        @if(!$event->hardcopy_submitted)
-            <button type="button"
-                    class="btn btn-sm btn-secondary"
-                    title="Record hardcopy submission"
-                    wire:click="markHardcopy"
-                    wire:loading.attr="disabled"
-                    wire:target="markHardcopy,submitProposal">
-                <span wire:loading.remove wire:target="markHardcopy">Hardcopy</span>
-                <span wire:loading wire:target="markHardcopy">Saving...</span>
-            </button>
-        @endif
-
         <button type="button"
                 class="btn btn-sm btn-primary"
                 title="Submit for Review"
                 wire:click="submitProposal"
                 wire:loading.attr="disabled"
-                wire:target="markHardcopy,submitProposal">
+                wire:target="submitProposal">
             <span wire:loading.remove wire:target="submitProposal">Submit</span>
             <span wire:loading wire:target="submitProposal">Submitting...</span>
         </button>

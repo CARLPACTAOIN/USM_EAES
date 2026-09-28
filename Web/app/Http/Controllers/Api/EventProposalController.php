@@ -316,9 +316,6 @@ class EventProposalController extends Controller
             'target_demographics' => $request->input('target_demographics', []),
             'budget_allocations' => $request->input('budget_allocations', []),
             'resolution_number' => $request->input('resolution_number'),
-            'hardcopy_submitted' => $request->boolean('hardcopy_submitted'),
-            'head_organization_signed' => $request->boolean('head_organization_signed'),
-            'adviser_signed' => $request->boolean('adviser_signed'),
             'event_days' => collect($request->input('event_days', []))
                 ->map(fn (array $day): array => [
                     'date' => $day['date'],

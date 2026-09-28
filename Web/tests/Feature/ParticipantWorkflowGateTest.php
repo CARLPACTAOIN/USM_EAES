@@ -121,6 +121,14 @@ class ParticipantWorkflowGateTest extends TestCase
             UploadedFile::fake()->create('participant-checklist.pdf', 100, 'application/pdf')
         );
 
+        $fixture['scope']->forceFill([
+            'ppa_softcopy_path' => 'participant-ppa-documents/spoofed.pdf',
+            'ppa_softcopy_original_name' => 'spoofed.pdf',
+            'hardcopy_submitted' => true,
+            'org_head_signed' => true,
+            'adviser_signed' => true,
+        ])->save();
+
         try {
             app(ScannerAssignmentService::class)->assign(
                 event: $fixture['event'],
@@ -193,6 +201,8 @@ class ParticipantWorkflowGateTest extends TestCase
             $fixture['osa'],
             ProposalWorkflowTask::DECISION_APPROVED
         );
+
+        $this->assertTrue($fixture['scope']->fresh()->hardcopy_submitted);
 
         $assignment = app(ScannerAssignmentService::class)->assign(
             event: $fixture['event'],

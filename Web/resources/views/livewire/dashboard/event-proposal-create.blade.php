@@ -611,37 +611,6 @@
         <fieldset class="proposal-modal-section">
             <legend class="proposal-section-title">
                 <span class="proposal-section-step">7</span>
-                Optional physical tracking
-            </legend>
-
-            <div class="proposal-check-grid">
-                <label class="proposal-check-item">
-                    <input type="checkbox" name="hardcopy_submitted" value="1" wire:model="hardcopySubmitted" @checked($hardcopySubmitted)>
-                    <span>
-                        <span class="proposal-check-title">Hardcopy submitted</span>
-                        <span class="proposal-check-note">Legacy physical packet received by OSA, when still collected.</span>
-                    </span>
-                </label>
-                <label class="proposal-check-item">
-                    <input type="checkbox" name="head_organization_signed" value="1" wire:model="headOrganizationSigned" @checked($headOrganizationSigned)>
-                    <span>
-                        <span class="proposal-check-title">Head signed</span>
-                        <span class="proposal-check-note">Organization head signature is complete.</span>
-                    </span>
-                </label>
-                <label class="proposal-check-item">
-                    <input type="checkbox" name="adviser_signed" value="1" wire:model="adviserSigned" @checked($adviserSigned)>
-                    <span>
-                        <span class="proposal-check-title">Adviser signed</span>
-                        <span class="proposal-check-note">Adviser signature is complete.</span>
-                    </span>
-                </label>
-            </div>
-        </fieldset>
-
-        <fieldset class="proposal-modal-section">
-            <legend class="proposal-section-title">
-                <span class="proposal-section-step">8</span>
                 Evaluation form
             </legend>
             @php($evaluationEditorOpen = $errors->has('evaluationQuestions') || $errors->has('evaluationQuestions.*.label') || $errors->has('evaluationQuestions.*.description'))

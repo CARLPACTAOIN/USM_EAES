@@ -20,6 +20,7 @@ use App\Models\User;
 use App\Models\Venue;
 use App\Services\AdminAssignmentService;
 use App\Services\EventPermitService;
+use App\Services\ProposalWorkflowTaskService;
 use App\Support\EvaluationQuestions;
 use App\Support\EventEvaluationForm;
 use Database\Seeders\RolePermissionSeeder;
@@ -89,6 +90,84 @@ class DigitalPermitGateTest extends TestCase
 
         $this->assertSame(Event::STATUS_UNDER_REVIEW, $event->fresh()->status);
         $this->assertDatabaseCount('event_permit_versions', 0);
+    }
+
+    public function test_direct_legacy_signature_mutation_cannot_bypass_digital_permit_workflow_gates(): void
+    {
+        $osa = $this->osaUser();
+        $event = $this->eventReadyForApproval($osa, [
+            'hardcopy_submitted' => false,
+            'hardcopy_submitted_at' => null,
+            'head_organization_signed' => false,
+            'adviser_signed' => false,
+        ]);
+        $run = $this->workflowRun($event, $osa);
+        $this->workflowTask($run, $this->step($run, 'osa_final_approval', 'OSA Final Permit Approval', 1, isGate: true), $osa, ProposalWorkflowTask::STATUS_AVAILABLE);
+
+        $event->forceFill([
+            'hardcopy_submitted' => true,
+            'hardcopy_submitted_at' => now(),
+            'head_organization_signed' => true,
+            'adviser_signed' => true,
+        ])->save();
+
+        try {
+            app(EventPermitService::class)->approve($event->fresh(), $osa);
+            $this->fail('Legacy signature projections must not unlock permit issuance.');
+        } catch (DomainException $exception) {
+            $this->assertStringContainsString('permit-gating workflow tasks', $exception->getMessage());
+        }
+
+        $this->assertDatabaseCount('event_permit_versions', 0);
+        $this->assertSame(Event::STATUS_UNDER_REVIEW, $event->fresh()->status);
+    }
+
+    public function test_legacy_signature_flags_are_projected_from_workflow_task_decisions(): void
+    {
+        $approver = $this->osaUser();
+        $event = $this->eventReadyForApproval($approver, [
+            'hardcopy_submitted' => false,
+            'hardcopy_submitted_at' => null,
+            'head_organization_signed' => false,
+            'adviser_signed' => false,
+        ]);
+        $run = $this->workflowRun($event, $approver);
+        $organizationHeadTask = $this->workflowTask(
+            $run,
+            $this->step($run, 'organization_head_endorsement', 'Organization Head Endorsement', 1, isGate: false, role: 'organization_head'),
+            $approver,
+            ProposalWorkflowTask::STATUS_AVAILABLE
+        );
+        $adviserTask = $this->workflowTask(
+            $run,
+            $this->step($run, 'adviser_endorsement', 'Adviser Endorsement', 2, isGate: false, role: 'adviser'),
+            $approver,
+            ProposalWorkflowTask::STATUS_AVAILABLE
+        );
+
+        app(ProposalWorkflowTaskService::class)->decide(
+            $organizationHeadTask,
+            $approver,
+            ProposalWorkflowTask::DECISION_APPROVED
+        );
+
+        $event->refresh();
+        $this->assertTrue($event->head_organization_signed);
+        $this->assertFalse($event->adviser_signed);
+        $this->assertFalse($event->hardcopy_submitted);
+
+        app(ProposalWorkflowTaskService::class)->decide(
+            $adviserTask->fresh(),
+            $approver,
+            ProposalWorkflowTask::DECISION_APPROVED
+        );
+
+        $event->refresh();
+        $this->assertSame(ProposalWorkflowRun::STATUS_APPROVED, $run->fresh()->status);
+        $this->assertTrue($event->head_organization_signed);
+        $this->assertTrue($event->adviser_signed);
+        $this->assertTrue($event->hardcopy_submitted);
+        $this->assertNotNull($event->hardcopy_submitted_at);
     }
 
     public function test_final_approval_creates_immutable_version_snapshots_and_copy_owners(): void

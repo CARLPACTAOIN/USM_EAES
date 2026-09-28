@@ -412,9 +412,9 @@ class UsmEaesTest extends TestCase
             'venue_id' => $venue->id,
             'venue_confirmation_document_original_name' => 'venue-confirmation.pdf',
             'resolution_number' => 'USG-2026-001',
-            'hardcopy_submitted' => true,
-            'head_organization_signed' => true,
-            'adviser_signed' => true,
+            'hardcopy_submitted' => false,
+            'head_organization_signed' => false,
+            'adviser_signed' => false,
         ]);
         $event = Event::findOrFail($eventId);
         $this->assertDatabaseHas('event_days', [
@@ -432,9 +432,9 @@ class UsmEaesTest extends TestCase
             'participation_role' => EventParticipationScope::ROLE_ORGANIZER,
             'organization_id' => $usgOrg->id,
             'ppa_softcopy_original_name' => 'usg-assembly.docx',
-            'hardcopy_submitted' => true,
-            'org_head_signed' => true,
-            'adviser_signed' => true,
+            'hardcopy_submitted' => false,
+            'org_head_signed' => false,
+            'adviser_signed' => false,
         ]);
         Storage::disk('local')->assertExists($event->proposal_document_path);
 
@@ -630,9 +630,9 @@ class UsmEaesTest extends TestCase
         $this->assertSame(25, $event->event_late_cutoff_min);
         $this->assertSame('replacement-proposal.docx', $event->proposal_document_original_name);
         $this->assertSame('REV-2026-001', $event->resolution_number);
-        $this->assertTrue($event->hardcopy_submitted);
-        $this->assertTrue($event->head_organization_signed);
-        $this->assertTrue($event->adviser_signed);
+        $this->assertFalse($event->hardcopy_submitted);
+        $this->assertFalse($event->head_organization_signed);
+        $this->assertFalse($event->adviser_signed);
         $this->assertDatabaseHas('event_days', [
             'event_id' => $event->id,
             'day_number' => 1,
@@ -648,9 +648,9 @@ class UsmEaesTest extends TestCase
             'participation_role' => EventParticipationScope::ROLE_ORGANIZER,
             'ppa_status' => EventParticipationScope::PPA_REVISION_REQUESTED,
             'ppa_softcopy_original_name' => 'replacement-proposal.docx',
-            'hardcopy_submitted' => true,
-            'org_head_signed' => true,
-            'adviser_signed' => true,
+            'hardcopy_submitted' => false,
+            'org_head_signed' => false,
+            'adviser_signed' => false,
         ]);
         Storage::disk('local')->assertMissing($oldDocumentPath);
         Storage::disk('local')->assertExists($event->proposal_document_path);
