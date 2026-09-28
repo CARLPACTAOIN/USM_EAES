@@ -77,19 +77,22 @@ class UsmEaesTest extends TestCase
             'name' => 'College of Engineering and Information Technology',
             'code' => 'CEIT',
         ]);
+        $department = Department::create([
+            'college_id' => $college->id,
+            'name' => 'Department of Information and Communication Technology',
+            'code' => 'ICT',
+            'status' => 'active',
+        ]);
 
         $org = Organization::create([
             'college_id' => $college->id,
+            'department_id' => $department->id,
             'name' => 'Philippine Society of Information Technology Students',
             'acronym' => 'PSITS',
             'type' => 'society',
         ]);
 
-        $program = Program::create([
-            'college_id' => $college->id,
-            'name' => 'BS Information Systems',
-            'code' => 'BSIS',
-        ]);
+        $program = $this->createProgramForCollege($college);
         $org->programs()->attach($program->id);
 
         // 2. Create Student & Scanner Admin Users
@@ -658,7 +661,9 @@ class UsmEaesTest extends TestCase
 
     public function test_unresolved_qr_sync_creates_pending_link_and_can_be_resolved()
     {
-        [$org, $scanner] = $this->createOrganizationWithScanner();
+        [$org, $scanner, $college] = $this->createOrganizationWithScanner();
+        $program = $this->createProgramForCollege($college);
+        $org->programs()->syncWithoutDetaching($program->id);
 
         $event = Event::create([
             'organization_id' => $org->id,
@@ -706,9 +711,12 @@ class UsmEaesTest extends TestCase
             'name' => 'Maria Santos',
             'email' => 'maria.santos@usm.edu.ph',
             'organization_id' => $org->id,
+            'college_id' => $college->id,
+            'department_id' => $program->department_id,
+            'program_id' => $program->id,
             'student_id_number' => '23-5678',
             'qr_code_value' => 'QR_MARIA_5678',
-            'program_code' => 'BSIS',
+            'program_code' => $program->code,
         ]);
         $student->assignRole('Student');
 
@@ -729,11 +737,7 @@ class UsmEaesTest extends TestCase
     public function test_assignment_activation_drives_hydrate_sync_and_eilo_resolution()
     {
         [$org, $admin, $college] = $this->createOrganizationWithScanner();
-        $program = Program::create([
-            'college_id' => $college->id,
-            'name' => 'BS Information Systems',
-            'code' => 'BSIS',
-        ]);
+        $program = $this->createProgramForCollege($college);
         $org->programs()->attach($program->id);
 
         $student = User::create([
@@ -894,11 +898,7 @@ class UsmEaesTest extends TestCase
     public function test_assigned_student_can_activate_scanner_session_but_mobile_token_cannot_hydrate()
     {
         [$org, $admin, $college] = $this->createOrganizationWithScanner();
-        $program = Program::create([
-            'college_id' => $college->id,
-            'name' => 'BS Information Systems',
-            'code' => 'BSIS',
-        ]);
+        $program = $this->createProgramForCollege($college);
         $org->programs()->attach($program->id);
 
         $student = User::create([
@@ -952,11 +952,7 @@ class UsmEaesTest extends TestCase
     public function test_unassigned_student_cannot_activate_another_users_assignment()
     {
         [$org, $admin, $college] = $this->createOrganizationWithScanner();
-        $program = Program::create([
-            'college_id' => $college->id,
-            'name' => 'BS Information Systems',
-            'code' => 'BSIS',
-        ]);
+        $program = $this->createProgramForCollege($college);
         $org->programs()->attach($program->id);
 
         $assignedStudent = User::create([
@@ -1006,11 +1002,7 @@ class UsmEaesTest extends TestCase
     public function test_revoked_assignment_blocks_new_activation_but_allows_pending_sync_during_grace()
     {
         [$org, $admin, $college] = $this->createOrganizationWithScanner();
-        $program = Program::create([
-            'college_id' => $college->id,
-            'name' => 'BS Information Systems',
-            'code' => 'BSIS',
-        ]);
+        $program = $this->createProgramForCollege($college);
         $org->programs()->attach($program->id);
 
         $student = User::create([
@@ -1078,11 +1070,7 @@ class UsmEaesTest extends TestCase
     public function test_assignment_activation_resumes_prior_session_for_same_device()
     {
         [$org, $admin, $college] = $this->createOrganizationWithScanner();
-        $program = Program::create([
-            'college_id' => $college->id,
-            'name' => 'BS Information Systems',
-            'code' => 'BSIS',
-        ]);
+        $program = $this->createProgramForCollege($college);
         $org->programs()->attach($program->id);
 
         $student = User::create([
@@ -1154,11 +1142,7 @@ class UsmEaesTest extends TestCase
     public function test_assignment_activation_blocks_different_device_without_revoking_old_session()
     {
         [$org, $admin, $college] = $this->createOrganizationWithScanner();
-        $program = Program::create([
-            'college_id' => $college->id,
-            'name' => 'BS Information Systems',
-            'code' => 'BSIS',
-        ]);
+        $program = $this->createProgramForCollege($college);
         $org->programs()->attach($program->id);
 
         $student = User::create([
@@ -1226,11 +1210,7 @@ class UsmEaesTest extends TestCase
     public function test_admin_revoke_allows_assignment_activation_on_another_device()
     {
         [$org, $admin, $college] = $this->createOrganizationWithScanner();
-        $program = Program::create([
-            'college_id' => $college->id,
-            'name' => 'BS Information Systems',
-            'code' => 'BSIS',
-        ]);
+        $program = $this->createProgramForCollege($college);
         $org->programs()->attach($program->id);
 
         $student = User::create([
@@ -1280,11 +1260,7 @@ class UsmEaesTest extends TestCase
     public function test_assignment_activation_blocks_other_active_assignment_without_revoking()
     {
         [$org, $admin, $college] = $this->createOrganizationWithScanner();
-        $program = Program::create([
-            'college_id' => $college->id,
-            'name' => 'BS Information Systems',
-            'code' => 'BSIS',
-        ]);
+        $program = $this->createProgramForCollege($college);
         $org->programs()->attach($program->id);
 
         $student = User::create([
@@ -1342,11 +1318,7 @@ class UsmEaesTest extends TestCase
     public function test_stale_session_from_closed_assignment_does_not_block_new_assignment_activation()
     {
         [$org, $admin, $college] = $this->createOrganizationWithScanner();
-        $program = Program::create([
-            'college_id' => $college->id,
-            'name' => 'BS Information Systems',
-            'code' => 'BSIS',
-        ]);
+        $program = $this->createProgramForCollege($college);
         $org->programs()->attach($program->id);
 
         $student = User::create([
@@ -1636,11 +1608,7 @@ class UsmEaesTest extends TestCase
     {
         [$organizerOrg, $organizerAdmin] = $this->createOrganizationWithScanner();
         [$participantOrg, $participantAdmin, $college] = $this->createOrganizationWithScanner('College of Architecture', 'COA', 'Architecture Society', 'ARCH');
-        $program = Program::create([
-            'college_id' => $college->id,
-            'name' => 'BS Architecture',
-            'code' => 'BSARCH',
-        ]);
+        $program = $this->createProgramForCollege($college, 'BS Architecture', 'BSARCH');
         $participantOrg->programs()->attach($program->id);
 
         $scanner = User::create([
@@ -1715,8 +1683,8 @@ class UsmEaesTest extends TestCase
         [$scopeOrg, $scopeAdmin, $scopeCollege] = $this->createOrganizationWithScanner('College of Computing', 'COC', 'Computing Society', 'COMP');
         [$otherOrg, , $otherCollege] = $this->createOrganizationWithScanner('College of Business', 'COB', 'Business Society', 'BUS');
 
-        $scopeProgram = Program::create(['college_id' => $scopeCollege->id, 'name' => 'BS Computing', 'code' => 'BSCOMP']);
-        $otherProgram = Program::create(['college_id' => $otherCollege->id, 'name' => 'BS Business', 'code' => 'BSBA']);
+        $scopeProgram = $this->createProgramForCollege($scopeCollege, 'BS Computing', 'BSCOMP');
+        $otherProgram = $this->createProgramForCollege($otherCollege, 'BS Business', 'BSBA');
 
         $scanner = User::create([
             'name' => 'Scoped Scanner',
@@ -1872,7 +1840,7 @@ class UsmEaesTest extends TestCase
             'acronym' => 'SECOND',
             'type' => 'society',
         ]);
-        $program = Program::create(['college_id' => $college->id, 'name' => 'BS Multi', 'code' => 'BSM']);
+        $program = $this->createProgramForCollege($college, 'BS Multi', 'BSM');
 
         $student = User::create([
             'name' => 'Multi Member',
@@ -2473,8 +2441,15 @@ class UsmEaesTest extends TestCase
             'name' => $collegeName,
             'code' => $collegeCode,
         ]);
+        $department = Department::create([
+            'college_id' => $college->id,
+            'name' => "{$collegeName} Academic Programs",
+            'code' => 'AP',
+            'status' => 'active',
+        ]);
         $org = Organization::create([
             'college_id' => $college->id,
+            'department_id' => $department->id,
             'name' => $organizationName,
             'acronym' => $organizationAcronym,
             'type' => 'society',
@@ -2489,6 +2464,25 @@ class UsmEaesTest extends TestCase
         $scanner->assignRole('Scanner');
 
         return [$org, $scanner, $college, $university];
+    }
+
+    private function createProgramForCollege(
+        College $college,
+        string $name = 'BS Information Systems',
+        string $code = 'BSIS'
+    ): Program {
+        $department = Department::where('college_id', $college->id)->oldest()->first()
+            ?? Department::create([
+                'college_id' => $college->id,
+                'name' => "{$college->name} Academic Programs",
+                'code' => 'AP',
+                'status' => 'active',
+            ]);
+
+        return Program::firstOrCreate(
+            ['department_id' => $department->id, 'code' => $code],
+            ['name' => $name]
+        );
     }
 
     private function assignAdminScope(

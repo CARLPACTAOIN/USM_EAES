@@ -404,8 +404,8 @@ class CorrectedAudienceAttendanceProcessingTest extends TestCase
         $otherDept = Department::create(['college_id' => $college->id, 'name' => 'Department of Civil Engineering', 'code' => 'DCE']);
         $otherCollegeDept = Department::create(['college_id' => $otherCollege->id, 'name' => 'Department of Agronomy', 'code' => 'DAG']);
 
-        $program = Program::create(['college_id' => $college->id, 'department_id' => $dept->id, 'name' => 'BS Information Systems', 'code' => 'BSIS']);
-        $otherProgram = Program::create(['college_id' => $college->id, 'department_id' => $otherDept->id, 'name' => 'BS Civil Engineering', 'code' => 'BSCE']);
+        $program = Program::create(['department_id' => $dept->id, 'name' => 'BS Information Systems', 'code' => 'BSIS']);
+        $otherProgram = Program::create(['department_id' => $otherDept->id, 'name' => 'BS Civil Engineering', 'code' => 'BSCE']);
 
         $org = Organization::create([
             'college_id' => $college->id,

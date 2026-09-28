@@ -378,16 +378,21 @@ class DemoDataSeeder extends Seeder
             $localProgramIds = [];
             foreach ($data['programs'] as $pName) {
                 $pCode = $programCodeMap[$pName] ?? substr(strtoupper(preg_replace('/[^A-Z]/', '', $pName)), 0, 6);
-                $departmentCode = $collegeCode === 'CEIT' ? ($ceitProgramDepartments[$pCode] ?? null) : null;
-                $department = $departmentCode
-                    ? Department::where('college_id', $college->id)->where('code', $departmentCode)->first()
-                    : null;
+                $departmentCode = $collegeCode === 'CEIT' ? ($ceitProgramDepartments[$pCode] ?? 'AP') : 'AP';
+                $department = Department::firstOrCreate(
+                    ['college_id' => $college->id, 'code' => $departmentCode],
+                    [
+                        'name' => $departmentCode === 'AP'
+                            ? "{$college->name} Academic Programs"
+                            : "Department {$departmentCode}",
+                        'status' => 'active',
+                    ]
+                );
 
                 $program = Program::updateOrCreate(
-                    ['code' => $pCode],
+                    ['department_id' => $department->id, 'code' => $pCode],
                     [
                         'name' => $pName,
-                        'department_id' => $department?->id,
                     ]
                 );
 

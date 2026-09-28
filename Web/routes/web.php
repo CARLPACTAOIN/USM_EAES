@@ -209,22 +209,18 @@ Route::get('/dev/login/{role}', function (string $role) {
 
     // Seed programs
     $program1 = Program::firstOrCreate(
-        ['code' => 'BSIS'],
+        ['department_id' => $department->id, 'code' => 'BSIS'],
         [
-            'department_id' => $department->id,
             'name' => 'Bachelor of Science in Information Systems',
         ]
     );
-    $program1->update(['department_id' => $department->id]);
 
     $program2 = Program::firstOrCreate(
-        ['code' => 'BSCS'],
+        ['department_id' => $department->id, 'code' => 'BSCS'],
         [
-            'department_id' => $department->id,
             'name' => 'Bachelor of Science in Computer Science',
         ]
     );
-    $program2->update(['department_id' => $department->id]);
 
     $orgType = match ($role) {
         'USG Admin' => 'usg',

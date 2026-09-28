@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\College;
+use App\Models\Department;
 use App\Models\Event;
 use App\Models\EventParticipationScope;
 use App\Models\Organization;
@@ -254,8 +255,10 @@ class ParticipantScopeConcurrencyTest extends TestCase
     {
         $university = University::create(['name' => 'USM', 'domain' => 'usm.edu.ph']);
         $college = College::create(['university_id' => $university->id, 'name' => 'CEIT', 'code' => 'CEIT']);
-        $program = Program::create(['college_id' => $college->id, 'name' => 'BS Information Systems', 'code' => 'BSIS']);
+        $department = Department::create(['college_id' => $college->id, 'name' => 'CEIT Academic Programs', 'code' => 'AP', 'status' => 'active']);
+        $program = Program::create(['department_id' => $department->id, 'name' => 'BS Information Systems', 'code' => 'BSIS']);
         $organizer = $this->createOrganization($college, 'PSITS', 'PSITS');
+        $organizer->update(['department_id' => $department->id]);
         $organizer->programs()->attach($program->id);
 
         return compact('college', 'organizer');

@@ -6,6 +6,7 @@ use App\Livewire\Dashboard\EventParticipantScopes;
 use App\Models\AttendanceRecord;
 use App\Models\CanonicalPpaPacket;
 use App\Models\College;
+use App\Models\Department;
 use App\Models\Event;
 use App\Models\EventParticipationScope;
 use App\Models\EventScannerAssignment;
@@ -328,14 +329,21 @@ class ParticipantWorkflowGateTest extends TestCase
             'name' => 'College of Workflow Tests',
             'code' => 'CWT',
         ]);
-        $program = Program::create([
+        $department = Department::create([
             'college_id' => $college->id,
+            'name' => 'Department of Workflow Tests',
+            'code' => 'DWT',
+            'status' => 'active',
+        ]);
+        $program = Program::create([
+            'department_id' => $department->id,
             'name' => 'BS Workflow',
             'code' => 'BSWF',
         ]);
 
         $organizerOrg = Organization::create([
             'college_id' => $college->id,
+            'department_id' => $department->id,
             'name' => 'Organizer Workflow Society',
             'acronym' => 'OWS',
             'type' => 'society',
@@ -345,6 +353,7 @@ class ParticipantWorkflowGateTest extends TestCase
 
         $participantOrg = Organization::create([
             'college_id' => $college->id,
+            'department_id' => $department->id,
             'name' => 'Participant Workflow Society',
             'acronym' => 'PWS',
             'type' => 'society',

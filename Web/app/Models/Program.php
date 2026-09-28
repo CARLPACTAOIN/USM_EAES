@@ -2,13 +2,17 @@
 
 namespace App\Models;
 
+use Database\Factories\ProgramFactory;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Program extends Model
 {
+    /** @use HasFactory<ProgramFactory> */
     use HasFactory, HasUuids;
 
     protected $fillable = [
@@ -32,14 +36,14 @@ class Program extends Model
         return $this->department?->college;
     }
 
-    public function organizations()
+    public function organizations(): BelongsToMany
     {
         return $this->belongsToMany(Organization::class, 'organization_programs')
             ->using(OrganizationProgram::class)
             ->withTimestamps();
     }
 
-    public function users()
+    public function users(): HasMany
     {
         return $this->hasMany(User::class);
     }

@@ -1248,7 +1248,6 @@ class AdminOnboardingTest extends TestCase
             'status' => 'active',
         ]);
         $program = Program::create([
-            'college_id' => $college->id,
             'department_id' => $department->id,
             'name' => 'BS Information Systems',
             'code' => 'BSIS',

@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Livewire\Dashboard\EventAnalyticsParticipantFilters;
 use App\Models\AttendanceRecord;
 use App\Models\College;
+use App\Models\Department;
 use App\Models\Evaluation;
 use App\Models\Event;
 use App\Models\EventDay;
@@ -518,9 +519,15 @@ class EventAnalyticsPageTest extends TestCase
     ): array {
         $uni = University::firstOrCreate(['domain' => 'usm.edu.ph'], ['name' => 'University of Southern Mindanao']);
         $college = College::create(['university_id' => $uni->id, 'name' => $collegeName, 'code' => $collegeCode]);
-        $org = Organization::create(['college_id' => $college->id, 'name' => $orgName, 'acronym' => $orgAcronym, 'type' => 'society']);
-        $program = Program::create([
+        $department = Department::create([
             'college_id' => $college->id,
+            'name' => "{$collegeName} Academic Programs",
+            'code' => 'AP',
+            'status' => 'active',
+        ]);
+        $org = Organization::create(['college_id' => $college->id, 'department_id' => $department->id, 'name' => $orgName, 'acronym' => $orgAcronym, 'type' => 'society']);
+        $program = Program::create([
+            'department_id' => $department->id,
             'name' => 'BS '.$orgAcronym,
             'code' => 'BS'.$orgAcronym,
         ]);

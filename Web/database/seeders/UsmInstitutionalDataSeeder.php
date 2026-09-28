@@ -70,14 +70,21 @@ class UsmInstitutionalDataSeeder extends Seeder
                 );
             }
 
+            if ($programs !== [] && ($departments[$code] ?? []) === []) {
+                $departmentModels[$code]['AP'] = Department::updateOrCreate(
+                    ['college_id' => $college->id, 'code' => 'AP'],
+                    ['name' => "{$name} Academic Programs", 'status' => 'active']
+                );
+            }
+
             foreach ($programs as $programCode => $programName) {
-                $departmentCode = $programDepartments[$code][$programCode] ?? null;
+                $departmentCode = $programDepartments[$code][$programCode] ?? 'AP';
+                $department = $departmentModels[$code][$departmentCode] ?? null;
 
                 Program::updateOrCreate(
-                    ['code' => $programCode],
+                    ['department_id' => $department->id, 'code' => $programCode],
                     [
                         'name' => $programName,
-                        'department_id' => $departmentCode ? ($departmentModels[$code][$departmentCode]?->id ?? null) : null,
                     ]
                 );
             }

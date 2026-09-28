@@ -70,13 +70,11 @@ class DevLoginController extends Controller
         );
 
         $program = Program::firstOrCreate(
-            ['code' => 'BSIS'],
+            ['department_id' => $department->id, 'code' => 'BSIS'],
             [
-                'department_id' => $department->id,
                 'name' => 'BS Information Systems',
             ]
         );
-        $program->update(['department_id' => $department->id]);
 
         $psits = Organization::firstOrCreate(
             [

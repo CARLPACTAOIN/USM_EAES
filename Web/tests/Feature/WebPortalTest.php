@@ -117,7 +117,6 @@ class WebPortalTest extends TestCase
             'type' => 'society',
         ]);
         $program = Program::create([
-            'college_id' => $college->id,
             'department_id' => $department->id,
             'name' => 'BS Information Systems',
             'code' => 'BSIS',
@@ -139,7 +138,6 @@ class WebPortalTest extends TestCase
     private function createStudent(Organization $org): User
     {
         $program = Program::where('code', 'BSIS')->first() ?? Program::create([
-            'college_id' => $org->college_id,
             'department_id' => $org->department_id,
             'name' => 'BS Information Systems',
             'code' => 'BSIS',
@@ -824,7 +822,6 @@ class WebPortalTest extends TestCase
             'code' => 'DOE',
         ]);
         $otherProgram = Program::create([
-            'college_id' => $h['college']->id,
             'department_id' => $sameCollegeOtherDepartment->id,
             'name' => 'BS Agricultural Engineering',
             'code' => 'BSAE',
@@ -3156,8 +3153,13 @@ class WebPortalTest extends TestCase
             'name' => 'College of Arts and Sciences',
             'code' => 'CAS',
         ]);
-        $otherProgram = Program::create([
+        $otherDepartment = Department::create([
             'college_id' => $otherCollege->id,
+            'name' => 'Department of Biology',
+            'code' => 'BIO',
+        ]);
+        $otherProgram = Program::create([
+            'department_id' => $otherDepartment->id,
             'name' => 'BS Biology',
             'code' => 'BSBIO',
         ]);
@@ -3170,6 +3172,7 @@ class WebPortalTest extends TestCase
         $partnerOrg->programs()->attach($h['program']->id);
         $otherOrg = Organization::create([
             'college_id' => $otherCollege->id,
+            'department_id' => $otherDepartment->id,
             'name' => 'Biology Society',
             'acronym' => 'BIOSOC',
             'type' => 'society',
