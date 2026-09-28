@@ -160,7 +160,7 @@ class DashboardController extends Controller
             'organization_id' => [$user->hasRole('Super Admin (OSA)') ? 'required' : 'nullable', 'uuid', 'exists:organizations,id'],
             'title' => 'required|string|max:255',
             'proposal_category' => 'required|in:program,project,activity',
-            'activity_role' => 'nullable|in:organizer,co-organizer,participant',
+            'activity_role' => 'nullable|in:organizer,co-organizer',
             'start_date' => 'required|date',
             'end_date' => 'required|date|after_or_equal:start_date',
             'location_type' => 'required|in:on-campus,off-campus,online',
@@ -343,7 +343,7 @@ class DashboardController extends Controller
         $validator = Validator::make($request->all(), [
             'title' => 'required|string|max:255',
             'proposal_category' => 'required|in:program,project,activity',
-            'activity_role' => 'nullable|in:organizer,co-organizer,participant',
+            'activity_role' => 'nullable|in:organizer,co-organizer',
             'start_date' => 'required|date',
             'end_date' => 'required|date|after_or_equal:start_date',
             'location_type' => 'required|in:on-campus,off-campus,online',
@@ -814,6 +814,7 @@ class DashboardController extends Controller
     public function saveParticipantScopeDraft(Request $request, Event $event, EventParticipationScope $participationScope)
     {
         $this->authorizeParticipantScopeAccess($event, $participationScope, $request->user());
+        abort_unless($participationScope->isParticipant(), 422, 'Participant packets can only be created for invited participant scopes.');
 
         $validated = $request->validate([
             'proponent_name' => 'nullable|string|max:255',
@@ -841,6 +842,7 @@ class DashboardController extends Controller
     public function submitParticipantScope(Request $request, Event $event, EventParticipationScope $participationScope)
     {
         $this->authorizeParticipantScopeAccess($event, $participationScope, $request->user());
+        abort_unless($participationScope->isParticipant(), 422, 'Participant packets can only be created for invited participant scopes.');
 
         if (! $participationScope->ppa_required) {
             return redirect()->back()->with('error', 'This participant scope does not require a PPA.');

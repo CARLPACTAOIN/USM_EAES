@@ -21,6 +21,8 @@ class ParticipantPpaPacketService
 
     public function getOrCreatePacket(EventParticipationScope $scope, ?User $actor = null): CanonicalPpaPacket
     {
+        $this->assertParticipantScope($scope);
+
         $scope->loadMissing([
             'event.organization',
             'event.venue',
@@ -142,6 +144,8 @@ class ParticipantPpaPacketService
         array $data = [],
         mixed $supportingDocument = null,
     ): CanonicalPpaPacket {
+        $this->assertParticipantScope($scope);
+
         if (! $scope->ppa_required) {
             throw new DomainException('This participant scope does not require a PPA.');
         }
@@ -289,5 +293,12 @@ class ParticipantPpaPacketService
         $value = trim((string) $value);
 
         return $value === '' ? null : $value;
+    }
+
+    private function assertParticipantScope(EventParticipationScope $scope): void
+    {
+        if ($scope->participation_role !== EventParticipationScope::ROLE_PARTICIPANT) {
+            throw new DomainException('Participant packets can only be created for invited participant scopes.');
+        }
     }
 }

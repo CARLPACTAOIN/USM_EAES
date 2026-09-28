@@ -41,6 +41,8 @@ class OfficerRosterController extends Controller
             ->where('school_year_id', $schoolYear->id)
             ->first();
 
+        $this->authorizeRosterGovernanceAccess($request, $organization, $service, $roster);
+
         return response()->json([
             'organization' => [
                 'id' => $organization->id,
@@ -107,6 +109,8 @@ class OfficerRosterController extends Controller
         OrganizationOfficerRoster $roster,
         OfficerRosterService $service
     ): JsonResponse {
+        $this->abortIfRosterDoesNotBelongToOrganization($roster, $organization);
+
         $verifiedRoster = $service->verifyRoster(
             $roster,
             $request->user(),
@@ -125,6 +129,8 @@ class OfficerRosterController extends Controller
         OrganizationOfficerRoster $roster,
         OfficerRosterService $service
     ): JsonResponse {
+        $this->abortIfRosterDoesNotBelongToOrganization($roster, $organization);
+
         $updatedRoster = $service->requestChanges(
             $roster,
             $request->user(),
@@ -137,8 +143,13 @@ class OfficerRosterController extends Controller
         ]);
     }
 
-    public function listChangeRequests(Request $request, Organization $organization): JsonResponse
-    {
+    public function listChangeRequests(
+        Request $request,
+        Organization $organization,
+        OfficerRosterService $service
+    ): JsonResponse {
+        $this->authorizeChangeRequestAccess($request, $organization, $service);
+
         $changeRequests = OfficerChangeRequest::query()
             ->where('organization_id', $organization->id)
             ->with(['oldOfficer.user', 'newUser', 'createdOfficer.user', 'requestedBy', 'decidedBy'])
@@ -174,6 +185,8 @@ class OfficerRosterController extends Controller
         OfficerChangeRequest $changeRequest,
         OfficerRosterService $service
     ): JsonResponse {
+        $this->abortIfChangeRequestDoesNotBelongToOrganization($changeRequest, $organization);
+
         $approvedRequest = $service->approveChangeRequest(
             $changeRequest,
             $request->user(),
@@ -192,6 +205,8 @@ class OfficerRosterController extends Controller
         OfficerChangeRequest $changeRequest,
         OfficerRosterService $service
     ): JsonResponse {
+        $this->abortIfChangeRequestDoesNotBelongToOrganization($changeRequest, $organization);
+
         $rejectedRequest = $service->rejectChangeRequest(
             $changeRequest,
             $request->user(),
@@ -204,8 +219,13 @@ class OfficerRosterController extends Controller
         ]);
     }
 
-    public function eligibleMembers(Request $request, Organization $organization): JsonResponse
-    {
+    public function eligibleMembers(
+        Request $request,
+        Organization $organization,
+        OfficerRosterService $service
+    ): JsonResponse {
+        $this->authorizeRosterGovernanceAccess($request, $organization, $service);
+
         $members = User::query()
             ->whereHas('organizationMemberships', function ($query) use ($organization): void {
                 $query->where('organization_id', $organization->id)
@@ -228,6 +248,8 @@ class OfficerRosterController extends Controller
         Organization $organization,
         OfficerRosterService $service
     ): JsonResponse {
+        $this->authorizeRosterGovernanceAccess($request, $organization, $service);
+
         $advisers = User::query()
             ->where(function ($query): void {
                 $query->where('user_type', '!=', 'student')
@@ -243,6 +265,62 @@ class OfficerRosterController extends Controller
         return response()->json([
             'advisers' => $advisers,
         ]);
+    }
+
+    private function authorizeRosterGovernanceAccess(
+        Request $request,
+        Organization $organization,
+        OfficerRosterService $service,
+        ?OrganizationOfficerRoster $roster = null
+    ): void {
+        $user = $request->user();
+
+        abort_unless($user, 403);
+
+        if ($user->hasRole('Super Admin (OSA)')) {
+            return;
+        }
+
+        if ($service->canPrepareRoster($user, $organization) || $service->canRequestOfficerChange($user, $organization)) {
+            return;
+        }
+
+        if ($roster && $service->canVerifyRoster($user, $roster)) {
+            return;
+        }
+
+        abort(403, 'Unauthorized. Officer roster governance is restricted to OSA and the exact organization authority.');
+    }
+
+    private function authorizeChangeRequestAccess(
+        Request $request,
+        Organization $organization,
+        OfficerRosterService $service
+    ): void {
+        $user = $request->user();
+
+        abort_unless($user, 403);
+
+        if ($user->hasRole('Super Admin (OSA)') || $service->canRequestOfficerChange($user, $organization)) {
+            return;
+        }
+
+        abort(403, 'Unauthorized. Officer change requests are restricted to OSA and the exact organization authority.');
+    }
+
+    private function abortIfRosterDoesNotBelongToOrganization(
+        OrganizationOfficerRoster $roster,
+        Organization $organization
+    ): void {
+        abort_unless($roster->organization_id === $organization->id, 404);
+    }
+
+    private function abortIfChangeRequestDoesNotBelongToOrganization(
+        OfficerChangeRequest $changeRequest,
+        Organization $organization
+    ): void {
+        abort_unless($changeRequest->organization_id === $organization->id, 404);
+        abort_unless($changeRequest->roster?->organization_id === $organization->id, 404);
     }
 
     private function serializeRoster(OrganizationOfficerRoster $roster): array

@@ -527,6 +527,156 @@ class OfficerRosterTest extends TestCase
             ->assertJsonPath('can_prepare', true);
     }
 
+    public function test_osa_can_view_roster_directories_and_change_requests_across_organizations(): void
+    {
+        [$org, , , , , , $adviser] = $this->setupOrganizationWithOfficers();
+
+        $osa = User::factory()->create([
+            'email' => 'osa.roster.governance@usm.edu.ph',
+            'user_type' => 'faculty_or_staff',
+        ]);
+        $osa->assignRole('Super Admin (OSA)');
+
+        $this->actingAs($osa)
+            ->getJson(route('dashboard.officer-rosters.show', ['organization' => $org->id]))
+            ->assertOk()
+            ->assertJsonPath('organization.id', $org->id);
+
+        $this->actingAs($osa)
+            ->getJson(route('dashboard.officer-rosters.eligible-members', ['organization' => $org->id]))
+            ->assertOk();
+
+        $this->actingAs($osa)
+            ->getJson(route('dashboard.officer-rosters.eligible-advisers', ['organization' => $org->id]))
+            ->assertOk()
+            ->assertJsonFragment(['id' => $adviser->id]);
+
+        $this->actingAs($osa)
+            ->getJson(route('dashboard.officer-change-requests.index', ['organization' => $org->id]))
+            ->assertOk()
+            ->assertJsonPath('requests', []);
+    }
+
+    public function test_broad_dashboard_role_without_exact_organization_authority_cannot_view_roster_governance(): void
+    {
+        [$org] = $this->setupOrganizationWithOfficers();
+        $otherOrganization = $this->createPeerOrganization('WRONG');
+
+        $wrongOrganizationAdmin = User::factory()->create([
+            'email' => 's.wrong.organization.admin@usm.edu.ph',
+            'user_type' => 'student',
+        ]);
+        $wrongOrganizationAdmin->assignRole('Society Admin');
+
+        AdminAssignment::create([
+            'user_id' => $wrongOrganizationAdmin->id,
+            'role_name' => 'Society Admin',
+            'organization_id' => $otherOrganization->id,
+            'college_id' => $otherOrganization->college_id,
+            'department_id' => $otherOrganization->department_id,
+            'position_title' => 'President',
+            'status' => AdminAssignment::STATUS_ACTIVE,
+            'academic_year' => '2024-2025',
+            'is_primary_admin' => true,
+            'term_start' => now()->subMonth(),
+        ]);
+
+        $this->actingAs($wrongOrganizationAdmin)
+            ->getJson(route('dashboard.officer-rosters.show', ['organization' => $org->id]))
+            ->assertForbidden();
+
+        $this->actingAs($wrongOrganizationAdmin)
+            ->getJson(route('dashboard.officer-rosters.eligible-members', ['organization' => $org->id]))
+            ->assertForbidden();
+
+        $this->actingAs($wrongOrganizationAdmin)
+            ->getJson(route('dashboard.officer-rosters.eligible-advisers', ['organization' => $org->id]))
+            ->assertForbidden();
+
+        $this->actingAs($wrongOrganizationAdmin)
+            ->getJson(route('dashboard.officer-change-requests.index', ['organization' => $org->id]))
+            ->assertForbidden();
+    }
+
+    public function test_mismatched_nested_roster_routes_return_not_found_before_mutating(): void
+    {
+        [$org, , $roster, $adviser] = $this->setupSubmittedRoster();
+        $otherOrganization = $this->createPeerOrganization('MISMATCH');
+
+        $this->actingAs($adviser)
+            ->postJson(route('dashboard.officer-rosters.verify', [
+                'organization' => $otherOrganization->id,
+                'roster' => $roster->id,
+            ]))
+            ->assertNotFound();
+
+        $this->actingAs($adviser)
+            ->postJson(route('dashboard.officer-rosters.request-changes', [
+                'organization' => $otherOrganization->id,
+                'roster' => $roster->id,
+            ]), [
+                'remarks' => 'This route should be rejected before changing the real roster.',
+            ])
+            ->assertNotFound();
+
+        $this->assertSame(OrganizationOfficerRoster::STATUS_SUBMITTED, $roster->fresh()->status);
+        $this->assertSame($org->id, $roster->organization_id);
+    }
+
+    public function test_mismatched_nested_change_request_routes_return_not_found_before_mutating(): void
+    {
+        [
+            $org,
+            ,
+            $roster,
+            $adviser,
+            $incomingPres,
+            ,
+            ,
+            $presOfficer,
+        ] = $this->setupSubmittedRoster();
+
+        $this->actingAs($adviser)
+            ->postJson(route('dashboard.officer-rosters.verify', [
+                'organization' => $org->id,
+                'roster' => $roster->id,
+            ]))
+            ->assertOk();
+
+        $changeRequest = OfficerChangeRequest::create([
+            'organization_id' => $org->id,
+            'officer_roster_id' => $roster->id,
+            'old_officer_id' => $presOfficer->id,
+            'request_type' => OfficerChangeRequest::TYPE_RESIGNATION,
+            'position_key' => OrganizationOfficer::POSITION_PRESIDENT,
+            'status' => OfficerChangeRequest::STATUS_PENDING,
+            'reason' => 'Pending resignation.',
+            'requested_by' => $incomingPres->id,
+            'requested_at' => now(),
+        ]);
+
+        $otherOrganization = $this->createPeerOrganization('CHANGE');
+
+        $this->actingAs($adviser)
+            ->postJson(route('dashboard.officer-change-requests.approve', [
+                'organization' => $otherOrganization->id,
+                'changeRequest' => $changeRequest->id,
+            ]))
+            ->assertNotFound();
+
+        $this->actingAs($adviser)
+            ->postJson(route('dashboard.officer-change-requests.reject', [
+                'organization' => $otherOrganization->id,
+                'changeRequest' => $changeRequest->id,
+            ]), [
+                'remarks' => 'Rejecting through a mismatched parent should fail.',
+            ])
+            ->assertNotFound();
+
+        $this->assertSame(OfficerChangeRequest::STATUS_PENDING, $changeRequest->fresh()->status);
+        $this->assertSame($org->id, $changeRequest->organization_id);
+    }
+
     private function setupOrganizationWithOfficers(): array
     {
         $university = University::firstOrCreate(
@@ -663,6 +813,20 @@ class OfficerRosterTest extends TestCase
         $adviser->assignRole('Faculty');
 
         return [$org, $schoolYear, $president, $secretary, $incomingPres, $incomingSec, $adviser];
+    }
+
+    private function createPeerOrganization(string $acronym): Organization
+    {
+        $baseOrganization = Organization::where('acronym', 'PSITS')->firstOrFail();
+
+        return Organization::create([
+            'name' => "{$acronym} Society",
+            'acronym' => $acronym,
+            'type' => 'society',
+            'college_id' => $baseOrganization->college_id,
+            'department_id' => $baseOrganization->department_id,
+            'status' => 'active',
+        ]);
     }
 
     protected function setupSubmittedRoster(): array

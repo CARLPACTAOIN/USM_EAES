@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\CanonicalPpaPacket;
 use App\Models\Event;
+use App\Models\EventParticipationScope;
 use DomainException;
 use Illuminate\Support\Facades\Storage;
 
@@ -23,6 +24,14 @@ class EventProposalSubmissionGuard
 
         if (! $packet) {
             return ['canonical PPA packet'];
+        }
+
+        if (! in_array($packet->activity_role, [CanonicalPpaPacket::ROLE_ORGANIZER, CanonicalPpaPacket::ROLE_CO_ORGANIZER], true)) {
+            $missing[] = 'valid organizer activity role';
+        }
+
+        if ($packet->event_participation_scope_id !== null) {
+            $missing[] = 'unscoped organizer packet';
         }
 
         foreach ($this->requiredPacketFields() as $field => $label) {
@@ -93,6 +102,18 @@ class EventProposalSubmissionGuard
 
         if ($packet->activity_role !== CanonicalPpaPacket::ROLE_PARTICIPANT) {
             $missing[] = 'participant activity role';
+        }
+
+        if (blank($packet->event_participation_scope_id)) {
+            $missing[] = 'associated participation scope';
+        } else {
+            $scope = $packet->relationLoaded('participationScope') && $packet->participationScope
+                ? $packet->participationScope
+                : $packet->participationScope()->first();
+
+            if ($scope && $scope->participation_role !== EventParticipationScope::ROLE_PARTICIPANT) {
+                $missing[] = 'invited participant participation scope';
+            }
         }
 
         if (blank($packet->proponent_name)) {

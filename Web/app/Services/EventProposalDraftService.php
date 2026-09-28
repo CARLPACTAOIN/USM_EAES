@@ -50,6 +50,7 @@ class EventProposalDraftService
     public function create(User $actor, array $data, ?UploadedFile $proposalDocument, ?UploadedFile $confirmationDocument = null): Event
     {
         $data = $this->prepareDraftData($data);
+        $this->assertOrganizerActivityRole($data);
         $organization = Organization::find($data['organization_id']);
 
         if (! $organization || ! in_array($organization->type, self::RECOGNIZED_ORGANIZER_TYPES, true)) {
@@ -146,6 +147,7 @@ class EventProposalDraftService
     public function update(Event $event, User $actor, array $data, ?UploadedFile $proposalDocument, ?UploadedFile $confirmationDocument = null): Event
     {
         $data = $this->prepareDraftData($data);
+        $this->assertOrganizerActivityRole($data);
         $event->loadMissing('organization');
 
         if (! $event->organization) {
@@ -399,9 +401,12 @@ class EventProposalDraftService
         $budget = $data['budget_allocations'] ?? [];
 
         $event->canonicalPpaPacket()->updateOrCreate(
-            ['event_id' => $event->id],
             [
-                'activity_role' => $this->normalizeActivityRole($packet['activity_role'] ?? null),
+                'event_id' => $event->id,
+                'event_participation_scope_id' => null,
+            ],
+            [
+                'activity_role' => $this->normalizeActivityRole($packet['activity_role'] ?? ($data['activity_role'] ?? null)),
                 'proposal_category' => $data['proposal_category'],
                 'title' => $data['title'],
                 'proponent_name' => $this->blankToNull($packet['proponent_name'] ?? null) ?: ($event->proponent_name_snapshot ?: $actor->name),
@@ -439,14 +444,30 @@ class EventProposalDraftService
         );
     }
 
+    private function assertOrganizerActivityRole(array $data): void
+    {
+        $role = $data['canonical_packet']['activity_role'] ?? ($data['activity_role'] ?? null);
+
+        if ($role !== null && (string) $role === CanonicalPpaPacket::ROLE_PARTICIPANT) {
+            throw new DomainException('Participant packets cannot be created from organizer proposal paths. Participant packets must come from an invited event participation scope.');
+        }
+    }
+
     private function normalizeActivityRole(mixed $value): string
     {
+        if ($value === null || $value === '') {
+            return CanonicalPpaPacket::ROLE_ORGANIZER;
+        }
+
         $value = (string) $value;
+
+        if ($value === CanonicalPpaPacket::ROLE_PARTICIPANT) {
+            throw new DomainException('Participant packets cannot be created from organizer proposal paths. Participant packets must come from an invited event participation scope.');
+        }
 
         return in_array($value, [
             CanonicalPpaPacket::ROLE_ORGANIZER,
             CanonicalPpaPacket::ROLE_CO_ORGANIZER,
-            CanonicalPpaPacket::ROLE_PARTICIPANT,
         ], true)
             ? $value
             : CanonicalPpaPacket::ROLE_ORGANIZER;

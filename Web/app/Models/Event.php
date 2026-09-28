@@ -175,10 +175,13 @@ class Event extends Model
     public function canonicalPpaPacket(): HasOne
     {
         return $this->hasOne(CanonicalPpaPacket::class)
-            ->where(function ($query): void {
-                $query->where('activity_role', CanonicalPpaPacket::ROLE_ORGANIZER)
-                    ->orWhereNull('event_participation_scope_id');
-            });
+            ->whereNull('event_participation_scope_id');
+    }
+
+    public function participantPpaPackets(): HasMany
+    {
+        return $this->hasMany(CanonicalPpaPacket::class)
+            ->whereNotNull('event_participation_scope_id');
     }
 
     public function canonicalPpaPackets(): HasMany

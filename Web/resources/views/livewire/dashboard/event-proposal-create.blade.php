@@ -84,11 +84,11 @@
                 <div>
                     <label for="livewire-activity-role" class="form-label">Activity Role <span class="text-(--color-destructive)">*</span></label>
                     <select id="livewire-activity-role" name="activity_role" class="form-input form-select @error('activityRole') form-input-error @enderror" required wire:model="activityRole">
-                        @foreach(['organizer' => 'Organizer', 'co-organizer' => 'Co-Organizer', 'participant' => 'Participant'] as $value => $label)
+                        @foreach(['organizer' => 'Organizer', 'co-organizer' => 'Co-Organizer'] as $value => $label)
                             <option value="{{ $value }}" @selected($activityRole === $value)>{{ $label }}</option>
                         @endforeach
                     </select>
-                    <p class="form-helper">Used by the Student Activity Permit route.</p>
+                    <p class="form-helper">Participant packets must be completed from participating event scopes.</p>
                     @error('activityRole') <p class="form-error" role="alert">{{ $message }}</p> @enderror
                 </div>
                 <div>

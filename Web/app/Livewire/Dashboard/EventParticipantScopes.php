@@ -200,6 +200,12 @@ class EventParticipantScopes extends Component
         $scope = $this->scopeForAction($scopeId);
         $this->authorizeParticipantScopeAccess($scope);
 
+        if (! $scope->isParticipant()) {
+            $this->errorNotice = 'Participant packets can only be created for invited participant scopes.';
+
+            return;
+        }
+
         $payload = $this->packetForms[$scopeId] ?? [];
         $payload['budget_breakdown'] = $this->budgetBreakdowns[$scopeId] ?? [];
 
@@ -220,6 +226,12 @@ class EventParticipantScopes extends Component
         $this->resetFeedback();
         $scope = $this->scopeForAction($scopeId);
         $this->authorizeParticipantScopeAccess($scope);
+
+        if (! $scope->isParticipant()) {
+            $this->errorNotice = 'Participant packets can only be created for invited participant scopes.';
+
+            return;
+        }
 
         if (! $scope->ppa_required) {
             $this->errorNotice = 'This participant scope does not require a PPA.';

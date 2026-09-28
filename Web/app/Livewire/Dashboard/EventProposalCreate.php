@@ -377,7 +377,7 @@ class EventProposalCreate extends Component
             'organizerId' => [auth()->user()?->hasRole('Super Admin (OSA)') ? 'required' : 'nullable', 'uuid', 'exists:organizations,id'],
             'title' => ['required', 'string', 'max:255'],
             'proposalCategory' => ['required', 'string', 'in:program,project,activity'],
-            'activityRole' => ['required', 'string', 'in:organizer,co-organizer,participant'],
+            'activityRole' => ['required', 'string', 'in:organizer,co-organizer'],
             'parentEventId' => ['nullable', 'uuid', 'exists:events,id'],
             'startDate' => ['required', 'date'],
             'endDate' => ['required', 'date', 'after_or_equal:startDate'],
@@ -541,7 +541,7 @@ class EventProposalCreate extends Component
         $this->organizerId = (string) $event->organization_id;
         $this->title = (string) $event->title;
         $this->proposalCategory = (string) $event->proposal_category;
-        $this->activityRole = (string) ($packet?->activity_role ?: 'organizer');
+        $this->activityRole = in_array((string) $packet?->activity_role, ['organizer', 'co-organizer'], true) ? (string) $packet->activity_role : 'organizer';
         $this->parentEventId = (string) ($event->parent_event_id ?? '');
         $this->startDate = $event->start_date?->toDateString() ?? '';
         $this->endDate = $event->end_date?->toDateString() ?? '';
@@ -730,7 +730,8 @@ class EventProposalCreate extends Component
         $this->organizerId = (string) data_get($old, 'organization_id', '');
         $this->title = (string) data_get($old, 'title', '');
         $this->proposalCategory = (string) data_get($old, 'proposal_category', '');
-        $this->activityRole = (string) data_get($old, 'activity_role', 'organizer');
+        $oldRole = (string) data_get($old, 'activity_role', 'organizer');
+        $this->activityRole = in_array($oldRole, ['organizer', 'co-organizer'], true) ? $oldRole : 'organizer';
         $this->parentEventId = (string) data_get($old, 'parent_event_id', '');
         $this->startDate = (string) data_get($old, 'start_date', '');
         $this->endDate = (string) data_get($old, 'end_date', '');

@@ -204,6 +204,16 @@ class EventParticipationScope extends Model
         return ! $this->ppa_required || in_array($this->ppa_status, [self::PPA_APPROVED, self::PPA_NOT_REQUIRED], true);
     }
 
+    public function isOrganizer(): bool
+    {
+        return $this->participation_role === self::ROLE_ORGANIZER;
+    }
+
+    public function isParticipant(): bool
+    {
+        return $this->participation_role === self::ROLE_PARTICIPANT;
+    }
+
     public function displayName(): string
     {
         return $this->participant_name_snapshot
