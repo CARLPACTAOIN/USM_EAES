@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class RawScan extends Model
 {
@@ -31,49 +32,52 @@ class RawScan extends Model
         'rejection_reason',
     ];
 
-    protected $casts = [
-        'scanned_at' => 'datetime',
-        'server_received_at' => 'datetime',
-        'processed_at' => 'datetime',
-        'manual_entry' => 'boolean',
-    ];
+    protected function casts(): array
+    {
+        return [
+            'scanned_at' => 'datetime',
+            'server_received_at' => 'datetime',
+            'processed_at' => 'datetime',
+            'manual_entry' => 'boolean',
+        ];
+    }
 
-    public function event()
+    public function event(): BelongsTo
     {
         return $this->belongsTo(Event::class);
     }
 
-    public function participationScope()
+    public function participationScope(): BelongsTo
     {
         return $this->belongsTo(EventParticipationScope::class, 'event_participation_scope_id');
     }
 
-    public function eventDay()
+    public function eventDay(): BelongsTo
     {
         return $this->belongsTo(EventDay::class);
     }
 
-    public function eventDaySession()
+    public function eventDaySession(): BelongsTo
     {
         return $this->belongsTo(EventDaySession::class);
     }
 
-    public function student()
+    public function student(): BelongsTo
     {
         return $this->belongsTo(User::class, 'student_id');
     }
 
-    public function scannerSession()
+    public function scannerSession(): BelongsTo
     {
         return $this->belongsTo(ScannerSession::class);
     }
 
-    public function scannerUser()
+    public function scannerUser(): BelongsTo
     {
         return $this->belongsTo(User::class, 'scanner_user_id');
     }
 
-    public function capturedByOrganization()
+    public function capturedByOrganization(): BelongsTo
     {
         return $this->belongsTo(Organization::class, 'captured_by_organization_id');
     }

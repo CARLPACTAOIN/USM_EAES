@@ -27,7 +27,7 @@
                 $revisionTarget = "requestParticipantPpaRevision('{$scope->id}')";
                 $rejectTarget = "rejectParticipantPpa('{$scope->id}')";
             @endphp
-            <div class="rounded-lg border border-(--color-border) bg-(--color-surface-raised) p-3">
+            <div wire:key="event-scope-{{ $scope->id }}" class="rounded-lg border border-(--color-border) bg-(--color-surface-raised) p-3">
                 <div class="grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(18rem,auto)]">
                     <div class="min-w-0">
                         <div class="flex flex-wrap items-center gap-2">

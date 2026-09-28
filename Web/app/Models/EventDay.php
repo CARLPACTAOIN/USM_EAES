@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class EventDay extends Model
@@ -19,11 +20,14 @@ class EventDay extends Model
         'end_time',
     ];
 
-    protected $casts = [
-        'date' => 'date',
-    ];
+    protected function casts(): array
+    {
+        return [
+            'date' => 'date',
+        ];
+    }
 
-    public function event()
+    public function event(): BelongsTo
     {
         return $this->belongsTo(Event::class);
     }
@@ -33,12 +37,12 @@ class EventDay extends Model
         return $this->hasMany(EventDaySession::class)->orderBy('session_number');
     }
 
-    public function rawScans()
+    public function rawScans(): HasMany
     {
         return $this->hasMany(RawScan::class);
     }
 
-    public function attendanceRecords()
+    public function attendanceRecords(): HasMany
     {
         return $this->hasMany(AttendanceRecord::class);
     }

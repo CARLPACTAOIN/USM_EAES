@@ -44,13 +44,16 @@ class AdminAssignment extends Model
         'revocation_reason',
     ];
 
-    protected $casts = [
-        'term_start' => 'date',
-        'term_end' => 'date',
-        'approved_at' => 'datetime',
-        'revoked_at' => 'datetime',
-        'is_primary_admin' => 'boolean',
-    ];
+    protected function casts(): array
+    {
+        return [
+            'term_start' => 'date',
+            'term_end' => 'date',
+            'approved_at' => 'datetime',
+            'revoked_at' => 'datetime',
+            'is_primary_admin' => 'boolean',
+        ];
+    }
 
     public function scopeCurrentlyEffective(Builder $query): Builder
     {
@@ -75,17 +78,17 @@ class AdminAssignment extends Model
             });
     }
 
-    public function user()
+    public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
     }
 
-    public function organization()
+    public function organization(): BelongsTo
     {
         return $this->belongsTo(Organization::class);
     }
 
-    public function college()
+    public function college(): BelongsTo
     {
         return $this->belongsTo(College::class);
     }
@@ -100,12 +103,12 @@ class AdminAssignment extends Model
         return $this->belongsTo(SchoolYear::class);
     }
 
-    public function approver()
+    public function approver(): BelongsTo
     {
         return $this->belongsTo(User::class, 'approved_by');
     }
 
-    public function revoker()
+    public function revoker(): BelongsTo
     {
         return $this->belongsTo(User::class, 'revoked_by');
     }

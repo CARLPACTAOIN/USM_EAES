@@ -429,7 +429,7 @@
                                         <p>Confirmed system-recorded usage overlaps this venue/time.</p>
                                         <ul>
                                             @foreach(array_slice($venueAvailabilityPreview['confirmed'], 0, 3) as $event)
-                                                <li>{{ $event['title'] }} · {{ $event['date'] }} {{ $event['start_time'] }}-{{ $event['end_time'] }} · buffered {{ $event['buffer_start_time'] }}-{{ $event['buffer_end_time'] }}</li>
+                                                <li wire:key="confirmed-venue-overlap-{{ $event['id'] ?? $loop->index }}">{{ $event['title'] }} · {{ $event['date'] }} {{ $event['start_time'] }}-{{ $event['end_time'] }} · buffered {{ $event['buffer_start_time'] }}-{{ $event['buffer_end_time'] }}</li>
                                             @endforeach
                                         </ul>
                                     </div>
@@ -438,7 +438,7 @@
                                         <p class="font-semibold">Tentative system-recorded usage exists for this venue/time.</p>
                                         <ul class="mt-1 list-disc pl-4 text-xs">
                                             @foreach(array_slice($venueAvailabilityPreview['tentative'], 0, 3) as $event)
-                                                <li>{{ $event['title'] }} · {{ $event['date'] }} {{ $event['start_time'] }}-{{ $event['end_time'] }}</li>
+                                                <li wire:key="tentative-venue-overlap-{{ $event['id'] ?? $loop->index }}">{{ $event['title'] }} · {{ $event['date'] }} {{ $event['start_time'] }}-{{ $event['end_time'] }}</li>
                                             @endforeach
                                         </ul>
                                     </div>
@@ -616,7 +616,7 @@
             @php($evaluationEditorOpen = $errors->has('evaluationQuestions') || $errors->has('evaluationQuestions.*.label') || $errors->has('evaluationQuestions.*.description'))
             <div class="proposal-question-preview" aria-label="Evaluation questions preview">
                 @foreach($evaluationQuestions as $index => $question)
-                    <div class="proposal-question-preview-item">
+                    <div wire:key="evaluation-question-preview-{{ $index }}" class="proposal-question-preview-item">
                         <span class="proposal-question-preview-index">Q{{ $index + 1 }}</span>
                         <span>{{ filled($question['label'] ?? '') ? $question['label'] : 'Untitled question' }}</span>
                     </div>

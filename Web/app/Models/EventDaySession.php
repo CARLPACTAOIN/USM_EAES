@@ -21,9 +21,12 @@ class EventDaySession extends Model
         'required_for_attendance',
     ];
 
-    protected $casts = [
-        'required_for_attendance' => 'boolean',
-    ];
+    protected function casts(): array
+    {
+        return [
+            'required_for_attendance' => 'boolean',
+        ];
+    }
 
     public function eventDay(): BelongsTo
     {

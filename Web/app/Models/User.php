@@ -7,6 +7,8 @@ use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
@@ -64,52 +66,52 @@ class User extends Authenticatable
     /**
      * Get the organization that the user belongs to.
      */
-    public function organization()
+    public function organization(): BelongsTo
     {
         return $this->belongsTo(Organization::class);
     }
 
-    public function adminAssignments()
+    public function adminAssignments(): HasMany
     {
         return $this->hasMany(AdminAssignment::class);
     }
 
-    public function activeAdminAssignments()
+    public function activeAdminAssignments(): HasMany
     {
         return $this->adminAssignments()->where('status', AdminAssignment::STATUS_ACTIVE);
     }
 
-    public function scannerAssignments()
+    public function scannerAssignments(): HasMany
     {
         return $this->hasMany(EventScannerAssignment::class, 'scanner_user_id');
     }
 
-    public function organizationMemberships()
+    public function organizationMemberships(): HasMany
     {
         return $this->hasMany(OrganizationMembership::class);
     }
 
-    public function activeOrganizationMemberships()
+    public function activeOrganizationMemberships(): HasMany
     {
         return $this->organizationMemberships()->where('status', OrganizationMembership::STATUS_ACTIVE);
     }
 
-    public function employeeProfile()
+    public function employeeProfile(): HasOne
     {
         return $this->hasOne(EmployeeProfile::class);
     }
 
-    public function employeeRosterEntry()
+    public function employeeRosterEntry(): HasOne
     {
         return $this->hasOne(EmployeeRosterEntry::class);
     }
 
-    public function issuedScannerAssignments()
+    public function issuedScannerAssignments(): HasMany
     {
         return $this->hasMany(EventScannerAssignment::class, 'assigned_by_user_id');
     }
 
-    public function college()
+    public function college(): BelongsTo
     {
         return $this->belongsTo(College::class);
     }
@@ -119,12 +121,12 @@ class User extends Authenticatable
         return $this->belongsTo(Department::class);
     }
 
-    public function program()
+    public function program(): BelongsTo
     {
         return $this->belongsTo(Program::class);
     }
 
-    public function organizationOfficers()
+    public function organizationOfficers(): HasMany
     {
         return $this->hasMany(OrganizationOfficer::class);
     }

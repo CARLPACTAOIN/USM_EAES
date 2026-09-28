@@ -3913,7 +3913,9 @@ class WebPortalTest extends TestCase
             ])
             ->assertSessionHas('success');
 
-        $notification = $osa->fresh()->notifications()->first();
+        $notification = $osa->fresh()->notifications()
+            ->get()
+            ->first(fn ($notification): bool => ($notification->data['kind'] ?? null) === 'participant_scope_submitted');
 
         $this->assertNotNull($notification);
         $this->assertSame('participant_scope_submitted', $notification->data['kind']);

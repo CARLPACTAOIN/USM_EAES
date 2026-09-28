@@ -28,9 +28,12 @@ class OrganizationMembership extends Model
         'verified_at',
     ];
 
-    protected $casts = [
-        'verified_at' => 'datetime',
-    ];
+    protected function casts(): array
+    {
+        return [
+            'verified_at' => 'datetime',
+        ];
+    }
 
     public function user(): BelongsTo
     {

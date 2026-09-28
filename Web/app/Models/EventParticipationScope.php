@@ -5,6 +5,8 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class EventParticipationScope extends Model
@@ -72,96 +74,99 @@ class EventParticipationScope extends Model
         'invitation_last_reminded_at',
     ];
 
-    protected $casts = [
-        'ppa_required' => 'boolean',
-        'hardcopy_submitted' => 'boolean',
-        'org_head_signed' => 'boolean',
-        'adviser_signed' => 'boolean',
-        'analytics_rollup_enabled' => 'boolean',
-        'late_cutoff_min' => 'integer',
-        'submitted_at' => 'datetime',
-        'reviewed_at' => 'datetime',
-        'approved_at' => 'datetime',
-        'invitation_acknowledged_at' => 'datetime',
-        'invitation_last_reminded_at' => 'datetime',
-    ];
+    protected function casts(): array
+    {
+        return [
+            'ppa_required' => 'boolean',
+            'hardcopy_submitted' => 'boolean',
+            'org_head_signed' => 'boolean',
+            'adviser_signed' => 'boolean',
+            'analytics_rollup_enabled' => 'boolean',
+            'late_cutoff_min' => 'integer',
+            'submitted_at' => 'datetime',
+            'reviewed_at' => 'datetime',
+            'approved_at' => 'datetime',
+            'invitation_acknowledged_at' => 'datetime',
+            'invitation_last_reminded_at' => 'datetime',
+        ];
+    }
 
-    public function event()
+    public function event(): BelongsTo
     {
         return $this->belongsTo(Event::class);
     }
 
-    public function canonicalPpaPacket()
+    public function canonicalPpaPacket(): HasOne
     {
         return $this->hasOne(CanonicalPpaPacket::class, 'event_participation_scope_id');
     }
 
-    public function schoolYear()
+    public function schoolYear(): BelongsTo
     {
         return $this->belongsTo(SchoolYear::class);
     }
 
-    public function parentScope()
+    public function parentScope(): BelongsTo
     {
         return $this->belongsTo(self::class, 'parent_scope_id');
     }
 
-    public function childScopes()
+    public function childScopes(): HasMany
     {
         return $this->hasMany(self::class, 'parent_scope_id');
     }
 
-    public function linkedEvent()
+    public function linkedEvent(): BelongsTo
     {
         return $this->belongsTo(Event::class, 'linked_event_id');
     }
 
-    public function organization()
+    public function organization(): BelongsTo
     {
         return $this->belongsTo(Organization::class);
     }
 
-    public function college()
+    public function college(): BelongsTo
     {
         return $this->belongsTo(College::class);
     }
 
-    public function department()
+    public function department(): BelongsTo
     {
         return $this->belongsTo(Department::class);
     }
 
-    public function program()
+    public function program(): BelongsTo
     {
         return $this->belongsTo(Program::class);
     }
 
-    public function delegatedOrganization()
+    public function delegatedOrganization(): BelongsTo
     {
         return $this->belongsTo(Organization::class, 'delegated_to_organization_id');
     }
 
-    public function submittedBy()
+    public function submittedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'submitted_by');
     }
 
-    public function reviewedBy()
+    public function reviewedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'reviewed_by');
     }
 
-    public function invitationAcknowledgedBy()
+    public function invitationAcknowledgedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'invitation_acknowledged_by');
     }
 
-    public function scannerAssignments()
+    public function scannerAssignments(): HasMany
     {
         return $this->hasMany(EventScannerAssignment::class, 'event_participation_scope_id');
     }
 
-    public function scannerSessions()
+    public function scannerSessions(): HasMany
     {
         return $this->hasMany(ScannerSession::class, 'event_participation_scope_id');
     }
@@ -171,12 +176,12 @@ class EventParticipationScope extends Model
         return $this->hasOne(ProposalWorkflowRun::class, 'event_participation_scope_id');
     }
 
-    public function rawScans()
+    public function rawScans(): HasMany
     {
         return $this->hasMany(RawScan::class, 'event_participation_scope_id');
     }
 
-    public function attendanceRecords()
+    public function attendanceRecords(): HasMany
     {
         return $this->hasMany(AttendanceRecord::class, 'event_participation_scope_id');
     }

@@ -16,6 +16,14 @@ class OrganizationProgram extends Pivot
 
     public $incrementing = false;
 
+    /**
+     * @var list<string>
+     */
+    protected $fillable = [
+        'organization_id',
+        'program_id',
+    ];
+
     protected static function booted(): void
     {
         static::saving(function (OrganizationProgram $pivot): void {

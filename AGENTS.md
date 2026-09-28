@@ -59,6 +59,7 @@
 - Use the skill before choosing layout, visual style, typography, color systems, interaction patterns, or UX recommendations.
 - Keep UI work aligned with `PRD_V1.md` and the current project direction.
 - The UI/UX skill improves design quality and decision support, but it does not override product scope or PRD requirements.
+- Legacy frontend design skills (`brandkit`, `design-taste-frontend`, `design-taste-frontend-v1`, `gpt-taste`, `high-end-visual-design`, `image-to-code`, `imagegen-frontend-mobile`, `imagegen-frontend-web`, `industrial-brutalist-ui`, `minimalist-ui`, `stitch-design-taste`) are explicitly superseded by `.agents/skills/ui-ux-pro-max/` and its sibling design skills (`ui-styling`, `design`, `design-system`, `brand`, `slides`, `banner-design`).
 
 ## Agent skills
 

@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class AuditLog extends Model
 {
@@ -17,11 +18,14 @@ class AuditLog extends Model
         'details',
     ];
 
-    protected $casts = [
-        'details' => 'array',
-    ];
+    protected function casts(): array
+    {
+        return [
+            'details' => 'array',
+        ];
+    }
 
-    public function admin()
+    public function admin(): BelongsTo
     {
         return $this->belongsTo(User::class, 'admin_id');
     }

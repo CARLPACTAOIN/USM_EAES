@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Web;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\SaveParticipantPacketDraftRequest;
+use App\Http\Requests\SubmitParticipantPacketRequest;
 use App\Jobs\ResolveAttendanceJob;
 use App\Models\AuditLog;
 use App\Models\Event;
@@ -811,26 +813,12 @@ class DashboardController extends Controller
             ->with('success', 'Participant invitation acknowledged.');
     }
 
-    public function saveParticipantScopeDraft(Request $request, Event $event, EventParticipationScope $participationScope)
+    public function saveParticipantScopeDraft(SaveParticipantPacketDraftRequest $request, Event $event, EventParticipationScope $participationScope)
     {
         $this->authorizeParticipantScopeAccess($event, $participationScope, $request->user());
         abort_unless($participationScope->isParticipant(), 422, 'Participant packets can only be created for invited participant scopes.');
 
-        $validated = $request->validate([
-            'proponent_name' => 'nullable|string|max:255',
-            'proponent_position' => 'nullable|string|max:255',
-            'proponent_organization' => 'nullable|string|max:255',
-            'proponent_email' => 'nullable|email|max:255',
-            'proponent_contact_number' => 'nullable|string|max:50',
-            'delegate_count' => 'nullable|integer|min:0',
-            'beneficiaries' => 'nullable|string|max:1000',
-            'source_of_fund' => 'nullable|string|max:255',
-            'budget_cost' => 'nullable|numeric|min:0',
-            'budget_breakdown' => 'nullable|array',
-            'rationale' => 'nullable|string|max:2000',
-            'supporting_document' => 'nullable|file|mimes:pdf,doc,docx|max:10240',
-            'ppa_softcopy' => 'nullable|file|mimes:pdf,doc,docx|max:10240',
-        ]);
+        $validated = $request->validated();
 
         $file = $request->file('supporting_document') ?? $request->file('ppa_softcopy');
 
@@ -839,7 +827,7 @@ class DashboardController extends Controller
         return redirect()->back()->with('success', 'Participant PPA draft saved.');
     }
 
-    public function submitParticipantScope(Request $request, Event $event, EventParticipationScope $participationScope)
+    public function submitParticipantScope(SubmitParticipantPacketRequest $request, Event $event, EventParticipationScope $participationScope)
     {
         $this->authorizeParticipantScopeAccess($event, $participationScope, $request->user());
         abort_unless($participationScope->isParticipant(), 422, 'Participant packets can only be created for invited participant scopes.');
@@ -852,24 +840,7 @@ class DashboardController extends Controller
             return redirect()->back()->with('error', 'Only draft or revision-requested participant PPAs can be submitted.');
         }
 
-        $validated = $request->validate([
-            'proponent_name' => 'nullable|string|max:255',
-            'proponent_position' => 'nullable|string|max:255',
-            'proponent_organization' => 'nullable|string|max:255',
-            'proponent_email' => 'nullable|email|max:255',
-            'proponent_contact_number' => 'nullable|string|max:50',
-            'delegate_count' => 'nullable|integer|min:1',
-            'beneficiaries' => 'nullable|string|max:1000',
-            'source_of_fund' => 'nullable|string|max:255',
-            'budget_cost' => 'nullable|numeric|min:0',
-            'budget_breakdown' => 'nullable|array',
-            'rationale' => 'nullable|string|max:2000',
-            'supporting_document' => 'nullable|file|mimes:pdf,doc,docx|max:10240',
-            'ppa_softcopy' => [$participationScope->ppa_softcopy_path || $participationScope->canonicalPpaPacket?->supporting_document_path ? 'nullable' : 'nullable', 'file', 'mimes:pdf,doc,docx', 'max:10240'],
-            'hardcopy_submitted' => 'nullable|boolean',
-            'org_head_signed' => 'nullable|boolean',
-            'adviser_signed' => 'nullable|boolean',
-        ]);
+        $validated = $request->validated();
 
         $file = $request->file('supporting_document') ?? $request->file('ppa_softcopy');
         $existingPacket = $participationScope->canonicalPpaPacket;

@@ -24,7 +24,7 @@
             </div>
             <div class="notification-strip-list">
                 @foreach($needsActionItems->take(3) as $item)
-                    <a href="{{ $item['url'] }}" wire:navigate class="notification-strip-item">
+                    <a wire:key="needs-action-strip-{{ $item['id'] ?? $loop->index }}" href="{{ $item['url'] }}" wire:navigate class="notification-strip-item">
                         <span class="notification-dot notification-dot-warning" aria-hidden="true"></span>
                         <span class="min-w-0">
                             <span class="notification-strip-item-title">{{ $item['label'] }}</span>

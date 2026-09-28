@@ -62,6 +62,7 @@
                                  class="absolute z-30 mt-1 max-h-56 w-full overflow-auto rounded-lg border border-(--color-border) bg-(--color-surface) shadow-lg">
                                 @foreach($eligibleScannerUsers as $scanner)
                                     <button
+                                        wire:key="eligible-scanner-{{ $scanner->id }}"
                                         type="button"
                                         class="block w-full px-3 py-2 text-left text-sm hover:bg-(--color-surface-muted) focus:bg-(--color-surface-muted) focus:outline-none"
                                         wire:click="addScanner('{{ $scanner->id }}')"

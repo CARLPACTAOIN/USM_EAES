@@ -76,24 +76,27 @@ class Event extends Model
         'evaluation_form_version_id',
     ];
 
-    protected $casts = [
-        'start_date' => 'date',
-        'end_date' => 'date',
-        'venue_confirmation_date' => 'date',
-        'permit_version' => 'integer',
-        'target_demographics' => 'array',
-        'budget_allocations' => 'array',
-        'hardcopy_submitted' => 'boolean',
-        'hardcopy_submitted_at' => 'datetime',
-        'head_organization_signed' => 'boolean',
-        'adviser_signed' => 'boolean',
-        'evaluation_open' => 'boolean',
-        'event_late_cutoff_min' => 'integer',
-        'society_late_threshold_min' => 'integer',
-        'general_competition_threshold_min' => 'integer',
-        'left_early_buffer_min' => 'integer',
-        'governance_snapshots' => 'array',
-    ];
+    protected function casts(): array
+    {
+        return [
+            'start_date' => 'date',
+            'end_date' => 'date',
+            'venue_confirmation_date' => 'date',
+            'permit_version' => 'integer',
+            'target_demographics' => 'array',
+            'budget_allocations' => 'array',
+            'hardcopy_submitted' => 'boolean',
+            'hardcopy_submitted_at' => 'datetime',
+            'head_organization_signed' => 'boolean',
+            'adviser_signed' => 'boolean',
+            'evaluation_open' => 'boolean',
+            'event_late_cutoff_min' => 'integer',
+            'society_late_threshold_min' => 'integer',
+            'general_competition_threshold_min' => 'integer',
+            'left_early_buffer_min' => 'integer',
+            'governance_snapshots' => 'array',
+        ];
+    }
 
     public function schoolYear(): BelongsTo
     {
@@ -150,7 +153,7 @@ class Event extends Model
         return $this->proponent_name_snapshot;
     }
 
-    public function organization()
+    public function organization(): BelongsTo
     {
         return $this->belongsTo(Organization::class);
     }
@@ -194,37 +197,37 @@ class Event extends Model
         return $this->event_domain !== 'hr';
     }
 
-    public function parentEvent()
+    public function parentEvent(): BelongsTo
     {
         return $this->belongsTo(Event::class, 'parent_event_id');
     }
 
-    public function subEvents()
+    public function subEvents(): HasMany
     {
         return $this->hasMany(Event::class, 'parent_event_id');
     }
 
-    public function eventDays()
+    public function eventDays(): HasMany
     {
         return $this->hasMany(EventDay::class);
     }
 
-    public function rawScans()
+    public function rawScans(): HasMany
     {
         return $this->hasMany(RawScan::class);
     }
 
-    public function scannerSessions()
+    public function scannerSessions(): HasMany
     {
         return $this->hasMany(ScannerSession::class);
     }
 
-    public function scannerAssignments()
+    public function scannerAssignments(): HasMany
     {
         return $this->hasMany(EventScannerAssignment::class);
     }
 
-    public function participationScopes()
+    public function participationScopes(): HasMany
     {
         return $this->hasMany(EventParticipationScope::class);
     }
@@ -242,28 +245,28 @@ class Event extends Model
         return (int) ($this->society_late_threshold_min ?? 15);
     }
 
-    public function organizerParticipationScope()
+    public function organizerParticipationScope(): HasOne
     {
         return $this->hasOne(EventParticipationScope::class)
             ->where('participation_role', EventParticipationScope::ROLE_ORGANIZER);
     }
 
-    public function attendanceRecords()
+    public function attendanceRecords(): HasMany
     {
         return $this->hasMany(AttendanceRecord::class);
     }
 
-    public function evaluations()
+    public function evaluations(): HasMany
     {
         return $this->hasMany(Evaluation::class);
     }
 
-    public function evaluationFormVersion()
+    public function evaluationFormVersion(): BelongsTo
     {
         return $this->belongsTo(EvaluationFormVersion::class, 'evaluation_form_version_id');
     }
 
-    public function evaluationFormVersions()
+    public function evaluationFormVersions(): HasMany
     {
         return $this->hasMany(EvaluationFormVersion::class);
     }

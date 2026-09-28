@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class EmployeeRosterEntry extends Model
 {
@@ -27,21 +28,24 @@ class EmployeeRosterEntry extends Model
         'verified_at',
     ];
 
-    protected $casts = [
-        'verified_at' => 'datetime',
-    ];
+    protected function casts(): array
+    {
+        return [
+            'verified_at' => 'datetime',
+        ];
+    }
 
-    public function user()
+    public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
     }
 
-    public function college()
+    public function college(): BelongsTo
     {
         return $this->belongsTo(College::class);
     }
 
-    public function verifiedBy()
+    public function verifiedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'verified_by');
     }

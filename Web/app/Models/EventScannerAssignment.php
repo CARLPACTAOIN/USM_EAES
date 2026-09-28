@@ -5,6 +5,8 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class EventScannerAssignment extends Model
 {
@@ -34,44 +36,47 @@ class EventScannerAssignment extends Model
         'last_activated_at',
     ];
 
-    protected $casts = [
-        'revoked_at' => 'datetime',
-        'expires_at' => 'datetime',
-        'last_activated_at' => 'datetime',
-        'max_devices' => 'integer',
-    ];
+    protected function casts(): array
+    {
+        return [
+            'revoked_at' => 'datetime',
+            'expires_at' => 'datetime',
+            'last_activated_at' => 'datetime',
+            'max_devices' => 'integer',
+        ];
+    }
 
-    public function event()
+    public function event(): BelongsTo
     {
         return $this->belongsTo(Event::class);
     }
 
-    public function schoolYear()
+    public function schoolYear(): BelongsTo
     {
         return $this->belongsTo(SchoolYear::class);
     }
 
-    public function participationScope()
+    public function participationScope(): BelongsTo
     {
         return $this->belongsTo(EventParticipationScope::class, 'event_participation_scope_id');
     }
 
-    public function scannerUser()
+    public function scannerUser(): BelongsTo
     {
         return $this->belongsTo(User::class, 'scanner_user_id');
     }
 
-    public function assignedBy()
+    public function assignedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'assigned_by_user_id');
     }
 
-    public function revokedBy()
+    public function revokedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'revoked_by_user_id');
     }
 
-    public function scannerSessions()
+    public function scannerSessions(): HasMany
     {
         return $this->hasMany(ScannerSession::class, 'assignment_id');
     }

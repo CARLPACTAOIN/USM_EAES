@@ -201,11 +201,11 @@
         @else
             <div class="mt-3 space-y-2">
                 @foreach($sessionRows as $dayIndex => $day)
-                    <div class="rounded-lg border border-(--color-border) bg-(--color-surface-raised) p-3">
+                    <div wire:key="view-session-day-{{ $day['id'] }}" class="rounded-lg border border-(--color-border) bg-(--color-surface-raised) p-3">
                         <p class="text-sm font-semibold text-(--color-text-primary)">Day {{ $dayIndex + 1 }} · {{ $day['date'] }}</p>
                         <ul class="mt-2 space-y-1 text-xs text-(--color-text-secondary)">
                             @foreach($day['sessions'] as $session)
-                                <li>{{ $session['name'] }} · {{ $session['start_time'] }}-{{ $session['end_time'] }} · {{ $session['required_for_attendance'] ? 'Required' : 'Optional' }}</li>
+                                <li wire:key="view-session-row-{{ $session['id'] ?? $loop->index }}">{{ $session['name'] }} · {{ $session['start_time'] }}-{{ $session['end_time'] }} · {{ $session['required_for_attendance'] ? 'Required' : 'Optional' }}</li>
                             @endforeach
                         </ul>
                     </div>
@@ -230,7 +230,7 @@
                     $canEditScopeCutoff = (bool) ($canEditScopeCutoffs[$scope->id] ?? false);
                     $scopeCutoffModel = 'scopeLateCutoffMins.'.$scope->id;
                 @endphp
-                <div class="rounded-lg border border-(--color-border) bg-(--color-surface-raised) p-3">
+                <div wire:key="participant-scope-cutoff-{{ $scope->id }}" class="rounded-lg border border-(--color-border) bg-(--color-surface-raised) p-3">
                     <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <div class="min-w-0">
                             <div class="flex flex-wrap items-center gap-2">

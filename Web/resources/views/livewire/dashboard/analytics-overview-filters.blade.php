@@ -363,7 +363,7 @@
                                             $org = $row['org'];
                                             $rank = $i + 1;
                                         @endphp
-                                        <tr class="hover:bg-(--color-surface-raised)/60 transition-colors">
+                                        <tr wire:key="analytics-ranked-row-{{ $row['org']['id'] ?? $i }}" class="hover:bg-(--color-surface-raised)/60 transition-colors">
                                             <td class="px-5 py-3">
                                                 @if($rank == 1)
                                                     <span class="inline-flex items-center justify-center w-7 h-7 rounded-full bg-amber-500/20 text-amber-500 border border-amber-500/30 text-xs font-bold font-display" title="1st Place">1</span>
@@ -481,7 +481,8 @@
                         $ar = $m['avg_attendance_rate'];
                         $es = $m['avg_evaluation_score'];
                     @endphp
-                    <div class="card analytics-org-card space-y-0"
+                    <div wire:key="analytics-org-card-{{ $org->id }}"
+                         class="card analytics-org-card space-y-0"
                          data-org-name="{{ strtolower($org->name . ' ' . $org->acronym) }}"
                          x-show="orgIsVisible({{ $orgIndex }}, '{{ strtolower($org->name . ' ' . $org->acronym) }}')"
                          x-data="{ showEvents: false, showPrograms: false }"
@@ -655,7 +656,7 @@
                                             </thead>
                                             <tbody class="divide-y divide-(--color-border)">
                                                 @foreach($m['linked_programs_metrics'] as $pm)
-                                                <tr class="hover:bg-(--color-surface-raised)/60 transition-colors">
+                                                <tr wire:key="org-{{ $org->id }}-prog-{{ $pm['program']->id }}" class="hover:bg-(--color-surface-raised)/60 transition-colors">
                                                     <td class="px-4 py-2 font-semibold text-text-primary font-data">{{ $pm['program']->code }}</td>
                                                     <td class="px-4 py-2 text-text-secondary truncate max-w-35">{{ $pm['program']->name }}</td>
                                                     <td class="px-4 py-2 text-right font-semibold font-data {{ $pm['avg_attendance_rate'] >= 75 ? 'text-emerald-400' : ($pm['avg_attendance_rate'] >= 50 ? 'text-amber-400' : 'text-red-400') }}">{{ $pm['avg_attendance_rate'] }}%</td>
@@ -682,7 +683,7 @@
                                             </thead>
                                             <tbody class="divide-y divide-(--color-border)">
                                                 @foreach($m['event_breakdown'] as $ev)
-                                                <tr class="hover:bg-(--color-surface-raised)/60 transition-colors">
+                                                <tr wire:key="org-{{ $org->id }}-event-{{ $ev['id'] }}" class="hover:bg-(--color-surface-raised)/60 transition-colors">
                                                     <td class="px-4 py-2.5 font-medium text-text-primary max-w-40 truncate">{{ $ev['title'] }}</td>
                                                     <td class="px-4 py-2.5 text-right text-text-secondary font-data">{{ $ev['start_date'] }}</td>
                                                     <td class="px-4 py-2.5 text-right font-semibold font-data {{ $ev['attendance_rate'] >= 75 ? 'text-emerald-400' : ($ev['attendance_rate'] >= 50 ? 'text-amber-400' : 'text-red-400') }}">{{ $ev['attendance_rate'] }}%</td>
@@ -759,7 +760,7 @@
                                         $prog = $progMetrics['program'];
                                         $rank = $i + 1;
                                     @endphp
-                                    <tr class="hover:bg-(--color-surface-raised)/60 transition-colors">
+                                    <tr wire:key="program-comparison-row-{{ $progMetrics['program']->id ?? $i }}" class="hover:bg-(--color-surface-raised)/60 transition-colors">
                                         <td class="px-5 py-3">
                                             @if($rank == 1)
                                                 <span class="inline-flex items-center justify-center w-7 h-7 rounded-full bg-amber-500/20 text-amber-500 border border-amber-500/30 text-xs font-bold font-display" title="1st Place">1</span>

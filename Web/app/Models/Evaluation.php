@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class Evaluation extends Model
 {
@@ -22,23 +23,26 @@ class Evaluation extends Model
         'submitted_at',
     ];
 
-    protected $casts = [
-        'section_scores' => 'array', // automatically casts JSONB to array
-        'sentiment_score' => 'float',
-        'submitted_at' => 'datetime',
-    ];
+    protected function casts(): array
+    {
+        return [
+            'section_scores' => 'array',
+            'sentiment_score' => 'float',
+            'submitted_at' => 'datetime',
+        ];
+    }
 
-    public function event()
+    public function event(): BelongsTo
     {
         return $this->belongsTo(Event::class);
     }
 
-    public function student()
+    public function student(): BelongsTo
     {
         return $this->belongsTo(User::class, 'student_id');
     }
 
-    public function evaluationFormVersion()
+    public function evaluationFormVersion(): BelongsTo
     {
         return $this->belongsTo(EvaluationFormVersion::class);
     }

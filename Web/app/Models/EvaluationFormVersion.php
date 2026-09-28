@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class EvaluationFormVersion extends Model
 {
@@ -18,17 +19,20 @@ class EvaluationFormVersion extends Model
         'locked_at',
     ];
 
-    protected $casts = [
-        'questions' => 'array',
-        'locked_at' => 'datetime',
-    ];
+    protected function casts(): array
+    {
+        return [
+            'questions' => 'array',
+            'locked_at' => 'datetime',
+        ];
+    }
 
-    public function event()
+    public function event(): BelongsTo
     {
         return $this->belongsTo(Event::class);
     }
 
-    public function creator()
+    public function creator(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');
     }

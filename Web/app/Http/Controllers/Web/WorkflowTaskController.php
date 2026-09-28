@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Web;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\DecideWorkflowTaskRequest;
+use App\Http\Requests\ReassignWorkflowTaskRequest;
 use App\Models\ProposalWorkflowTask;
 use App\Models\User;
 use App\Services\ProposalWorkflowTaskService;
@@ -35,14 +36,9 @@ class WorkflowTaskController extends Controller
         ]);
     }
 
-    public function reassign(Request $request, ProposalWorkflowTask $task): RedirectResponse
+    public function reassign(ReassignWorkflowTaskRequest $request, ProposalWorkflowTask $task): RedirectResponse
     {
-        $validated = $request->validate([
-            'new_assignee_id' => ['required', 'uuid', 'exists:users,id'],
-            'reason' => ['required', 'string', 'min:8', 'max:1000'],
-        ], [], [
-            'new_assignee_id' => 'replacement approver',
-        ]);
+        $validated = $request->validated();
 
         $this->tasks->reassign(
             $task,

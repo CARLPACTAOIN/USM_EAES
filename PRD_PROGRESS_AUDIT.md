@@ -1,4 +1,4 @@
-﻿# PRD Progress Audit — USM EAES
+# PRD Progress Audit — USM EAES
 
 **Branch / snapshot:** `main` (local)  
 **PRD source:** `PRD_V1.md` (v2.0 content, filename `PRD_V1.md`)  
@@ -696,6 +696,13 @@
   - Wrapped dispatches in `DB::afterCommit` to guarantee notifications are emitted only after successful database transaction commits and never when transactions roll back.
   - Hardened duplicate suppression and idempotency with key-based deduplication (`hasNotificationKey`) and in-memory dispatched key caching to prevent duplicate notifications during the same logical lifecycle event.
   - Added comprehensive test suite `ProposalWorkflowNotificationTest` (13 passed, 76 assertions) covering all 10 workflow events, URL destinations, tenant isolation, duplicate suppression, and rollback safety.
+- **2026-09-29 (Issue #53 - Resolve documented standards and repository hygiene findings):**
+  - Restored unintentionally deleted agent skill infrastructure from commit `53f7803~1` (`checkyourself` and `deployment-pipeline-design`) and documented the supersession of legacy frontend design skills by `ui-ux-pro-max` and companion skills in `AGENTS.md`.
+  - Added mass-assignment declarations (`$fillable`) to `OrganizationProgram` pivot model and added explicit Eloquent relationship return types (`BelongsTo`, `HasMany`, `HasOne`, `BelongsToMany`) and modernized `casts(): array` declarations across 20 models (`Event`, `EventParticipationScope`, `User`, `Organization`, `ScannerSession`, `EventScannerAssignment`, `PendingStudentLink`, `RawScan`, `EventDay`, `AttendanceRecord`, `EmployeeProfile`, `EmployeeRosterEntry`, `University`, `AdminAssignment`, `AuditLog`, `College`, `Evaluation`, `EvaluationFormVersion`, `EventDaySession`, `OrganizationMembership`).
+  - Extracted duplicated controller-level packet validation and workflow task reassignment validation into dedicated FormRequest objects (`ReassignWorkflowTaskRequest`, `ParticipantPacketRequest`, `SaveParticipantPacketDraftRequest`, `SubmitParticipantPacketRequest`) while preserving exact validation logic and authorization gates.
+  - Extracted 90 lines of inline Blade CSS from `permit-certificate.blade.php` into `public/css/permit-certificate.css` and linked it via standard asset approach.
+  - Added stable `wire:key` attributes to dynamic Livewire loops across 8 components (`event-participant-scopes`, `events-workspace`, `event-attendance-rules`, `notification-center`, `event-scanner-access`, `event-proposal-create`, `venue-availability`, `analytics-overview-filters`).
+  - Formatted modified PHP code with Laravel Pint, verified Vite frontend build (`npm run build`), and passed all 430 backend tests / 2,886 assertions with 0 regressions.
 
 - **2026-09-29 (Issue #50 - Officer transition closure authority cleanup):**
   - Closing an open School Year transition now transactionally locks lifecycle and verified officer state, expires outgoing President/Secretary authority projections, marks outgoing officers as replaced when a verified successor exists or expired when no continuity exists, syncs affected Spatie role projections, and records close reason/timestamp evidence on the lifecycle audit row.

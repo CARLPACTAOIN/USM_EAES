@@ -5,6 +5,8 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class ScannerSession extends Model
 {
@@ -36,40 +38,43 @@ class ScannerSession extends Model
         'last_seen_at',
     ];
 
-    protected $casts = [
-        'issued_at' => 'datetime',
-        'activated_at' => 'datetime',
-        'expires_at' => 'datetime',
-        'revoked_at' => 'datetime',
-        'last_seen_at' => 'datetime',
-    ];
+    protected function casts(): array
+    {
+        return [
+            'issued_at' => 'datetime',
+            'activated_at' => 'datetime',
+            'expires_at' => 'datetime',
+            'revoked_at' => 'datetime',
+            'last_seen_at' => 'datetime',
+        ];
+    }
 
-    public function event()
+    public function event(): BelongsTo
     {
         return $this->belongsTo(Event::class);
     }
 
-    public function assignment()
+    public function assignment(): BelongsTo
     {
         return $this->belongsTo(EventScannerAssignment::class, 'assignment_id');
     }
 
-    public function participationScope()
+    public function participationScope(): BelongsTo
     {
         return $this->belongsTo(EventParticipationScope::class, 'event_participation_scope_id');
     }
 
-    public function scannerUser()
+    public function scannerUser(): BelongsTo
     {
         return $this->belongsTo(User::class, 'scanner_user_id');
     }
 
-    public function issuer()
+    public function issuer(): BelongsTo
     {
         return $this->belongsTo(User::class, 'issued_by');
     }
 
-    public function rawScans()
+    public function rawScans(): HasMany
     {
         return $this->hasMany(RawScan::class);
     }

@@ -120,7 +120,7 @@
                                 @else
                                     <div class="space-y-2">
                                         @foreach($venue['events'] as $event)
-                                            <div class="rounded-md border border-(--color-border) bg-(--color-surface-raised) p-3">
+                                            <div wire:key="venue-event-{{ $event['id'] ?? $loop->index }}" class="rounded-md border border-(--color-border) bg-(--color-surface-raised) p-3">
                                                 <p class="font-medium text-(--color-text-primary)">{{ $event['title'] }}</p>
                                                 <p class="text-xs text-(--color-text-secondary)">
                                                     {{ $event['organization'] ?? 'Organizer unavailable' }}

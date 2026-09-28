@@ -74,7 +74,8 @@
            aria-pressed="{{ $currentStatus === '' ? 'true' : 'false' }}"
            class="btn btn-sm {{ $currentStatus === '' ? 'btn-primary' : 'btn-secondary' }}">All</a>
         @foreach($statusFilters as $status)
-        <a href="{{ route('dashboard.events', $routeParams(['status' => $status])) }}"
+        <a wire:key="status-filter-{{ $status }}"
+           href="{{ route('dashboard.events', $routeParams(['status' => $status])) }}"
            wire:click.prevent="setStatus('{{ $status }}')"
            aria-pressed="{{ $currentStatus === $status ? 'true' : 'false' }}"
            class="btn btn-sm {{ $currentStatus === $status ? 'btn-primary' : 'btn-secondary' }}">
