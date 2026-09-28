@@ -696,3 +696,7 @@
   - Wrapped dispatches in `DB::afterCommit` to guarantee notifications are emitted only after successful database transaction commits and never when transactions roll back.
   - Hardened duplicate suppression and idempotency with key-based deduplication (`hasNotificationKey`) and in-memory dispatched key caching to prevent duplicate notifications during the same logical lifecycle event.
   - Added comprehensive test suite `ProposalWorkflowNotificationTest` (13 passed, 76 assertions) covering all 10 workflow events, URL destinations, tenant isolation, duplicate suppression, and rollback safety.
+
+- **2026-09-29 (Issue #50 - Officer transition closure authority cleanup):**
+  - Closing an open School Year transition now transactionally locks lifecycle and verified officer state, expires outgoing President/Secretary authority projections, marks outgoing officers as replaced when a verified successor exists or expired when no continuity exists, syncs affected Spatie role projections, and records close reason/timestamp evidence on the lifecycle audit row.
+  - Added focused PHPUnit coverage in `tests/Feature/OfficerTransitionClosureTest.php` for replacement, no-continuity expiration, wrong-school-year isolation, and rollback on projection-sync failure.
