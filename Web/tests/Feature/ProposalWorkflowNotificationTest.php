@@ -358,7 +358,11 @@ class ProposalWorkflowNotificationTest extends TestCase
             $task,
             $this->approver1,
             ProposalWorkflowTask::DECISION_REVISION_REQUESTED,
-            'Please update the venue risk assessment section.'
+            'Please update the venue risk assessment section.',
+            [
+                'type' => 'packet_section',
+                'key' => 'venue',
+            ]
         );
 
         $notification = $this->organizer->fresh()->notifications()

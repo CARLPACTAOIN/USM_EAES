@@ -31,6 +31,9 @@ class DecideWorkflowTaskRequest extends FormRequest
         return [
             'decision' => ['required', 'string'],
             'remarks' => ['nullable', 'string', 'max:2000'],
+            'revision_target' => ['nullable', 'string', 'max:150'],
+            'revision_target_type' => ['nullable', 'string', 'in:packet_section,attachment_requirement'],
+            'revision_target_key' => ['nullable', 'string', 'max:100'],
         ];
     }
 }

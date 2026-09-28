@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\AdminAssignment;
 use App\Models\ApprovalTrail;
+use App\Models\CanonicalPpaAttachment;
 use App\Models\CanonicalPpaPacket;
 use App\Models\College;
 use App\Models\Event;
@@ -18,6 +19,7 @@ use App\Models\SchoolYear;
 use App\Models\User;
 use App\Notifications\EventWorkflowNotification;
 use App\Services\AdminAssignmentService;
+use App\Support\ProposalRevisionTargets;
 use Database\Seeders\RolePermissionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Notification;
@@ -118,7 +120,25 @@ class ProposalOrganizerChecklistTest extends TestCase
         $run = $this->workflowRun($event, ProposalWorkflowRun::STATUS_REVISION_REQUESTED);
 
         $this->task($run, 'intake', 'Packet Intake', 1, ProposalWorkflowTask::STATUS_APPROVED);
-        $this->task($run, 'adviser_review', 'Adviser Review', 2, ProposalWorkflowTask::STATUS_REVISION_REQUESTED, 'Clarify the budget source.');
+        $this->task(
+            $run,
+            'adviser_review',
+            'Adviser Review',
+            2,
+            ProposalWorkflowTask::STATUS_REVISION_REQUESTED,
+            'Clarify the budget source.',
+            [
+                'revision' => [
+                    'target' => [
+                        'type' => 'packet_section',
+                        'key' => 'budget',
+                        'label' => 'Budget and funding',
+                        'description' => 'Source of fund, budget cost, and budget breakdown.',
+                        'anchor' => 'packet-section-budget',
+                    ],
+                ],
+            ],
+        );
         $this->task($run, 'chair_review', 'Department Chair Review', 3, ProposalWorkflowTask::STATUS_AVAILABLE);
         $this->task($run, 'security_review', 'Security Clearance', 4, ProposalWorkflowTask::STATUS_IN_PROGRESS);
         $this->task($run, 'osa_approval', 'OSA Approval', 5, ProposalWorkflowTask::STATUS_BLOCKED);
@@ -145,6 +165,8 @@ class ProposalOrganizerChecklistTest extends TestCase
                 'Blocked',
             ])
             ->assertSee('Clarify the budget source.')
+            ->assertSee('Review target: Budget and funding')
+            ->assertSee('#packet-section-budget', false)
             ->assertSee('Edit returned packet')
             ->assertSee('modal=proposal-edit', false)
             ->assertSee('Resubmit proposal');
@@ -157,6 +179,29 @@ class ProposalOrganizerChecklistTest extends TestCase
         $event = $this->eventWithPacket(Event::STATUS_REVISION_REQUESTED);
         $run = $this->workflowRun($event, ProposalWorkflowRun::STATUS_REVISION_REQUESTED);
         $returnedTask = $this->task($run, 'adviser_review', 'Adviser Review', 1, ProposalWorkflowTask::STATUS_REVISION_REQUESTED, 'Correct the participant estimate.');
+        $returnedTask->forceFill([
+            'metadata' => array_replace_recursive($returnedTask->metadata ?? [], [
+                'revision' => [
+                    'target' => [
+                        'type' => 'packet_section',
+                        'key' => 'beneficiaries',
+                        'label' => 'Expected output and beneficiaries',
+                        'description' => 'Expected output, participant groups, and beneficiary details.',
+                        'anchor' => 'packet-section-beneficiaries',
+                    ],
+                ],
+            ]),
+        ])->save();
+        $returnedTask->forceFill([
+            'metadata' => array_replace_recursive($returnedTask->metadata ?? [], [
+                'revision' => [
+                    'target_fingerprint' => app(ProposalRevisionTargets::class)->targetFingerprintForTask(
+                        $returnedTask,
+                        data_get($returnedTask->metadata, 'revision.target')
+                    ),
+                ],
+            ]),
+        ])->save();
 
         $returnedTask->forceFill([
             'decision' => ProposalWorkflowTask::DECISION_REVISION_REQUESTED,
@@ -193,6 +238,7 @@ class ProposalOrganizerChecklistTest extends TestCase
         $this->assertSame(ProposalWorkflowTask::STATUS_AVAILABLE, $returnedTask->fresh()->status);
         $this->assertSame($run->id, $event->fresh()->workflowRun->id);
         $this->assertSame(1, ProposalWorkflowRun::where('event_id', $event->id)->count());
+        $this->assertNotNull(data_get($returnedTask->fresh()->metadata, 'revision.addressed_at'));
 
         Notification::assertSentTo(
             $this->approver,
@@ -208,7 +254,7 @@ class ProposalOrganizerChecklistTest extends TestCase
         $run = $this->workflowRun($event, ProposalWorkflowRun::STATUS_REVISION_REQUESTED);
         $returnedTask = $this->task($run, 'adviser_review', 'Adviser Review', 1, ProposalWorkflowTask::STATUS_REVISION_REQUESTED, 'Update the objectives.');
 
-        $returnedAt = now();
+        $returnedAt = now()->subHour();
         $returnedTask->forceFill([
             'decision' => ProposalWorkflowTask::DECISION_REVISION_REQUESTED,
             'decided_by' => $this->approver->id,
@@ -244,6 +290,72 @@ class ProposalOrganizerChecklistTest extends TestCase
             ])
             ->assertRedirect(route('dashboard.events.checklist', $event))
             ->assertSessionHas('error', 'Edit the returned proposal packet before resubmitting the workflow task.');
+    }
+
+    public function test_attachment_targeted_revision_requires_specific_attachment_update_before_resubmission(): void
+    {
+        $event = $this->eventWithPacket(Event::STATUS_REVISION_REQUESTED);
+        $run = $this->workflowRun($event, ProposalWorkflowRun::STATUS_REVISION_REQUESTED);
+        $returnedAt = now()->subHour();
+        $returnedTask = $this->task(
+            $run,
+            'osa_review',
+            'OSA Review',
+            1,
+            ProposalWorkflowTask::STATUS_REVISION_REQUESTED,
+            'Replace the supporting evidence.',
+            [
+                'revision' => [
+                    'target' => [
+                        'type' => 'attachment_requirement',
+                        'key' => CanonicalPpaAttachment::TYPE_SUPPORTING,
+                        'label' => 'Supporting checklist evidence',
+                        'description' => 'Participant or checklist support document required by the packet.',
+                        'anchor' => 'attachment-requirement-supporting',
+                    ],
+                ],
+            ],
+        );
+
+        $returnedTask->forceFill([
+            'decision' => ProposalWorkflowTask::DECISION_REVISION_REQUESTED,
+            'decided_by' => $this->approver->id,
+            'decided_at' => $returnedAt,
+            'completed_at' => $returnedAt,
+        ])->save();
+
+        $event->canonicalPpaPacket->forceFill(['beneficiaries' => 'Updated packet text without replacing evidence.'])->save();
+
+        $this->actingAs($this->organizer)
+            ->from(route('dashboard.events.checklist', $event))
+            ->post(route('dashboard.events.submit', $event), [
+                'returned_tasks_addressed' => '1',
+            ])
+            ->assertRedirect(route('dashboard.events.checklist', $event))
+            ->assertSessionHas('error', 'Update the targeted revision item (Supporting checklist evidence) before resubmitting.');
+
+        $this->assertSame(Event::STATUS_REVISION_REQUESTED, $event->fresh()->status);
+        $this->assertSame(ProposalWorkflowTask::STATUS_REVISION_REQUESTED, $returnedTask->fresh()->status);
+
+        CanonicalPpaAttachment::factory()
+            ->for($event->canonicalPpaPacket, 'packet')
+            ->create([
+                'attachment_type' => CanonicalPpaAttachment::TYPE_SUPPORTING,
+                'path' => 'canonical-ppa/replaced-supporting.pdf',
+                'original_name' => 'replaced-supporting.pdf',
+                'uploaded_by_user_id' => $this->organizer->id,
+            ]);
+
+        $event->canonicalPpaPacket->forceFill(['expected_output' => 'Updated after replacing evidence.'])->save();
+
+        $this->actingAs($this->organizer)
+            ->post(route('dashboard.events.submit', $event), [
+                'returned_tasks_addressed' => '1',
+            ])
+            ->assertRedirect();
+
+        $this->assertSame(Event::STATUS_SUBMITTED, $event->fresh()->status);
+        $this->assertSame(ProposalWorkflowTask::STATUS_AVAILABLE, $returnedTask->fresh()->status);
     }
 
     private function eventWithPacket(string $status): Event
@@ -316,7 +428,8 @@ class ProposalOrganizerChecklistTest extends TestCase
         string $title,
         int $order,
         string $status,
-        ?string $remarks = null
+        ?string $remarks = null,
+        ?array $metadata = null
     ): ProposalWorkflowTask {
         $step = ProposalProcessStep::create([
             'template_version_id' => $this->version->id,
@@ -333,7 +446,7 @@ class ProposalOrganizerChecklistTest extends TestCase
             ],
         ]);
 
-        return ProposalWorkflowTask::create([
+        $task = ProposalWorkflowTask::create([
             'workflow_run_id' => $run->id,
             'process_step_id' => $step->id,
             'status' => $status,
@@ -347,7 +460,7 @@ class ProposalOrganizerChecklistTest extends TestCase
             'assigned_scope' => 'university',
             'available_at' => in_array($status, [ProposalWorkflowTask::STATUS_AVAILABLE, ProposalWorkflowTask::STATUS_IN_PROGRESS], true) ? now() : null,
             'remarks' => $remarks,
-            'metadata' => [
+            'metadata' => array_replace_recursive([
                 'assignment' => [
                     'role_key' => 'osa',
                     'scope_key' => 'university',
@@ -362,7 +475,16 @@ class ProposalOrganizerChecklistTest extends TestCase
                         'email' => $this->approver->email,
                     ],
                 ],
-            ],
+            ], $metadata ?? []),
         ]);
+
+        $target = data_get($task->metadata, 'revision.target');
+        if (is_array($target)) {
+            $taskMetadata = $task->metadata ?? [];
+            data_set($taskMetadata, 'revision.target_fingerprint', app(ProposalRevisionTargets::class)->targetFingerprintForTask($task, $target));
+            $task->forceFill(['metadata' => $taskMetadata])->save();
+        }
+
+        return $task;
     }
 }

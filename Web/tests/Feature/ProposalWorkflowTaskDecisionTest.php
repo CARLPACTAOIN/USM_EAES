@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\ApprovalTrail;
+use App\Models\CanonicalPpaAttachment;
 use App\Models\College;
 use App\Models\Event;
 use App\Models\Organization;
@@ -164,6 +165,52 @@ class ProposalWorkflowTaskDecisionTest extends TestCase
         $this->assertDatabaseCount('approval_trails', 0);
     }
 
+    public function test_revision_requested_decision_requires_revision_target(): void
+    {
+        $actor = $this->osaUser('osa.target-required');
+        $step = $this->step('osa_review', 'OSA Review', 1);
+        $this->publishVersion();
+        [, $run] = $this->workflowRun($actor);
+        $task = $this->task($run, $step, $actor, ProposalWorkflowTask::STATUS_AVAILABLE);
+
+        $this->actingAs($actor)
+            ->from(route('dashboard.workflow-tasks.show', $task))
+            ->post(route('dashboard.workflow-tasks.decide', $task), [
+                'decision' => ProposalWorkflowTask::DECISION_REVISION_REQUESTED,
+                'remarks' => 'Please correct the target section.',
+            ])
+            ->assertRedirect(route('dashboard.workflow-tasks.show', $task))
+            ->assertSessionHasErrors('revision_target_key');
+
+        $this->assertSame(ProposalWorkflowTask::STATUS_AVAILABLE, $task->fresh()->status);
+        $this->assertDatabaseCount('approval_trails', 0);
+    }
+
+    public function test_revision_requested_decision_stores_target_metadata_in_task_and_approval_trail(): void
+    {
+        $actor = $this->osaUser('osa.target-stored');
+        $step = $this->step('osa_review', 'OSA Review', 1);
+        $this->publishVersion();
+        [, $run] = $this->workflowRun($actor);
+        $task = $this->task($run, $step, $actor, ProposalWorkflowTask::STATUS_AVAILABLE);
+
+        $this->actingAs($actor)
+            ->post(route('dashboard.workflow-tasks.decide', $task), [
+                'decision' => ProposalWorkflowTask::DECISION_REVISION_REQUESTED,
+                'remarks' => 'Attach the corrected venue confirmation evidence.',
+                'revision_target' => 'attachment_requirement:'.CanonicalPpaAttachment::TYPE_VENUE_CONFIRMATION,
+            ])
+            ->assertRedirect(route('dashboard.workflow-tasks.show', $task));
+
+        $task->refresh();
+        $trail = ApprovalTrail::firstOrFail();
+
+        $this->assertSame('Venue confirmation evidence', data_get($task->metadata, 'revision.target.label'));
+        $this->assertSame(CanonicalPpaAttachment::TYPE_VENUE_CONFIRMATION, data_get($task->metadata, 'revision.target.key'));
+        $this->assertSame('Venue confirmation evidence', data_get($trail->metadata, 'revision_target.label'));
+        $this->assertSame($actor->id, data_get($trail->metadata, 'actor.id'));
+    }
+
     public function test_not_required_decision_is_limited_to_optional_steps(): void
     {
         $actor = $this->osaUser('osa.optional');
@@ -236,6 +283,7 @@ class ProposalWorkflowTaskDecisionTest extends TestCase
             ->post(route('dashboard.workflow-tasks.decide', $revisionTask), [
                 'decision' => ProposalWorkflowTask::DECISION_REVISION_REQUESTED,
                 'remarks' => 'Please attach the corrected venue confirmation before approval.',
+                'revision_target' => 'attachment_requirement:'.CanonicalPpaAttachment::TYPE_VENUE_CONFIRMATION,
             ])
             ->assertRedirect(route('dashboard.workflow-tasks.show', $revisionTask));
 

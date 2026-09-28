@@ -1,10 +1,11 @@
 <x-layouts.app :title="'Workflow Task - EAES'">
-    @php($packet = $event->canonicalPpaPacket)
+    @php($packet = $task->workflowRun->participationScope?->canonicalPpaPacket ?? $event->canonicalPpaPacket)
     @php($decisionApproved = \App\Models\ProposalWorkflowTask::DECISION_APPROVED)
     @php($decisionRejected = \App\Models\ProposalWorkflowTask::DECISION_REJECTED)
     @php($decisionRevisionRequested = \App\Models\ProposalWorkflowTask::DECISION_REVISION_REQUESTED)
     @php($decisionNotRequired = \App\Models\ProposalWorkflowTask::DECISION_NOT_REQUIRED)
     @php($statusAvailable = \App\Models\ProposalWorkflowTask::STATUS_AVAILABLE)
+    @php($oldRevisionTarget = old('revision_target') ?: (old('revision_target_type') && old('revision_target_key') ? old('revision_target_type').':'.old('revision_target_key') : ''))
     <div class="space-y-6">
         <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
@@ -85,6 +86,23 @@
                                 <textarea id="remarks" name="remarks" class="form-input @error('remarks') form-input-error @enderror" rows="4" maxlength="2000">{{ old('remarks') }}</textarea>
                                 @error('remarks') <p class="form-error">{{ $message }}</p> @enderror
                             </div>
+                            <div>
+                                <label class="form-label" for="revision-target">Revision target</label>
+                                <select id="revision-target" name="revision_target" class="form-input @error('revision_target_key') form-input-error @enderror @error('revision_target') form-input-error @enderror">
+                                    <option value="">Select target for revision requests</option>
+                                    @foreach($revisionTargetGroups as $groupLabel => $revisionTargets)
+                                        <optgroup label="{{ $groupLabel }}">
+                                            @foreach($revisionTargets as $revisionTarget)
+                                                @php($revisionTargetValue = $revisionTarget['type'].':'.$revisionTarget['key'])
+                                                <option value="{{ $revisionTargetValue }}" @selected($oldRevisionTarget === $revisionTargetValue)>{{ $revisionTarget['label'] }}</option>
+                                            @endforeach
+                                        </optgroup>
+                                    @endforeach
+                                </select>
+                                @error('revision_target_key') <p class="form-error">{{ $message }}</p> @enderror
+                                @error('revision_target') <p class="form-error">{{ $message }}</p> @enderror
+                                <p class="mt-1 text-xs text-(--color-text-tertiary)">Required only when requesting revisions.</p>
+                            </div>
                             <button type="submit" class="btn btn-primary">Record Decision</button>
                         </form>
                     </section>
@@ -134,6 +152,9 @@
                                     <span class="badge {{ in_array($trail->decision, [$decisionApproved, $decisionNotRequired], true) ? 'badge-approved' : 'badge-pending' }}">{{ $trail->reference_id }}</span>
                                 </div>
                                 <p class="text-xs text-(--color-text-tertiary)">By {{ $trail->actor?->name ?? 'System' }} | {{ $trail->decided_at?->format('M d, Y g:i A') }}</p>
+                                @if(data_get($trail->metadata, 'revision_target.label'))
+                                    <p class="mt-2 text-xs font-semibold uppercase text-rose-700">Target: {{ data_get($trail->metadata, 'revision_target.label') }}</p>
+                                @endif
                                 <p class="mt-2 text-(--color-text-secondary)">{{ $trail->remarks ?: 'No remarks provided.' }}</p>
                             </div>
                         @empty

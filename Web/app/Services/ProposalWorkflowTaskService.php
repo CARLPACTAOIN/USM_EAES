@@ -12,6 +12,7 @@ use App\Models\ProposalWorkflowRun;
 use App\Models\ProposalWorkflowTask;
 use App\Models\User;
 use App\Models\WorkflowTaskAssignmentHistory;
+use App\Support\ProposalRevisionTargets;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
@@ -25,6 +26,7 @@ class ProposalWorkflowTaskService
     public function __construct(
         private readonly EventNotificationService $notifications,
         private readonly LegacyProposalCompatibilityProjection $legacyProjection,
+        private readonly ProposalRevisionTargets $revisionTargets,
     ) {}
 
     private const ACTIVE_STATUSES = [
@@ -183,24 +185,40 @@ class ProposalWorkflowTaskService
         });
     }
 
-    public function decide(ProposalWorkflowTask $task, User $actor, string $decision, ?string $remarks = null): ApprovalTrail
+    /**
+     * @param  array{type?: string|null, key?: string|null}|null  $revisionTarget
+     */
+    public function decide(ProposalWorkflowTask $task, User $actor, string $decision, ?string $remarks = null, ?array $revisionTarget = null): ApprovalTrail
     {
         $remarks = filled($remarks) ? trim((string) $remarks) : null;
+        $normalizedRevisionTarget = $this->normalizeRevisionTarget($task, $decision, $revisionTarget);
 
-        $this->validateDecisionInput($task, $actor, $decision, $remarks);
+        $this->validateDecisionInput($task, $actor, $decision, $remarks, $normalizedRevisionTarget);
 
-        $trail = DB::transaction(function () use ($task, $actor, $decision, $remarks): ApprovalTrail {
+        $trail = DB::transaction(function () use ($task, $actor, $decision, $remarks, $revisionTarget): ApprovalTrail {
             $lockedTask = ProposalWorkflowTask::with(['workflowRun.event', 'workflowRun.participationScope', 'processStep'])
                 ->whereKey($task->id)
                 ->lockForUpdate()
                 ->firstOrFail();
+            $normalizedRevisionTarget = $this->normalizeRevisionTarget($lockedTask, $decision, $revisionTarget);
 
-            $this->validateDecisionInput($lockedTask, $actor, $decision, $remarks);
+            $this->validateDecisionInput($lockedTask, $actor, $decision, $remarks, $normalizedRevisionTarget);
 
             $previousStatus = $lockedTask->status;
             $resultingStatus = $this->statusForDecision($decision);
             $decidedAt = now();
             $event = $lockedTask->workflowRun->event;
+            $taskMetadata = $lockedTask->metadata ?? [];
+
+            if ($normalizedRevisionTarget !== null) {
+                data_set($taskMetadata, 'revision.target', $normalizedRevisionTarget);
+                data_set($taskMetadata, 'revision.target_fingerprint', $this->revisionTargets->targetFingerprintForTask($lockedTask, $normalizedRevisionTarget));
+                data_set($taskMetadata, 'revision.requested_by', [
+                    'id' => $actor->id,
+                    'name' => $actor->name,
+                ]);
+                data_set($taskMetadata, 'revision.requested_at', $decidedAt->toIso8601String());
+            }
 
             $lockedTask->update([
                 'status' => $resultingStatus,
@@ -209,6 +227,7 @@ class ProposalWorkflowTaskService
                 'decided_by' => $actor->id,
                 'decided_at' => $decidedAt,
                 'completed_at' => $decidedAt,
+                'metadata' => $taskMetadata,
             ]);
 
             $trail = ApprovalTrail::create([
@@ -234,6 +253,8 @@ class ProposalWorkflowTaskService
                     'event_status_before' => $event->status,
                     'participant_ppa_status_before' => $lockedTask->workflowRun->participationScope?->ppa_status,
                     'workflow_run_status_before' => $lockedTask->workflowRun->status,
+                    'revision_target' => $normalizedRevisionTarget,
+                    'revision_target_fingerprint' => data_get($taskMetadata, 'revision.target_fingerprint'),
                 ],
             ]);
 
@@ -249,6 +270,7 @@ class ProposalWorkflowTaskService
                     'resulting_status' => $resultingStatus,
                     'approval_trail_id' => $trail->id,
                     'reference_id' => $trail->reference_id,
+                    'revision_target' => $normalizedRevisionTarget,
                 ],
             ]);
 
@@ -440,7 +462,10 @@ class ProposalWorkflowTaskService
             : 'Institutional Approver';
     }
 
-    private function validateDecisionInput(ProposalWorkflowTask $task, User $actor, string $decision, ?string $remarks): void
+    /**
+     * @param  array{type: string, key: string, label: string, description: string, anchor: string}|null  $revisionTarget
+     */
+    private function validateDecisionInput(ProposalWorkflowTask $task, User $actor, string $decision, ?string $remarks, ?array $revisionTarget): void
     {
         if (! in_array($decision, self::CANONICAL_DECISIONS, true)) {
             throw ValidationException::withMessages([
@@ -467,6 +492,12 @@ class ProposalWorkflowTaskService
             ]);
         }
 
+        if ($decision === ProposalWorkflowTask::DECISION_REVISION_REQUESTED && $revisionTarget === null) {
+            throw ValidationException::withMessages([
+                'revision_target_key' => 'Select the packet section or attachment requirement that needs revision.',
+            ]);
+        }
+
         if ($decision === ProposalWorkflowTask::DECISION_NOT_REQUIRED && ! $this->taskAllowsNotRequired($task)) {
             throw ValidationException::withMessages([
                 'decision' => 'Only optional workflow steps can be marked not required.',
@@ -490,6 +521,31 @@ class ProposalWorkflowTaskService
             ProposalWorkflowTask::DECISION_REVISION_REQUESTED => ProposalWorkflowTask::STATUS_REVISION_REQUESTED,
             ProposalWorkflowTask::DECISION_NOT_REQUIRED => ProposalWorkflowTask::STATUS_NOT_REQUIRED,
         };
+    }
+
+    /**
+     * @param  array{type?: string|null, key?: string|null}|null  $revisionTarget
+     * @return array{type: string, key: string, label: string, description: string, anchor: string}|null
+     */
+    private function normalizeRevisionTarget(ProposalWorkflowTask $task, string $decision, ?array $revisionTarget): ?array
+    {
+        if ($decision !== ProposalWorkflowTask::DECISION_REVISION_REQUESTED) {
+            return null;
+        }
+
+        $normalized = $this->revisionTargets->normalizeForTask(
+            $task,
+            $revisionTarget['type'] ?? null,
+            $revisionTarget['key'] ?? null
+        );
+
+        if ($normalized === null && (filled($revisionTarget['type'] ?? null) || filled($revisionTarget['key'] ?? null))) {
+            throw ValidationException::withMessages([
+                'revision_target_key' => 'Select a valid packet revision target.',
+            ]);
+        }
+
+        return $normalized;
     }
 
     private function referenceId(ProposalWorkflowTask $task): string

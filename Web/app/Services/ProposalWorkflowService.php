@@ -13,6 +13,7 @@ use App\Models\ProposalTemplateApplicabilityRule;
 use App\Models\ProposalWorkflowRun;
 use App\Models\ProposalWorkflowTask;
 use App\Models\User;
+use App\Support\ProposalRevisionTargets;
 use DomainException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -23,6 +24,7 @@ class ProposalWorkflowService
     public function __construct(
         private readonly ProposalWorkflowAssignmentResolver $assignmentResolver,
         private readonly EventNotificationService $notifications,
+        private readonly ProposalRevisionTargets $revisionTargets,
     ) {}
 
     /**
@@ -140,6 +142,8 @@ class ProposalWorkflowService
             throw new DomainException('Edit the returned proposal packet before resubmitting the workflow task.');
         }
 
+        $this->assertTargetedRevisionItemsAddressed($returnedTasks);
+
         $availableAt = now();
         $run->update([
             'status' => ProposalWorkflowRun::STATUS_IN_PROGRESS,
@@ -158,6 +162,11 @@ class ProposalWorkflowService
 
         $returnedTasks->each(function (ProposalWorkflowTask $task) use ($allTasks, $availableAt, $returnedStepIds): void {
             $canOpen = $this->returnedTaskCanOpen($task, $allTasks, $returnedStepIds);
+            $metadata = $task->metadata ?? [];
+
+            if (data_get($metadata, 'revision.target')) {
+                data_set($metadata, 'revision.addressed_at', $availableAt->toIso8601String());
+            }
 
             $task->update([
                 'status' => $canOpen
@@ -169,6 +178,7 @@ class ProposalWorkflowService
                 'decided_at' => null,
                 'completed_at' => null,
                 'available_at' => $canOpen ? $availableAt : null,
+                'metadata' => $metadata,
             ]);
         });
 
@@ -638,6 +648,42 @@ class ProposalWorkflowService
                     ProposalWorkflowTask::STATUS_NOT_REQUIRED,
                 ], true);
         });
+    }
+
+    /**
+     * @param  Collection<int, ProposalWorkflowTask>  $returnedTasks
+     */
+    private function assertTargetedRevisionItemsAddressed(Collection $returnedTasks): void
+    {
+        foreach ($returnedTasks as $task) {
+            if (! data_get($task->metadata, 'revision.target')) {
+                continue;
+            }
+
+            $returnedAt = $task->decided_at ?? $task->completed_at ?? $task->updated_at;
+            $target = data_get($task->metadata, 'revision.target');
+            $targetType = is_array($target) ? ($target['type'] ?? null) : null;
+            $addressedAt = $this->revisionTargets->targetAddressedAt($task);
+            $previousFingerprint = data_get($task->metadata, 'revision.target_fingerprint');
+            $currentFingerprint = is_array($target)
+                ? $this->revisionTargets->targetFingerprintForTask($task, $target)
+                : null;
+            $sectionChanged = $previousFingerprint !== null
+                && $currentFingerprint !== null
+                && $previousFingerprint !== $currentFingerprint;
+            $attachmentUpdated = $addressedAt !== null && $returnedAt !== null && $addressedAt->greaterThan($returnedAt);
+            $targetAddressed = match ($targetType) {
+                ProposalRevisionTargets::TYPE_PACKET_SECTION => $sectionChanged,
+                ProposalRevisionTargets::TYPE_ATTACHMENT_REQUIREMENT => $attachmentUpdated,
+                default => false,
+            };
+
+            if (! $targetAddressed) {
+                $targetLabel = $this->revisionTargets->labelForMetadata($target) ?: 'targeted packet content';
+
+                throw new DomainException("Update the targeted revision item ({$targetLabel}) before resubmitting.");
+            }
+        }
     }
 
     private function isVenueDependentTask(ProposalWorkflowTask $task): bool

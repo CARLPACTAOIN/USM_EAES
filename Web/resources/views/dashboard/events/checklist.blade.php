@@ -28,6 +28,9 @@
             \App\Models\ProposalWorkflowTask::STATUS_NOT_REQUIRED,
         ];
         $returnedTasks = $tasks->where('status', \App\Models\ProposalWorkflowTask::STATUS_REVISION_REQUESTED)->values();
+        $targetPreviewUrl = function (array $target) use ($event): string {
+            return route('dashboard.events.proposal-preview', $event).'#'.($target['anchor'] ?? 'packet-content');
+        };
         $openGates = $tasks
             ->filter(fn ($task) => ! in_array($task->status, $satisfiedStatuses, true))
             ->values();
@@ -138,6 +141,12 @@
                             <div class="mt-5 rounded-md border border-rose-200 bg-rose-50 p-4">
                                 <p class="text-xs font-semibold uppercase text-rose-700">Approver remarks</p>
                                 <p class="mt-1 text-sm text-rose-900">{{ $currentTask->remarks }}</p>
+                                @if(data_get($currentTask->metadata, 'revision.target.label'))
+                                    @php($target = data_get($currentTask->metadata, 'revision.target'))
+                                    <a class="mt-3 inline-flex text-sm font-semibold text-rose-800 underline decoration-rose-300 underline-offset-2" href="{{ $targetPreviewUrl($target) }}" target="_blank" rel="noopener">
+                                        Review target: {{ $target['label'] }}
+                                    </a>
+                                @endif
                             </div>
                         @elseif($organizerScope?->review_remarks)
                             <div class="mt-5 rounded-md border border-amber-200 bg-amber-50 p-4">
@@ -170,6 +179,22 @@
                             @if($event->status === \App\Models\Event::STATUS_REVISION_REQUESTED && $returnedTasks->isNotEmpty())
                                 <form method="POST" action="{{ route('dashboard.events.submit', $event) }}" class="space-y-3">
                                     @csrf
+                                    @if($returnedTasks->contains(fn ($task) => (bool) data_get($task->metadata, 'revision.target.label')))
+                                        <div class="max-w-xl rounded-md border border-rose-100 bg-rose-50/70 p-3 text-sm text-rose-900">
+                                            <p class="font-semibold">Targeted corrections</p>
+                                            <ul class="mt-2 space-y-1">
+                                                @foreach($returnedTasks as $returnedTask)
+                                                    @if(data_get($returnedTask->metadata, 'revision.target.label'))
+                                                        @php($target = data_get($returnedTask->metadata, 'revision.target'))
+                                                        <li>
+                                                            <a class="font-medium underline decoration-rose-300 underline-offset-2" href="{{ $targetPreviewUrl($target) }}" target="_blank" rel="noopener">{{ $target['label'] }}</a>
+                                                            <span class="text-rose-700">for {{ $returnedTask->title }}</span>
+                                                        </li>
+                                                    @endif
+                                                @endforeach
+                                            </ul>
+                                        </div>
+                                    @endif
                                     <label class="flex max-w-xl items-start gap-2 text-sm text-(--color-text-secondary)">
                                         <input type="checkbox" name="returned_tasks_addressed" value="1" class="mt-1" required>
                                         <span>Returned tasks and packet corrections have been addressed.</span>
@@ -202,6 +227,12 @@
                                     </div>
                                     @if($trail->remarks)
                                         <p class="mt-2 text-sm text-(--color-text-secondary)">{{ $trail->remarks }}</p>
+                                    @endif
+                                    @if(data_get($trail->metadata, 'revision_target.label'))
+                                        @php($target = data_get($trail->metadata, 'revision_target'))
+                                        <a class="mt-2 inline-flex text-xs font-semibold uppercase text-rose-700 underline decoration-rose-300 underline-offset-2" href="{{ $targetPreviewUrl($target) }}" target="_blank" rel="noopener">
+                                            Target: {{ $target['label'] }}
+                                        </a>
                                     @endif
                                 </div>
                             @empty

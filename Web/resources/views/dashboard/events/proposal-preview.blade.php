@@ -9,7 +9,7 @@
     </div>
 
     <div class="grid gap-4">
-        <section class="card p-5">
+        <section id="packet-section-proponent" class="card scroll-mt-24 p-5">
             <h2 class="text-lg font-semibold">A. Basic Information</h2>
             <div class="proposal-detail-grid mt-4">
                 <div class="proposal-detail-item"><span class="proposal-detail-label">Category</span><span class="proposal-detail-value">{{ ucfirst((string) $packet->proposal_category) }}</span></div>
@@ -30,12 +30,12 @@
                 @if($packet->supporting_document_path)
                     <div class="proposal-detail-item"><span class="proposal-detail-label">Supporting evidence</span><span class="proposal-detail-value">{{ $packet->supporting_document_original_name ?: 'Attached evidence' }}</span></div>
                 @endif
-                <div class="proposal-detail-item"><span class="proposal-detail-label">Duration</span><span class="proposal-detail-value">{{ $packet->start_date?->toFormattedDateString() }} - {{ $packet->end_date?->toFormattedDateString() }}</span></div>
-                <div class="proposal-detail-item"><span class="proposal-detail-label">Location</span><span class="proposal-detail-value">{{ ucwords(str_replace('-', ' ', (string) $packet->location_type)) }}: {{ $packet->location_details }}</span></div>
+                <div id="packet-section-schedule" class="proposal-detail-item scroll-mt-24"><span class="proposal-detail-label">Duration</span><span class="proposal-detail-value">{{ $packet->start_date?->toFormattedDateString() }} - {{ $packet->end_date?->toFormattedDateString() }}</span></div>
+                <div id="packet-section-venue" class="proposal-detail-item scroll-mt-24"><span class="proposal-detail-label">Location</span><span class="proposal-detail-value">{{ ucwords(str_replace('-', ' ', (string) $packet->location_type)) }}: {{ $packet->location_details }}</span></div>
             </div>
         </section>
 
-        <section class="card p-5">
+        <section id="packet-section-objectives" class="card scroll-mt-24 p-5">
             <h2 class="text-lg font-semibold">B. Introduction</h2>
             <div class="grid gap-4 mt-4">
                 <div><p class="form-label">Rationale / Significance</p><p>{{ $packet->rationale }}</p></div>
@@ -48,8 +48,8 @@
                         @endforeach
                     </ul>
                 </div>
-                <div><p class="form-label">Methodology / Mechanics and Guidelines</p><p>{{ $packet->methodology }}</p></div>
-                <div>
+                <div id="packet-section-activities" class="scroll-mt-24"><p class="form-label">Methodology / Mechanics and Guidelines</p><p>{{ $packet->methodology }}</p></div>
+                <div class="scroll-mt-24">
                     <p class="form-label">Major Activities / Program of Activities</p>
                     @if(($packet->program_activities ?? []) !== [])
                         <div class="table-responsive mt-2">
@@ -75,12 +75,12 @@
                         </ul>
                     @endif
                 </div>
-                <div><p class="form-label">Expected Output</p><p>{{ $packet->expected_output }}</p></div>
+                <div id="packet-section-beneficiaries" class="scroll-mt-24"><p class="form-label">Expected Output</p><p>{{ $packet->expected_output }}</p></div>
                 <div><p class="form-label">Target Beneficiaries / Participants</p><p>{{ $packet->beneficiaries }}</p></div>
             </div>
         </section>
 
-        <section class="card p-5">
+        <section id="packet-section-budget" class="card scroll-mt-24 p-5">
             <h2 class="text-lg font-semibold">Budget Breakdown</h2>
             <div class="table-responsive mt-4">
                 <table class="data-table">
@@ -97,7 +97,10 @@
             </div>
         </section>
 
-        <section class="card p-5">
+        <section id="packet-attachments" class="card scroll-mt-24 p-5">
+            <span id="attachment-requirement-proposal" class="scroll-mt-24"></span>
+            <span id="attachment-requirement-venue-confirmation" class="scroll-mt-24"></span>
+            <span id="attachment-requirement-supporting" class="scroll-mt-24"></span>
             <h2 class="text-lg font-semibold">Canonical Attachments</h2>
             @if($packet->attachments->isEmpty())
                 <p class="mt-4 text-sm text-slate-600">No packet attachments are currently available.</p>
