@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Web;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\CloseSchoolYearTransitionRequest;
 use App\Http\Requests\OpenSchoolYearTransitionRequest;
 use App\Http\Requests\StoreSchoolYearRequest;
 use App\Models\SchoolYear;
@@ -63,13 +64,11 @@ class SchoolYearController extends Controller
     }
 
     public function closeTransition(
-        Request $request,
+        CloseSchoolYearTransitionRequest $request,
         SchoolYear $schoolYear,
         SchoolYearLifecycleService $service
     ): JsonResponse {
-        $this->authorizeOsa($request);
-
-        $schoolYear = $service->closeTransition($schoolYear, $request->user());
+        $schoolYear = $service->closeTransition($schoolYear, $request->user(), $request->closeReason());
 
         return response()->json([
             'school_year' => $this->serializeSchoolYear($schoolYear),
