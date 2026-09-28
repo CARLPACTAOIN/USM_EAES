@@ -62,6 +62,22 @@
         </section>
 
         <section class="card p-5">
+            <h2 class="text-lg font-semibold">Canonical Attachment Status</h2>
+            @if($packet->attachments->isEmpty())
+                <p class="mt-4 text-sm text-slate-600">No packet attachments are currently available.</p>
+            @else
+                <ul class="mt-4 grid gap-2 text-sm">
+                    @foreach($packet->attachments as $attachment)
+                        <li class="flex items-center justify-between gap-4 rounded border border-slate-200 px-3 py-2">
+                            <span>{{ $attachment->original_name }}</span>
+                            <span class="font-semibold text-emerald-700">Available</span>
+                        </li>
+                    @endforeach
+                </ul>
+            @endif
+        </section>
+
+        <section class="card p-5">
             <h2 class="text-lg font-semibold">Approval / Signatories</h2>
             <div class="proposal-detail-grid mt-4">
                 <div class="proposal-detail-item"><span class="proposal-detail-label">Prepared by</span><span class="proposal-detail-value">{{ $packet->proponent_name }}</span></div>

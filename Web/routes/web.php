@@ -102,6 +102,7 @@ Route::middleware(['auth'])->group(function () {
             Route::post('/events/{event}/participant-scopes/{participationScope}/reject', [DashboardController::class, 'rejectParticipantScope'])->name('dashboard.events.participant-scopes.reject');
             Route::post('/events/{event}/participant-scopes/{participationScope}/acknowledge', [DashboardController::class, 'acknowledgeParticipantScope'])->name('dashboard.events.participant-scopes.acknowledge');
             Route::get('/events/{event}/proposal-document', [DashboardController::class, 'downloadProposal'])->name('dashboard.events.proposal-document');
+            Route::get('/events/{event}/ppa-attachments/{attachment}', [DashboardController::class, 'downloadCanonicalAttachment'])->name('dashboard.events.ppa-attachments');
             Route::get('/events/{event}/venue-evidence', [VenueController::class, 'downloadEvidence'])->name('dashboard.events.venue-evidence');
             Route::get('/events/{event}/permit-certificate', [VenueController::class, 'downloadCurrentPermitCertificate'])->name('dashboard.events.permit-certificate');
             Route::get('/events/{event}/permit-history', [VenueController::class, 'permitHistory'])->name('dashboard.events.permit-history');

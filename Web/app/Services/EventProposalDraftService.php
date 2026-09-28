@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\AuditLog;
+use App\Models\CanonicalPpaAttachment;
 use App\Models\CanonicalPpaPacket;
 use App\Models\Event;
 use App\Models\EventDay;
@@ -60,6 +61,9 @@ class EventProposalDraftService
         $this->validateParentEvent($data['parent_event_id']);
 
         $isHrEvent = $organization->type === 'hr_unit';
+        $confirmationDocument = ! $isHrEvent && $data['location_type'] === 'off-campus'
+            ? $confirmationDocument
+            : null;
         $venueData = $this->venueData($data, $isHrEvent);
         $documentPath = $proposalDocument?->store('proposal-documents');
         $confirmationPath = $confirmationDocument?->store('venue-confirmations');
@@ -94,9 +98,9 @@ class EventProposalDraftService
                     'end_date' => $data['end_date'],
                     'location_type' => $data['location_type'],
                     ...$venueData,
-                    'venue_confirmation_office' => $isHrEvent ? null : ($data['venue_confirmation_office'] ?? null),
-                    'venue_confirmation_date' => $isHrEvent ? null : ($data['venue_confirmation_date'] ?? null),
-                    'venue_confirmation_reference_number' => $isHrEvent ? null : ($data['venue_confirmation_reference_number'] ?? null),
+                    'venue_confirmation_office' => $isHrEvent || $data['location_type'] !== 'off-campus' ? null : ($data['venue_confirmation_office'] ?? null),
+                    'venue_confirmation_date' => $isHrEvent || $data['location_type'] !== 'off-campus' ? null : ($data['venue_confirmation_date'] ?? null),
+                    'venue_confirmation_reference_number' => $isHrEvent || $data['location_type'] !== 'off-campus' ? null : ($data['venue_confirmation_reference_number'] ?? null),
                     'venue_confirmation_document_path' => $isHrEvent ? null : $confirmationPath,
                     'venue_confirmation_document_original_name' => $isHrEvent ? null : $confirmationDocument?->getClientOriginalName(),
                     'target_demographics' => $data['target_demographics'],
@@ -111,7 +115,8 @@ class EventProposalDraftService
                 ]);
 
                 $this->replaceEventDays($event, $this->sessionSchedules->normalizeEventDays($data['event_days']));
-                $this->syncCanonicalPacket($event, $actor, $data);
+                $packet = $this->syncCanonicalPacket($event, $actor, $data);
+                $this->syncCanonicalAttachments($packet, $event, $actor);
 
                 EventEvaluationForm::createForEvent(
                     $event,
@@ -157,11 +162,17 @@ class EventProposalDraftService
         $this->validateParentEvent($data['parent_event_id'], $event->id);
 
         $isHrEvent = $event->organization->type === 'hr_unit';
+        $confirmationDocument = ! $isHrEvent && $data['location_type'] === 'off-campus'
+            ? $confirmationDocument
+            : null;
         $venueData = $this->venueData($data, $isHrEvent);
         $newDocumentPath = $proposalDocument?->store('proposal-documents');
         $newConfirmationPath = $confirmationDocument?->store('venue-confirmations');
         $oldDocumentPath = $event->proposal_document_path;
         $oldConfirmationPath = $event->venue_confirmation_document_path;
+        $finalConfirmationPath = $data['location_type'] === 'off-campus'
+            ? ($newConfirmationPath ?: $oldConfirmationPath)
+            : null;
 
         try {
             $updatedEvent = DB::transaction(function () use ($actor, $confirmationDocument, $data, $event, $isHrEvent, $newConfirmationPath, $newDocumentPath, $oldConfirmationPath, $proposalDocument, $venueData): Event {
@@ -169,10 +180,14 @@ class EventProposalDraftService
                 $documentOriginalName = $proposalDocument
                     ? $proposalDocument->getClientOriginalName()
                     : $event->proposal_document_original_name;
-                $confirmationPath = $newConfirmationPath ?: $event->venue_confirmation_document_path;
+                $confirmationPath = $data['location_type'] === 'off-campus'
+                    ? ($newConfirmationPath ?: $event->venue_confirmation_document_path)
+                    : null;
                 $confirmationOriginalName = $confirmationDocument
                     ? $confirmationDocument->getClientOriginalName()
-                    : $event->venue_confirmation_document_original_name;
+                    : ($data['location_type'] === 'off-campus'
+                        ? $event->venue_confirmation_document_original_name
+                        : null);
 
                 $event->update([
                     'parent_event_id' => $data['parent_event_id'],
@@ -182,9 +197,9 @@ class EventProposalDraftService
                     'end_date' => $data['end_date'],
                     'location_type' => $data['location_type'],
                     ...$venueData,
-                    'venue_confirmation_office' => $isHrEvent ? null : ($data['venue_confirmation_office'] ?? null),
-                    'venue_confirmation_date' => $isHrEvent ? null : ($data['venue_confirmation_date'] ?? null),
-                    'venue_confirmation_reference_number' => $isHrEvent ? null : ($data['venue_confirmation_reference_number'] ?? null),
+                    'venue_confirmation_office' => $isHrEvent || $data['location_type'] !== 'off-campus' ? null : ($data['venue_confirmation_office'] ?? null),
+                    'venue_confirmation_date' => $isHrEvent || $data['location_type'] !== 'off-campus' ? null : ($data['venue_confirmation_date'] ?? null),
+                    'venue_confirmation_reference_number' => $isHrEvent || $data['location_type'] !== 'off-campus' ? null : ($data['venue_confirmation_reference_number'] ?? null),
                     'venue_confirmation_document_path' => $isHrEvent ? null : $confirmationPath,
                     'venue_confirmation_document_original_name' => $isHrEvent ? null : $confirmationOriginalName,
                     'target_demographics' => $data['target_demographics'],
@@ -195,7 +210,8 @@ class EventProposalDraftService
                 ]);
 
                 $this->replaceEventDays($event, $this->sessionSchedules->normalizeEventDays($data['event_days']));
-                $this->syncCanonicalPacket($event, $actor, $data);
+                $packet = $this->syncCanonicalPacket($event, $actor, $data);
+                $this->syncCanonicalAttachments($packet, $event, $actor);
 
                 EventEvaluationForm::createForEvent(
                     $event->fresh(),
@@ -232,7 +248,7 @@ class EventProposalDraftService
             Storage::delete($oldDocumentPath);
         }
 
-        if ($newConfirmationPath && $oldConfirmationPath && $oldConfirmationPath !== $newConfirmationPath && ! $this->isVersionedFile($oldConfirmationPath, 'confirmation_document_path')) {
+        if ($oldConfirmationPath && $oldConfirmationPath !== $finalConfirmationPath && ! $this->isVersionedFile($oldConfirmationPath, 'confirmation_document_path')) {
             Storage::delete($oldConfirmationPath);
         }
 
@@ -392,7 +408,7 @@ class EventProposalDraftService
     /**
      * @param  array<string, mixed>  $data
      */
-    private function syncCanonicalPacket(Event $event, User $actor, array $data): void
+    private function syncCanonicalPacket(Event $event, User $actor, array $data): CanonicalPpaPacket
     {
         $event->loadMissing('organization');
 
@@ -400,7 +416,7 @@ class EventProposalDraftService
         $target = $data['target_demographics'] ?? [];
         $budget = $data['budget_allocations'] ?? [];
 
-        $event->canonicalPpaPacket()->updateOrCreate(
+        return $event->canonicalPpaPacket()->updateOrCreate(
             [
                 'event_id' => $event->id,
                 'event_participation_scope_id' => null,
@@ -440,6 +456,52 @@ class EventProposalDraftService
                 'schedule_summary' => $this->scheduleSummary($data),
                 'venue_summary' => $this->venueSummary($data),
                 'prepared_by_user_id' => $event->proponent_user_id ?: $actor->id,
+            ]
+        );
+    }
+
+    private function syncCanonicalAttachments(CanonicalPpaPacket $packet, Event $event, User $actor): void
+    {
+        $this->syncCanonicalAttachment(
+            packet: $packet,
+            type: CanonicalPpaAttachment::TYPE_PROPOSAL,
+            path: $event->proposal_document_path,
+            originalName: $event->proposal_document_original_name,
+            actor: $actor,
+        );
+
+        $this->syncCanonicalAttachment(
+            packet: $packet,
+            type: CanonicalPpaAttachment::TYPE_VENUE_CONFIRMATION,
+            path: $event->location_type === 'off-campus' ? $event->venue_confirmation_document_path : null,
+            originalName: $event->location_type === 'off-campus' ? $event->venue_confirmation_document_original_name : null,
+            actor: $actor,
+        );
+    }
+
+    private function syncCanonicalAttachment(
+        CanonicalPpaPacket $packet,
+        string $type,
+        ?string $path,
+        ?string $originalName,
+        User $actor,
+    ): void {
+        $query = $packet->attachments()->where('attachment_type', $type);
+
+        if (blank($path)) {
+            $query->delete();
+
+            return;
+        }
+
+        $packet->attachments()->updateOrCreate(
+            ['attachment_type' => $type],
+            [
+                'path' => $path,
+                'original_name' => $originalName ?: basename($path),
+                'mime_type' => Storage::exists($path) ? Storage::mimeType($path) : null,
+                'size_bytes' => Storage::exists($path) ? Storage::size($path) : null,
+                'uploaded_by_user_id' => $actor->id,
             ]
         );
     }

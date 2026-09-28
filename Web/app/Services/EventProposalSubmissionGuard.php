@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\CanonicalPpaAttachment;
 use App\Models\CanonicalPpaPacket;
 use App\Models\Event;
 use App\Models\EventParticipationScope;
@@ -17,7 +18,7 @@ class EventProposalSubmissionGuard
             return [];
         }
 
-        $event->loadMissing(['canonicalPpaPacket', 'venue']);
+        $event->loadMissing(['canonicalPpaPacket.attachments', 'venue']);
 
         $missing = [];
         $packet = $event->canonicalPpaPacket;
@@ -78,7 +79,7 @@ class EventProposalSubmissionGuard
                 $missing[] = 'valid confirmation date';
             }
 
-            if (! $packet->venue_confirmation_document_path || ! Storage::exists($packet->venue_confirmation_document_path)) {
+            if (! $this->hasStoredAttachment($packet, CanonicalPpaAttachment::TYPE_VENUE_CONFIRMATION, $packet->venue_confirmation_document_path)) {
                 $missing[] = 'venue confirmation evidence';
             }
         }
@@ -98,6 +99,7 @@ class EventProposalSubmissionGuard
     /** @return list<string> */
     public function missingParticipantRequirements(CanonicalPpaPacket $packet): array
     {
+        $packet->loadMissing('attachments');
         $missing = [];
 
         if ($packet->activity_role !== CanonicalPpaPacket::ROLE_PARTICIPANT) {
@@ -148,7 +150,7 @@ class EventProposalSubmissionGuard
             $missing[] = 'budget breakdown';
         }
 
-        if (blank($packet->supporting_document_path) || (! app()->runningUnitTests() && ! Storage::exists($packet->supporting_document_path))) {
+        if (! $this->hasStoredAttachment($packet, CanonicalPpaAttachment::TYPE_SUPPORTING, $packet->supporting_document_path, allowMissingStorageInTests: true)) {
             $missing[] = 'supporting checklist evidence';
         }
 
@@ -267,5 +269,26 @@ class EventProposalSubmissionGuard
         }
 
         return false;
+    }
+
+    private function hasStoredAttachment(
+        CanonicalPpaPacket $packet,
+        string $type,
+        ?string $legacyPath,
+        bool $allowMissingStorageInTests = false,
+    ): bool {
+        $attachment = $packet->attachments->firstWhere('attachment_type', $type);
+        if (blank($legacyPath)) {
+            return false;
+        }
+
+        $attachmentPath = $attachment?->getRawOriginal('path');
+        if ($attachmentPath !== null && $attachmentPath !== $legacyPath) {
+            return false;
+        }
+
+        $path = $attachmentPath ?: $legacyPath;
+
+        return filled($path) && (($allowMissingStorageInTests && app()->runningUnitTests()) || Storage::exists($path));
     }
 }

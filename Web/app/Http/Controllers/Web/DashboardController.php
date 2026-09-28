@@ -7,6 +7,7 @@ use App\Http\Requests\SaveParticipantPacketDraftRequest;
 use App\Http\Requests\SubmitParticipantPacketRequest;
 use App\Jobs\ResolveAttendanceJob;
 use App\Models\AuditLog;
+use App\Models\CanonicalPpaAttachment;
 use App\Models\Event;
 use App\Models\EventDay;
 use App\Models\EventParticipationScope;
@@ -39,6 +40,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 use Throwable;
 
 class DashboardController extends Controller
@@ -631,7 +633,7 @@ class DashboardController extends Controller
     public function proposalPreview(Request $request, Event $event): View
     {
         $this->authorizeEventAccess($event, $request->user());
-        $event->loadMissing(['canonicalPpaPacket', 'eventDays.sessions', 'organization', 'venue']);
+        $event->loadMissing(['canonicalPpaPacket.attachments', 'eventDays.sessions', 'organization', 'venue']);
 
         abort_unless($event->canonicalPpaPacket, 404, 'Canonical PPA packet not found.');
 
@@ -644,7 +646,7 @@ class DashboardController extends Controller
     public function permitPreview(Request $request, Event $event): View
     {
         $this->authorizeEventAccess($event, $request->user());
-        $event->loadMissing(['canonicalPpaPacket', 'eventDays.sessions', 'organization', 'venue']);
+        $event->loadMissing(['canonicalPpaPacket.attachments', 'eventDays.sessions', 'organization', 'venue']);
 
         abort_unless($event->canonicalPpaPacket, 404, 'Canonical PPA packet not found.');
 
@@ -891,6 +893,7 @@ class DashboardController extends Controller
         abort_unless($participationScope->event_id === $event->id, 404);
 
         $packet = $this->participantPackets->getOrCreatePacket($participationScope, $user);
+        $packet->loadMissing('attachments');
 
         return view('dashboard.events.proposal-preview', [
             'event' => $event,
@@ -908,8 +911,9 @@ class DashboardController extends Controller
         abort_unless($participationScope->event_id === $event->id, 404);
 
         $packet = $participationScope->canonicalPpaPacket;
-        $path = $packet?->supporting_document_path ?: $participationScope->ppa_softcopy_path;
-        $name = $packet?->supporting_document_original_name ?: ($participationScope->ppa_softcopy_original_name ?: 'participant-evidence.pdf');
+        $attachment = $packet?->attachments()->where('attachment_type', CanonicalPpaAttachment::TYPE_SUPPORTING)->first();
+        $path = $attachment?->getRawOriginal('path') ?: ($packet?->supporting_document_path ?: $participationScope->ppa_softcopy_path);
+        $name = $attachment?->original_name ?: ($packet?->supporting_document_original_name ?: ($participationScope->ppa_softcopy_original_name ?: 'participant-evidence.pdf'));
 
         abort_unless($path && Storage::exists($path), 404, 'Supporting evidence document not found.');
 
@@ -1207,6 +1211,17 @@ class DashboardController extends Controller
             $event->proposal_document_path,
             $event->proposal_document_original_name ?: 'proposal-document'
         );
+    }
+
+    public function downloadCanonicalAttachment(Request $request, Event $event, CanonicalPpaAttachment $attachment): StreamedResponse
+    {
+        $this->authorizeEventAccess($event, $request->user());
+
+        $packet = $attachment->packet;
+        abort_unless($packet && $packet->event_id === $event->id && $packet->event_participation_scope_id === null, 404);
+        abort_unless(Storage::exists($attachment->path), 404, 'PPA attachment not found.');
+
+        return Storage::download($attachment->path, $attachment->original_name);
     }
 
     /**

@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\CanonicalPpaAttachment;
 use App\Models\CanonicalPpaPacket;
 use App\Models\Event;
 use App\Models\EventParticipationScope;
@@ -9,6 +10,7 @@ use App\Models\User;
 use DomainException;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 
 class ParticipantPpaPacketService
 {
@@ -120,6 +122,7 @@ class ParticipantPpaPacketService
         $this->syncParentContext($packet, $event);
 
         $packet->save();
+        $this->syncSupportingAttachment($packet, $actor);
 
         if (in_array($scope->ppa_status, [EventParticipationScope::PPA_DRAFT, EventParticipationScope::PPA_REVISION_REQUESTED], true)) {
             $scopeUpdates = [];
@@ -227,10 +230,32 @@ class ParticipantPpaPacketService
         $packet->venue_confirmation_office = $parentPacket?->venue_confirmation_office ?: $event->venue_confirmation_office;
         $packet->venue_confirmation_date = $parentPacket?->venue_confirmation_date ?: $event->venue_confirmation_date;
         $packet->venue_confirmation_reference_number = $parentPacket?->venue_confirmation_reference_number ?: $event->venue_confirmation_reference_number;
-        $packet->venue_confirmation_document_path = $parentPacket?->venue_confirmation_document_path ?: $event->venue_confirmation_document_path;
-        $packet->venue_confirmation_document_original_name = $parentPacket?->venue_confirmation_document_original_name ?: $event->venue_confirmation_document_original_name;
+        // Venue evidence belongs to the organizer's private packet. Participant packets inherit
+        // the approved venue context without copying the organizer's attachment metadata.
+        $packet->venue_confirmation_document_path = null;
+        $packet->venue_confirmation_document_original_name = null;
         $packet->schedule_summary = $parentPacket?->schedule_summary;
         $packet->venue_summary = $parentPacket?->venue_summary;
+    }
+
+    private function syncSupportingAttachment(CanonicalPpaPacket $packet, User $actor): void
+    {
+        if (blank($packet->supporting_document_path)) {
+            return;
+        }
+
+        $path = $packet->supporting_document_path;
+
+        $packet->attachments()->updateOrCreate(
+            ['attachment_type' => CanonicalPpaAttachment::TYPE_SUPPORTING],
+            [
+                'path' => $path,
+                'original_name' => $packet->supporting_document_original_name ?: basename($path),
+                'mime_type' => Storage::exists($path) ? Storage::mimeType($path) : null,
+                'size_bytes' => Storage::exists($path) ? Storage::size($path) : null,
+                'uploaded_by_user_id' => $actor->id,
+            ]
+        );
     }
 
     /**

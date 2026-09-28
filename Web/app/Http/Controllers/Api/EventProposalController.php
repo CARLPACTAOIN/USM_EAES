@@ -478,7 +478,7 @@ class EventProposalController extends Controller
     /** @return array<string, mixed> */
     private function eventPayload(Event $event): array
     {
-        $event->loadMissing(['canonicalPpaPacket', 'organization', 'eventDays.sessions', 'venue']);
+        $event->loadMissing(['canonicalPpaPacket.attachments', 'organization', 'eventDays.sessions', 'venue']);
         $attributes = $event->toArray();
         unset($attributes['proposal_document_path'], $attributes['venue_confirmation_document_path']);
 

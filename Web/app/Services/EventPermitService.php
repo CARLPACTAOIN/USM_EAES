@@ -105,7 +105,7 @@ class EventPermitService
             if (! in_array($lockedEvent->status, [Event::STATUS_SUBMITTED, Event::STATUS_UNDER_REVIEW], true)) {
                 throw new DomainException('Proposal was already processed by another reviewer.');
             }
-            $lockedEvent->loadMissing(['canonicalPpaPacket', 'organization', 'venue']);
+            $lockedEvent->loadMissing(['canonicalPpaPacket.attachments', 'organization', 'venue']);
             $this->assertDigitalPermitGateSatisfied($lockedEvent);
 
             $approvedAt = now();
@@ -135,7 +135,7 @@ class EventPermitService
                 'approved_by' => $actor->id,
                 'approved_at' => $approvedAt,
                 'verification_reference' => $verificationReference,
-                'canonical_packet_snapshot' => $lockedEvent->canonicalPpaPacket?->toArray(),
+                'canonical_packet_snapshot' => $this->canonicalPacketSnapshot($lockedEvent),
                 'proposal_snapshot' => $this->proposalSnapshot($lockedEvent),
                 'permit_snapshot' => $this->permitSnapshot($lockedEvent, $versionNumber, $actor, $approvedAt, $verificationReference),
                 'evidence_snapshot' => $this->evidenceSnapshot($lockedEvent),
@@ -403,6 +403,9 @@ class EventPermitService
     /** @return array<string, mixed> */
     private function evidenceSnapshot(Event $event): array
     {
+        $packet = $event->canonicalPpaPacket;
+        $packet?->loadMissing('attachments');
+
         return [
             'venue_confirmation_office' => $event->venue_confirmation_office,
             'venue_confirmation_date' => $event->venue_confirmation_date?->toDateString(),
@@ -411,7 +414,32 @@ class EventPermitService
             'venue_confirmation_document_original_name' => $event->venue_confirmation_document_original_name,
             'ppa_document_path' => $event->proposal_document_path,
             'ppa_document_original_name' => $event->proposal_document_original_name,
+            'attachments' => $packet?->attachments->map(fn ($attachment): array => [
+                'attachment_type' => $attachment->attachment_type,
+                'path' => $attachment->getRawOriginal('path'),
+                'original_name' => $attachment->original_name,
+                'mime_type' => $attachment->mime_type,
+                'size_bytes' => $attachment->size_bytes,
+            ])->values()->all() ?? [],
         ];
+    }
+
+    /** @return array<string, mixed>|null */
+    private function canonicalPacketSnapshot(Event $event): ?array
+    {
+        $packet = $event->canonicalPpaPacket;
+
+        if (! $packet) {
+            return null;
+        }
+
+        $packet->makeVisible([
+            'venue_confirmation_document_path',
+            'supporting_document_path',
+        ]);
+        $packet->attachments->each(fn ($attachment) => $attachment->makeVisible('path'));
+
+        return $packet->toArray();
     }
 
     private function createPermitCopyOwners(EventPermitVersion $permitVersion, Event $event, \DateTimeInterface $assignedAt): void

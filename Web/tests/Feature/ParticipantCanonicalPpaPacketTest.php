@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Livewire\Dashboard\EventParticipantScopes;
+use App\Models\CanonicalPpaAttachment;
 use App\Models\CanonicalPpaPacket;
 use App\Models\College;
 use App\Models\Department;
@@ -324,6 +325,11 @@ class ParticipantCanonicalPpaPacketTest extends TestCase
             ->assertSessionHas('success', 'Participant PPA draft saved.');
 
         $this->assertSame(12, $scope->fresh()->canonicalPpaPacket->delegate_count);
+        $this->assertDatabaseHas('canonical_ppa_attachments', [
+            'canonical_ppa_packet_id' => $scope->fresh()->canonicalPpaPacket->id,
+            'attachment_type' => CanonicalPpaAttachment::TYPE_SUPPORTING,
+            'original_name' => 'checklist-evidence.pdf',
+        ]);
 
         // 2. Submit packet
         $this->actingAs($partnerAdmin)
@@ -355,6 +361,32 @@ class ParticipantCanonicalPpaPacketTest extends TestCase
         $this->actingAs($osa)
             ->get(route('dashboard.events.participant-scopes.evidence', [$event->id, $scope->id]))
             ->assertOk();
+    }
+
+    public function test_organizer_packet_attachment_downloads_are_scoped_to_the_event_organization(): void
+    {
+        $h = $this->createHierarchy();
+        $organizerAdmin = $this->createAdmin($h['organizer']);
+        $otherOrg = $this->createOrganization($h['college'], 'Other Attachment Org', 'OAO');
+        $otherAdmin = $this->createAdmin($otherOrg);
+        $event = $this->createEvent($h['organizer'], 'Attachment Privacy Event');
+        $packet = CanonicalPpaPacket::factory()->for($event)->create();
+        Storage::put('canonical-ppa/proposal.pdf', 'private proposal');
+        $attachment = CanonicalPpaAttachment::factory()->for($packet, 'packet')->create([
+            'attachment_type' => CanonicalPpaAttachment::TYPE_PROPOSAL,
+            'path' => 'canonical-ppa/proposal.pdf',
+            'original_name' => 'proposal.pdf',
+        ]);
+
+        $this->actingAs($organizerAdmin)
+            ->get(route('dashboard.events.ppa-attachments', [$event, $attachment]))
+            ->assertOk();
+
+        $this->actingAs($otherAdmin)
+            ->get(route('dashboard.events.ppa-attachments', [$event, $attachment]))
+            ->assertForbidden();
+
+        $this->assertArrayNotHasKey('path', $packet->fresh(['attachments'])->toArray()['attachments'][0] ?? []);
     }
 
     public function test_livewire_component_saves_draft_and_submits_canonical_packet(): void

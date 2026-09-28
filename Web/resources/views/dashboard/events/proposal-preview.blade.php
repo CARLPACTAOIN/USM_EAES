@@ -98,6 +98,39 @@
         </section>
 
         <section class="card p-5">
+            <h2 class="text-lg font-semibold">Canonical Attachments</h2>
+            @if($packet->attachments->isEmpty())
+                <p class="mt-4 text-sm text-slate-600">No packet attachments are currently available.</p>
+            @else
+                <div class="table-responsive mt-4">
+                    <table class="data-table">
+                        <thead><tr><th>Requirement</th><th>File</th><th>Status</th><th></th></tr></thead>
+                        <tbody>
+                            @foreach($packet->attachments as $attachment)
+                                @php
+                                    $attachmentLabel = match ($attachment->attachment_type) {
+                                        \App\Models\CanonicalPpaAttachment::TYPE_PROPOSAL => 'PPA proposal',
+                                        \App\Models\CanonicalPpaAttachment::TYPE_VENUE_CONFIRMATION => 'Venue confirmation',
+                                        default => 'Supporting checklist evidence',
+                                    };
+                                    $downloadUrl = isset($scope) && $attachment->attachment_type === \App\Models\CanonicalPpaAttachment::TYPE_SUPPORTING
+                                        ? route('dashboard.events.participant-scopes.evidence', [$event, $scope])
+                                        : route('dashboard.events.ppa-attachments', [$event, $attachment]);
+                                @endphp
+                                <tr>
+                                    <td>{{ $attachmentLabel }}</td>
+                                    <td>{{ $attachment->original_name }}</td>
+                                    <td>Available</td>
+                                    <td><a class="text-sm font-semibold text-(--color-primary)" href="{{ $downloadUrl }}">Download</a></td>
+                                </tr>
+                            @endforeach
+                        </tbody>
+                    </table>
+                </div>
+            @endif
+        </section>
+
+        <section class="card p-5">
             <h2 class="text-lg font-semibold">Approval / Signatories</h2>
             <div class="proposal-detail-grid mt-4">
                 <div class="proposal-detail-item">
