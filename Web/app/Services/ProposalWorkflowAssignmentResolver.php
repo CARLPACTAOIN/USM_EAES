@@ -4,9 +4,14 @@ namespace App\Services;
 
 use App\Exceptions\WorkflowAssignmentResolutionException;
 use App\Models\AdminAssignment;
+use App\Models\College;
+use App\Models\Department;
 use App\Models\Event;
+use App\Models\EventParticipationScope;
+use App\Models\Organization;
 use App\Models\OrganizationOfficer;
 use App\Models\ProposalProcessStep;
+use App\Models\SchoolYear;
 use App\Models\User;
 
 class ProposalWorkflowAssignmentResolver
@@ -21,8 +26,12 @@ class ProposalWorkflowAssignmentResolver
      *     metadata: array<string, mixed>
      * }
      */
-    public function resolve(Event $event, ProposalProcessStep $step, User $actor): array
-    {
+    public function resolve(
+        Event $event,
+        ProposalProcessStep $step,
+        User $actor,
+        ?EventParticipationScope $subject = null,
+    ): array {
         $event->loadMissing([
             'schoolYear',
             'organization.department.college',
@@ -32,6 +41,12 @@ class ProposalWorkflowAssignmentResolver
             'organizationHead',
             'departmentChairperson',
             'collegeDean',
+        ]);
+        $subject?->loadMissing([
+            'schoolYear',
+            'organization.department.college',
+            'department',
+            'college',
         ]);
 
         $config = $step->condition_config ?? [];
@@ -47,14 +62,14 @@ class ProposalWorkflowAssignmentResolver
                     'assignment' => [
                         'role_key' => null,
                         'scope_key' => $scopeKey,
-                        'scope' => $this->scopeSnapshot($event),
+                        'scope' => $this->scopeSnapshot($event, $subject),
                         'resolved_at' => now()->toIso8601String(),
                     ],
                 ],
             ];
         }
 
-        $resolved = $this->resolveUser($event, $roleKey, $actor);
+        $resolved = $this->resolveUser($event, $roleKey, $actor, $subject);
 
         if (! $resolved['user'] && $step->is_required && ! $this->allowsMissingRequiredAssignee($step, $roleKey, $config)) {
             $roleLabel = $this->roleLabel($roleKey);
@@ -80,7 +95,7 @@ class ProposalWorkflowAssignmentResolver
                     'role_key' => $roleKey,
                     'role_label' => $this->roleLabel($roleKey),
                     'scope_key' => $scopeKey,
-                    'scope' => $this->scopeSnapshot($event),
+                    'scope' => $this->scopeSnapshot($event, $subject),
                     'source' => $resolved['source'],
                     'assigned_user_snapshot' => $user ? [
                         'id' => $user->id,
@@ -110,71 +125,108 @@ class ProposalWorkflowAssignmentResolver
     /**
      * @return array{user: ?User, source: array<string, mixed>}
      */
-    private function resolveUser(Event $event, string $roleKey, User $actor): array
-    {
+    private function resolveUser(
+        Event $event,
+        string $roleKey,
+        User $actor,
+        ?EventParticipationScope $subject,
+    ): array {
+        $organization = $this->subjectOrganization($event, $subject);
+        $schoolYear = $this->subjectSchoolYear($event, $subject);
+
         return match ($roleKey) {
-            'proponent' => $this->fromEventSnapshot(
-                $event->proponent,
-                'event_snapshot',
-                'proponent_user_id',
-            ) ?? $this->fromUser(
-                $this->governance->resolveProponent($event->organization, $event->schoolYear, $actor),
-                'governance_resolver',
-                'proponent',
-            ),
-            'organization_head' => $this->fromEventSnapshot(
-                $event->organizationHead,
-                'event_snapshot',
-                'org_head_user_id',
-            ) ?? $this->fromUser(
-                $this->governance->resolveOrganizationHead($event->organization, $event->schoolYear),
-                'governance_resolver',
-                'organization_head',
-            ),
-            'adviser' => $this->resolveAdviser($event),
-            'dept_chair' => $this->fromEventSnapshot(
-                $event->departmentChairperson,
-                'event_snapshot',
-                'dept_chair_user_id',
-            ) ?? $this->fromUser(
-                $this->governance->resolveDepartmentChairperson($event->organization),
-                'governance_resolver',
-                'dept_chair',
-            ),
-            'college_dean' => $this->fromEventSnapshot(
-                $event->collegeDean,
-                'event_snapshot',
-                'college_dean_user_id',
-            ) ?? $this->fromUser(
-                $this->governance->resolveCollegeDean($event->organization),
-                'governance_resolver',
-                'college_dean',
-            ),
+            'proponent' => $subject
+                ? $this->fromUser(
+                    $this->governance->resolveProponent($organization, $schoolYear, $actor),
+                    'governance_resolver',
+                    'proponent',
+                )
+                : $this->fromEventSnapshot(
+                    $event->proponent,
+                    'event_snapshot',
+                    'proponent_user_id',
+                ) ?? $this->fromUser(
+                    $this->governance->resolveProponent($organization, $schoolYear, $actor),
+                    'governance_resolver',
+                    'proponent',
+                ),
+            'organization_head' => $subject
+                ? $this->fromUser(
+                    $this->governance->resolveOrganizationHead($organization, $schoolYear),
+                    'governance_resolver',
+                    'organization_head',
+                )
+                : $this->fromEventSnapshot(
+                    $event->organizationHead,
+                    'event_snapshot',
+                    'org_head_user_id',
+                ) ?? $this->fromUser(
+                    $this->governance->resolveOrganizationHead($organization, $schoolYear),
+                    'governance_resolver',
+                    'organization_head',
+                ),
+            'adviser' => $this->resolveAdviser($event, $subject),
+            'dept_chair' => $subject
+                ? $this->fromUser(
+                    $this->governance->resolveDepartmentChairperson($organization),
+                    'governance_resolver',
+                    'dept_chair',
+                )
+                : $this->fromEventSnapshot(
+                    $event->departmentChairperson,
+                    'event_snapshot',
+                    'dept_chair_user_id',
+                ) ?? $this->fromUser(
+                    $this->governance->resolveDepartmentChairperson($organization),
+                    'governance_resolver',
+                    'dept_chair',
+                ),
+            'college_dean' => $subject
+                ? $this->fromUser(
+                    $this->governance->resolveCollegeDean($organization),
+                    'governance_resolver',
+                    'college_dean',
+                )
+                : $this->fromEventSnapshot(
+                    $event->collegeDean,
+                    'event_snapshot',
+                    'college_dean_user_id',
+                ) ?? $this->fromUser(
+                    $this->governance->resolveCollegeDean($organization),
+                    'governance_resolver',
+                    'college_dean',
+                ),
             'chief_security' => $this->resolveInstitutionalAssignment(
                 $event,
                 ['Chief Security', 'Office of Security', 'Security Admin'],
                 'chief_security',
+                $subject,
             ) ?? $this->fromUser(User::role('Chief Security')->first(), 'spatie_role', 'Chief Security'),
             'osa' => $this->resolveInstitutionalAssignment(
                 $event,
                 ['Super Admin (OSA)'],
                 'osa',
+                $subject,
             ) ?? $this->fromUser(User::role('Super Admin (OSA)')->first(), 'spatie_role', 'Super Admin (OSA)'),
             'venue_admin' => $this->resolveInstitutionalAssignment(
                 $event,
                 ['Venue Custodian', 'Venue Admin', 'Campus Facilities Office'],
                 'venue_admin',
+                $subject,
             ),
-            default => $this->resolveInstitutionalAssignment($event, [$this->roleLabel($roleKey)], $roleKey),
+            default => $this->resolveInstitutionalAssignment($event, [$this->roleLabel($roleKey)], $roleKey, $subject),
         };
     }
 
     /**
      * @return array{user: ?User, source: array<string, mixed>}
      */
-    private function resolveAdviser(Event $event): array
+    private function resolveAdviser(Event $event, ?EventParticipationScope $subject): array
     {
-        $roster = $this->governance->resolveVerifiedRoster($event->organization, $event->schoolYear);
+        $roster = $this->governance->resolveVerifiedRoster(
+            $this->subjectOrganization($event, $subject),
+            $this->subjectSchoolYear($event, $subject),
+        );
         $officer = $roster?->officers
             ->where('status', OrganizationOfficer::STATUS_ACTIVE)
             ->firstWhere('position_key', OrganizationOfficer::POSITION_ADVISER);
@@ -193,25 +245,32 @@ class ProposalWorkflowAssignmentResolver
      * @param  list<string>  $roleNames
      * @return array{user: ?User, source: array<string, mixed>}|null
      */
-    private function resolveInstitutionalAssignment(Event $event, array $roleNames, string $roleKey): ?array
-    {
+    private function resolveInstitutionalAssignment(
+        Event $event,
+        array $roleNames,
+        string $roleKey,
+        ?EventParticipationScope $subject,
+    ): ?array {
+        $schoolYear = $this->subjectSchoolYear($event, $subject);
+        $department = $this->subjectDepartment($event, $subject);
+        $college = $this->subjectCollege($event, $subject);
+
         $assignment = AdminAssignment::query()
             ->with('user')
             ->currentlyEffective()
             ->whereIn('role_name', $roleNames)
-            ->where(function ($query) use ($event): void {
+            ->where(function ($query) use ($schoolYear): void {
                 $query->whereNull('school_year_id');
 
-                if ($event->school_year_id) {
-                    $query->orWhere('school_year_id', $event->school_year_id);
+                if ($schoolYear?->id) {
+                    $query->orWhere('school_year_id', $schoolYear->id);
                 }
             })
-            ->when($roleKey === 'dept_chair', function ($query) use ($event): void {
-                $departmentId = $event->department_id ?? $event->organization?->department_id;
-                $query->where('department_id', $departmentId);
+            ->when($roleKey === 'dept_chair', function ($query) use ($department): void {
+                $query->where('department_id', $department?->id);
             })
-            ->when($roleKey === 'college_dean', function ($query) use ($event): void {
-                $query->where('college_id', $event->organization?->resolvedCollege()?->id);
+            ->when($roleKey === 'college_dean', function ($query) use ($college): void {
+                $query->where('college_id', $college?->id);
             })
             ->orderByDesc('is_primary_admin')
             ->latest('approved_at')
@@ -263,25 +322,54 @@ class ProposalWorkflowAssignmentResolver
         ];
     }
 
+    private function subjectOrganization(Event $event, ?EventParticipationScope $subject): Organization
+    {
+        return $subject?->organization ?: $event->organization;
+    }
+
+    private function subjectSchoolYear(Event $event, ?EventParticipationScope $subject): ?SchoolYear
+    {
+        return $subject?->schoolYear ?: $event->schoolYear;
+    }
+
+    private function subjectDepartment(Event $event, ?EventParticipationScope $subject): ?Department
+    {
+        return $subject?->department
+            ?: $subject?->organization?->department
+            ?: $event->department
+            ?: $event->organization?->department;
+    }
+
+    private function subjectCollege(Event $event, ?EventParticipationScope $subject): ?College
+    {
+        return $subject?->college
+            ?: $subject?->organization?->resolvedCollege()
+            ?: $event->organization?->resolvedCollege();
+    }
+
     /**
      * @return array<string, mixed>
      */
-    private function scopeSnapshot(Event $event): array
+    private function scopeSnapshot(Event $event, ?EventParticipationScope $subject): array
     {
-        $organization = $event->organization;
-        $college = $organization?->resolvedCollege();
-        $department = $event->department ?? $organization?->department;
+        $organization = $this->subjectOrganization($event, $subject);
+        $schoolYear = $this->subjectSchoolYear($event, $subject);
+        $college = $this->subjectCollege($event, $subject);
+        $department = $this->subjectDepartment($event, $subject);
+        $isParticipant = $subject !== null;
 
         return [
-            'school_year_id' => $event->school_year_id,
-            'school_year_label' => $event->schoolYear?->label ?? data_get($event->governance_snapshots, 'metadata.school_year_label'),
+            'school_year_id' => $schoolYear?->id,
+            'school_year_label' => $schoolYear?->label ?? ($isParticipant ? null : data_get($event->governance_snapshots, 'metadata.school_year_label')),
             'organization_id' => $organization?->id,
-            'organization_name' => $event->organization_name_snapshot ?? $organization?->name,
+            'organization_name' => $isParticipant
+                ? ($subject->participant_name_snapshot ?: $organization?->name)
+                : ($event->organization_name_snapshot ?? $organization?->name),
             'organization_type' => $organization?->type,
             'college_id' => $college?->id,
-            'college_name' => $event->college_name_snapshot ?? $college?->name,
+            'college_name' => $isParticipant ? $college?->name : ($event->college_name_snapshot ?? $college?->name),
             'department_id' => $department?->id,
-            'department_name' => $event->department_name_snapshot ?? $department?->name,
+            'department_name' => $isParticipant ? $department?->name : ($event->department_name_snapshot ?? $department?->name),
             'venue_id' => $event->venue_id,
             'venue_name' => $event->venue?->displayName(),
             'event_domain' => $event->event_domain,

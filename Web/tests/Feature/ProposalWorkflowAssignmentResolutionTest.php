@@ -6,6 +6,7 @@ use App\Models\AdminAssignment;
 use App\Models\College;
 use App\Models\Department;
 use App\Models\Event;
+use App\Models\EventParticipationScope;
 use App\Models\Organization;
 use App\Models\OrganizationOfficer;
 use App\Models\OrganizationOfficerRoster;
@@ -91,6 +92,74 @@ class ProposalWorkflowAssignmentResolutionTest extends TestCase
         $this->assertSame($context['chair']->id, $freshTask->assigned_user_id);
         $this->assertSame('Dr. Chairperson', $freshTask->metadata['assignment']['assigned_user_snapshot']['name']);
         $this->assertSame('Department of Computer Science', $freshTask->metadata['assignment']['scope']['department_name']);
+    }
+
+    public function test_participant_workflow_tasks_resolve_from_participant_governance_context(): void
+    {
+        $organizer = $this->createGovernedOrganization('society', 'Organizer Society', withDepartment: true);
+        $participant = $this->createGovernedOrganization('society', 'Participant Society', withDepartment: true);
+        $participantSchoolYear = SchoolYear::create([
+            'label' => '2027-2028',
+            'starts_on' => '2027-06-01',
+            'ends_on' => '2028-03-31',
+            'status' => SchoolYear::STATUS_DRAFT,
+        ]);
+        $this->createVerifiedRoster($participant, $participantSchoolYear);
+        $this->adminAssignment(
+            $participant['chair'],
+            'Department Chairperson',
+            'Chairperson, Participant Department of Computer Science',
+            college: $participant['college'],
+            department: $participant['department'],
+            schoolYear: $participantSchoolYear,
+        );
+        $this->adminAssignment(
+            $participant['dean'],
+            'College Dean',
+            'Dean, Participant College of Science and Mathematics',
+            college: $participant['college'],
+            schoolYear: $participantSchoolYear,
+        );
+        $this->createTemplateForOrganizationType('society', [
+            ['participant_proponent', 'Participant Proponent', 'proponent', 'organization'],
+            ['participant_head', 'Participant Organization Head', 'organization_head', 'organization'],
+            ['participant_adviser', 'Participant Adviser', 'adviser', 'organization'],
+            ['participant_chair', 'Participant Department Chair', 'dept_chair', 'department'],
+            ['participant_dean', 'Participant College Dean', 'college_dean', 'college'],
+        ], EventParticipationScope::ROLE_PARTICIPANT);
+
+        $event = $this->createEvent($organizer);
+        $scope = EventParticipationScope::create([
+            'event_id' => $event->id,
+            'school_year_id' => $participantSchoolYear->id,
+            'participation_role' => EventParticipationScope::ROLE_PARTICIPANT,
+            'participant_type' => 'society',
+            'organization_id' => $participant['organization']->id,
+            'college_id' => $participant['college']->id,
+            'department_id' => $participant['department']->id,
+            'participant_name_snapshot' => $participant['organization']->name,
+            'ppa_required' => true,
+            'ppa_status' => EventParticipationScope::PPA_SUBMITTED,
+            'status' => EventParticipationScope::STATUS_ACTIVE,
+        ]);
+
+        $run = app(ProposalWorkflowService::class)->bindParticipantSubmission($scope, $participant['secretary']);
+        $tasks = $run->tasks()->get()->keyBy('step_key');
+
+        $this->assertSame($participant['secretary']->id, $tasks['participant_proponent']->assigned_user_id);
+        $this->assertSame($participant['president']->id, $tasks['participant_head']->assigned_user_id);
+        $this->assertSame($participant['adviser']->id, $tasks['participant_adviser']->assigned_user_id);
+        $this->assertSame($participant['chair']->id, $tasks['participant_chair']->assigned_user_id);
+        $this->assertSame($participant['dean']->id, $tasks['participant_dean']->assigned_user_id);
+
+        $participantScope = $tasks['participant_chair']->metadata['assignment']['scope'];
+        $this->assertSame($participant['organization']->id, $participantScope['organization_id']);
+        $this->assertSame($participant['department']->id, $participantScope['department_id']);
+        $this->assertSame($participant['college']->id, $participantScope['college_id']);
+        $this->assertSame($participantSchoolYear->id, $participantScope['school_year_id']);
+        $this->assertNotSame($event->school_year_id, $participantScope['school_year_id']);
+        $this->assertNotSame($organizer['organization']->id, $participantScope['organization_id']);
+        $this->assertNotSame($organizer['department']->id, $participantScope['department_id']);
     }
 
     public function test_lsg_usg_and_non_academic_events_resolve_their_configured_institutional_actors(): void
@@ -289,10 +358,46 @@ class ProposalWorkflowAssignmentResolutionTest extends TestCase
     }
 
     /**
+     * @param  array<string, mixed>  $context
+     */
+    private function createVerifiedRoster(array $context, SchoolYear $schoolYear): OrganizationOfficerRoster
+    {
+        $roster = OrganizationOfficerRoster::create([
+            'organization_id' => $context['organization']->id,
+            'school_year_id' => $schoolYear->id,
+            'status' => OrganizationOfficerRoster::STATUS_VERIFIED,
+            'submitted_by' => $context['president']->id,
+            'submitted_at' => now()->subDays(2),
+            'verified_by' => $context['adviser']->id,
+            'verified_at' => now()->subDay(),
+        ]);
+
+        foreach ([
+            [$context['president'], OrganizationOfficer::POSITION_PRESIDENT, 'President'],
+            [$context['secretary'], OrganizationOfficer::POSITION_SECRETARY, 'Secretary'],
+            [$context['adviser'], OrganizationOfficer::POSITION_ADVISER, 'Faculty Adviser'],
+        ] as [$user, $positionKey, $positionTitle]) {
+            OrganizationOfficer::create([
+                'officer_roster_id' => $roster->id,
+                'user_id' => $user->id,
+                'position_key' => $positionKey,
+                'position_title' => $positionTitle,
+                'status' => OrganizationOfficer::STATUS_ACTIVE,
+                'effective_start' => $schoolYear->starts_on,
+            ]);
+        }
+
+        return $roster;
+    }
+
+    /**
      * @param  list<array{0: string, 1: string, 2: string, 3: string}>  $steps
      */
-    private function createTemplateForOrganizationType(string $organizationType, array $steps): ProposalProcessTemplateVersion
-    {
+    private function createTemplateForOrganizationType(
+        string $organizationType,
+        array $steps,
+        ?string $organizerRole = null,
+    ): ProposalProcessTemplateVersion {
         $template = ProposalProcessTemplate::create([
             'name' => 'Workflow for '.$organizationType.' '.uniqid(),
             'status' => ProposalProcessTemplate::STATUS_ACTIVE,
@@ -324,6 +429,7 @@ class ProposalWorkflowAssignmentResolutionTest extends TestCase
             'template_version_id' => $version->id,
             'priority' => 100,
             'organization_type' => $organizationType,
+            'organizer_role' => $organizerRole,
             'status' => ProposalTemplateApplicabilityRule::STATUS_ACTIVE,
         ]);
 
@@ -381,10 +487,12 @@ class ProposalWorkflowAssignmentResolutionTest extends TestCase
         string $positionTitle,
         ?College $college = null,
         ?Department $department = null,
+        ?SchoolYear $schoolYear = null,
     ): AdminAssignment {
+        $schoolYear ??= $this->schoolYear;
         $isPrimary = ! AdminAssignment::query()
             ->where('role_name', $roleName)
-            ->where('academic_year', $this->schoolYear->label)
+            ->where('academic_year', $schoolYear->label)
             ->where('organization_id', null)
             ->where('college_id', $college?->id)
             ->where('status', AdminAssignment::STATUS_ACTIVE)
@@ -397,8 +505,8 @@ class ProposalWorkflowAssignmentResolutionTest extends TestCase
             'position_title' => $positionTitle,
             'college_id' => $college?->id,
             'department_id' => $department?->id,
-            'school_year_id' => $this->schoolYear->id,
-            'academic_year' => $this->schoolYear->label,
+            'school_year_id' => $schoolYear->id,
+            'academic_year' => $schoolYear->label,
             'term_start' => today()->subMonth()->toDateString(),
             'term_end' => today()->addYear()->toDateString(),
             'status' => AdminAssignment::STATUS_ACTIVE,

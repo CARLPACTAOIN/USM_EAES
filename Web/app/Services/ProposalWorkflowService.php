@@ -567,7 +567,7 @@ class ProposalWorkflowService
                 ? ProposalWorkflowTask::STATUS_BLOCKED
                 : ProposalWorkflowTask::STATUS_AVAILABLE;
 
-            $assignment = $this->assignmentResolver->resolve($event, $step, $actor);
+            $assignment = $this->assignmentResolver->resolve($event, $step, $actor, $scope);
 
             ProposalWorkflowTask::create([
                 'workflow_run_id' => $run->id,

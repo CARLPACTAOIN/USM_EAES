@@ -704,6 +704,10 @@
   - Added stable `wire:key` attributes to dynamic Livewire loops across 8 components (`event-participant-scopes`, `events-workspace`, `event-attendance-rules`, `notification-center`, `event-scanner-access`, `event-proposal-create`, `venue-availability`, `analytics-overview-filters`).
   - Formatted modified PHP code with Laravel Pint, verified Vite frontend build (`npm run build`), and passed all 430 backend tests / 2,886 assertions with 0 regressions.
 
+- **2026-09-29 (Issue #54 - Resolve participant workflows from participant governance):**
+  - Extended workflow assignment resolution to accept the participant participation scope as its proposal subject context, resolving participant proponent, organization head, adviser roster, department chair, college dean, hierarchy snapshots, and School Year from the participating organization while preserving organizer event-snapshot resolution.
+  - Added distinct organizer/participant organization coverage with a participant-specific School Year in `ProposalWorkflowAssignmentResolutionTest` (20 focused workflow tests / 186 assertions passing).
+
 - **2026-09-29 (Issue #50 - Officer transition closure authority cleanup):**
   - Closing an open School Year transition now transactionally locks lifecycle and verified officer state, expires outgoing President/Secretary authority projections, marks outgoing officers as replaced when a verified successor exists or expired when no continuity exists, syncs affected Spatie role projections, and records close reason/timestamp evidence on the lifecycle audit row.
   - Added focused PHPUnit coverage in `tests/Feature/OfficerTransitionClosureTest.php` for replacement, no-continuity expiration, wrong-school-year isolation, and rollback on projection-sync failure.
