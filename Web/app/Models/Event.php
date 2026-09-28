@@ -267,7 +267,8 @@ class Event extends Model
 
     public function workflowRun(): HasOne
     {
-        return $this->hasOne(ProposalWorkflowRun::class);
+        return $this->hasOne(ProposalWorkflowRun::class)
+            ->whereNull('event_participation_scope_id');
     }
 
     public function workflowRuns(): HasMany

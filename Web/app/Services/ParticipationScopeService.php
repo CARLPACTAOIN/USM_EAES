@@ -356,11 +356,11 @@ class ParticipationScopeService
             ];
         }
 
-        if ($scope->ppa_required && $scope->ppa_status !== EventParticipationScope::PPA_APPROVED) {
+        if ($scope->ppa_required && ! in_array($scope->ppa_status, [EventParticipationScope::PPA_APPROVED, EventParticipationScope::PPA_NOT_REQUIRED], true)) {
             return [
                 'status' => 423,
                 'reason' => 'participant_ppa_locked',
-                'message' => 'Scanner access is locked until this participant PPA is approved.',
+                'message' => 'Scanner access is locked until this participant PPA is approved or marked not required.',
             ];
         }
 

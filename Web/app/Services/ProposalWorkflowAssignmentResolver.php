@@ -56,7 +56,7 @@ class ProposalWorkflowAssignmentResolver
 
         $resolved = $this->resolveUser($event, $roleKey, $actor);
 
-        if (! $resolved['user'] && $step->is_required) {
+        if (! $resolved['user'] && $step->is_required && ! $this->allowsMissingRequiredAssignee($step, $roleKey, $config)) {
             $roleLabel = $this->roleLabel($roleKey);
 
             throw new WorkflowAssignmentResolutionException(
@@ -91,6 +91,20 @@ class ProposalWorkflowAssignmentResolver
                 ],
             ],
         ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $config
+     */
+    private function allowsMissingRequiredAssignee(ProposalProcessStep $step, string $roleKey, array $config): bool
+    {
+        if ((bool) data_get($config, 'allow_unassigned_required', false)) {
+            return true;
+        }
+
+        return $roleKey === 'osa'
+            && $step->step_key === 'participant_osa_approval'
+            && ! User::role('Super Admin (OSA)')->exists();
     }
 
     /**

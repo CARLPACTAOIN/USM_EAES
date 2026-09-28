@@ -6,6 +6,7 @@ use App\Models\AdminAssignment;
 use App\Models\ApprovalTrail;
 use App\Models\AuditLog;
 use App\Models\Event;
+use App\Models\EventParticipationScope;
 use App\Models\ProposalProcessStepDependency;
 use App\Models\ProposalWorkflowRun;
 use App\Models\ProposalWorkflowTask;
@@ -177,7 +178,7 @@ class ProposalWorkflowTaskService
         $this->validateDecisionInput($task, $actor, $decision, $remarks);
 
         $trail = DB::transaction(function () use ($task, $actor, $decision, $remarks): ApprovalTrail {
-            $lockedTask = ProposalWorkflowTask::with(['workflowRun.event', 'processStep'])
+            $lockedTask = ProposalWorkflowTask::with(['workflowRun.event', 'workflowRun.participationScope', 'processStep'])
                 ->whereKey($task->id)
                 ->lockForUpdate()
                 ->firstOrFail();
@@ -219,6 +220,7 @@ class ProposalWorkflowTaskService
                     ],
                     'assignment' => data_get($lockedTask->metadata, 'assignment', []),
                     'event_status_before' => $event->status,
+                    'participant_ppa_status_before' => $lockedTask->workflowRun->participationScope?->ppa_status,
                     'workflow_run_status_before' => $lockedTask->workflowRun->status,
                 ],
             ]);
@@ -240,11 +242,11 @@ class ProposalWorkflowTaskService
 
             if (in_array($resultingStatus, self::SATISFIED_PREREQUISITE_STATUSES, true)) {
                 $this->unblockSatisfiedDependents($lockedTask, $decidedAt);
-                $this->markRunApprovedWhenComplete($lockedTask->workflowRun, $decidedAt);
+                $this->markRunApprovedWhenComplete($lockedTask->workflowRun, $decidedAt, $actor);
             } elseif ($resultingStatus === ProposalWorkflowTask::STATUS_REJECTED) {
-                $this->markRunAndProposalRejected($lockedTask->workflowRun, $event, $decidedAt);
+                $this->markRunAndProposalRejected($lockedTask->workflowRun, $event, $decidedAt, $actor, $remarks);
             } elseif ($resultingStatus === ProposalWorkflowTask::STATUS_REVISION_REQUESTED) {
-                $this->markRunAndProposalRevisionRequested($lockedTask->workflowRun, $event);
+                $this->markRunAndProposalRevisionRequested($lockedTask->workflowRun, $event, $actor, $remarks);
             }
 
             return $trail;
@@ -316,6 +318,8 @@ class ProposalWorkflowTaskService
             'workflowRun.event.organization',
             'workflowRun.event.venue',
             'workflowRun.event.permitVersions.approver',
+            'workflowRun.participationScope.canonicalPpaPacket',
+            'workflowRun.participationScope.organization',
         ];
     }
 
@@ -507,7 +511,7 @@ class ProposalWorkflowTaskService
         }
     }
 
-    private function markRunApprovedWhenComplete(ProposalWorkflowRun $run, \DateTimeInterface $completedAt): void
+    private function markRunApprovedWhenComplete(ProposalWorkflowRun $run, \DateTimeInterface $completedAt, User $actor): void
     {
         $hasOpenRequiredTask = ProposalWorkflowTask::query()
             ->where('workflow_run_id', $run->id)
@@ -520,30 +524,82 @@ class ProposalWorkflowTaskService
                 'status' => ProposalWorkflowRun::STATUS_APPROVED,
                 'completed_at' => $completedAt,
             ]);
+
+            $this->markParticipantScopeApproved($run, $completedAt, $actor);
         }
     }
 
-    private function markRunAndProposalRejected(ProposalWorkflowRun $run, Event $event, \DateTimeInterface $completedAt): void
+    private function markRunAndProposalRejected(ProposalWorkflowRun $run, Event $event, \DateTimeInterface $completedAt, User $actor, ?string $remarks): void
     {
         $run->update([
             'status' => ProposalWorkflowRun::STATUS_REJECTED,
             'completed_at' => $completedAt,
         ]);
 
+        if ($scope = $this->participantScopeForRun($run)) {
+            $scope->update([
+                'ppa_status' => EventParticipationScope::PPA_REJECTED,
+                'reviewed_by' => $actor->id,
+                'reviewed_at' => $completedAt,
+                'review_remarks' => $remarks,
+                'approved_at' => null,
+            ]);
+
+            return;
+        }
+
         $event->update([
             'status' => Event::STATUS_REJECTED,
         ]);
     }
 
-    private function markRunAndProposalRevisionRequested(ProposalWorkflowRun $run, Event $event): void
+    private function markRunAndProposalRevisionRequested(ProposalWorkflowRun $run, Event $event, User $actor, ?string $remarks): void
     {
         $run->update([
             'status' => ProposalWorkflowRun::STATUS_REVISION_REQUESTED,
             'completed_at' => null,
         ]);
 
+        if ($scope = $this->participantScopeForRun($run)) {
+            $scope->update([
+                'ppa_status' => EventParticipationScope::PPA_REVISION_REQUESTED,
+                'reviewed_by' => $actor->id,
+                'reviewed_at' => now(),
+                'review_remarks' => $remarks,
+                'approved_at' => null,
+            ]);
+
+            return;
+        }
+
         $event->update([
             'status' => Event::STATUS_REVISION_REQUESTED,
         ]);
+    }
+
+    private function markParticipantScopeApproved(ProposalWorkflowRun $run, \DateTimeInterface $completedAt, User $actor): void
+    {
+        $scope = $this->participantScopeForRun($run);
+
+        if (! $scope) {
+            return;
+        }
+
+        $scope->update([
+            'ppa_status' => EventParticipationScope::PPA_APPROVED,
+            'reviewed_by' => $actor->id,
+            'reviewed_at' => $completedAt,
+            'review_remarks' => null,
+            'approved_at' => $completedAt,
+        ]);
+    }
+
+    private function participantScopeForRun(ProposalWorkflowRun $run): ?EventParticipationScope
+    {
+        if ($run->relationLoaded('participationScope')) {
+            return $run->participationScope;
+        }
+
+        return $run->participationScope()->first();
     }
 }

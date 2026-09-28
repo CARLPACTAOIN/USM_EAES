@@ -7,6 +7,7 @@ use App\Models\Department;
 use App\Models\Event;
 use App\Models\EventParticipationScope;
 use App\Models\Organization;
+use App\Models\ProposalWorkflowRun;
 use App\Models\User;
 use App\Services\AdminScopeService;
 use App\Services\EventNotificationService;
@@ -318,6 +319,12 @@ class EventParticipantScopes extends Component
             return;
         }
 
+        if ($this->workflowReviewLocked($scope)) {
+            $this->errorNotice = 'Participant PPA review must be completed through the assigned workflow task.';
+
+            return;
+        }
+
         $scope->update([
             'ppa_status' => EventParticipationScope::PPA_APPROVED,
             'reviewed_by' => auth()->id(),
@@ -350,6 +357,12 @@ class EventParticipantScopes extends Component
             return;
         }
 
+        if ($this->workflowReviewLocked($scope)) {
+            $this->errorNotice = 'Participant PPA review must be completed through the assigned workflow task.';
+
+            return;
+        }
+
         $scope->update([
             'ppa_status' => EventParticipationScope::PPA_REJECTED,
             'reviewed_by' => auth()->id(),
@@ -377,6 +390,12 @@ class EventParticipantScopes extends Component
 
         if (! in_array($scope->ppa_status, [EventParticipationScope::PPA_SUBMITTED, EventParticipationScope::PPA_UNDER_REVIEW], true)) {
             $this->errorNotice = 'Participant PPA must be submitted or under review before requesting revision.';
+
+            return;
+        }
+
+        if ($this->workflowReviewLocked($scope)) {
+            $this->errorNotice = 'Participant PPA review must be completed through the assigned workflow task.';
 
             return;
         }
@@ -619,6 +638,17 @@ class EventParticipantScopes extends Component
         foreach ($this->visibleScopes($event) as $scope) {
             $this->reviewRemarks[$scope->id] ??= $scope->review_remarks ?: 'Returned by OSA for revision.';
         }
+    }
+
+    private function workflowReviewLocked(EventParticipationScope $scope): bool
+    {
+        $run = $scope->workflowRun()->first();
+
+        return $run !== null
+            && in_array($run->status, [
+                ProposalWorkflowRun::STATUS_IN_PROGRESS,
+                ProposalWorkflowRun::STATUS_REVISION_REQUESTED,
+            ], true);
     }
 
     private function syncPacketForms(Event $event): void

@@ -11,6 +11,7 @@ use App\Models\EventParticipationScope;
 use App\Models\EventScannerAssignment;
 use App\Models\Organization;
 use App\Models\PendingStudentLink;
+use App\Models\ProposalWorkflowRun;
 use App\Models\RawScan;
 use App\Models\ScannerSession;
 use App\Models\User;
@@ -1057,6 +1058,10 @@ class DashboardController extends Controller
             return redirect()->back()->with('error', 'Participant PPA softcopy and hardcopy submission are required before approval.');
         }
 
+        if ($message = $this->participantWorkflowReviewMessage($participationScope)) {
+            return redirect()->back()->with('error', $message);
+        }
+
         $participationScope->update([
             'ppa_status' => EventParticipationScope::PPA_APPROVED,
             'reviewed_by' => $request->user()->id,
@@ -1084,6 +1089,10 @@ class DashboardController extends Controller
             return redirect()->back()->with('error', 'Participant PPA must be submitted or under review before requesting revision.');
         }
 
+        if ($message = $this->participantWorkflowReviewMessage($participationScope)) {
+            return redirect()->back()->with('error', $message);
+        }
+
         $participationScope->update([
             'ppa_status' => EventParticipationScope::PPA_REVISION_REQUESTED,
             'reviewed_by' => $request->user()->id,
@@ -1106,6 +1115,10 @@ class DashboardController extends Controller
 
         if (! in_array($participationScope->ppa_status, [EventParticipationScope::PPA_SUBMITTED, EventParticipationScope::PPA_UNDER_REVIEW], true)) {
             return redirect()->back()->with('error', 'Participant PPA must be submitted or under review before rejection.');
+        }
+
+        if ($message = $this->participantWorkflowReviewMessage($participationScope)) {
+            return redirect()->back()->with('error', $message);
         }
 
         $participationScope->update([
@@ -1713,6 +1726,24 @@ class DashboardController extends Controller
         }
 
         abort(403, 'Access denied. Restricted to the participant scope owner or event organizer.');
+    }
+
+    private function participantWorkflowReviewMessage(EventParticipationScope $participationScope): ?string
+    {
+        $run = $participationScope->workflowRun()->first();
+
+        if (! $run) {
+            return null;
+        }
+
+        if (in_array($run->status, [
+            ProposalWorkflowRun::STATUS_IN_PROGRESS,
+            ProposalWorkflowRun::STATUS_REVISION_REQUESTED,
+        ], true)) {
+            return 'Participant PPA review must be completed through the assigned workflow task.';
+        }
+
+        return null;
     }
 
     private function authorizePendingLinkAccess(PendingStudentLink $pendingLink, User $user): void

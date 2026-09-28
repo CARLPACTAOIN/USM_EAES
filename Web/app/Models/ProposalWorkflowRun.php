@@ -26,6 +26,7 @@ class ProposalWorkflowRun extends Model
 
     protected $fillable = [
         'event_id',
+        'event_participation_scope_id',
         'template_version_id',
         'status',
         'started_by',
@@ -54,6 +55,11 @@ class ProposalWorkflowRun extends Model
     public function event(): BelongsTo
     {
         return $this->belongsTo(Event::class, 'event_id');
+    }
+
+    public function participationScope(): BelongsTo
+    {
+        return $this->belongsTo(EventParticipationScope::class, 'event_participation_scope_id');
     }
 
     public function templateVersion(): BelongsTo

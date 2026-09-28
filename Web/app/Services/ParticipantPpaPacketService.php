@@ -8,12 +8,14 @@ use App\Models\EventParticipationScope;
 use App\Models\User;
 use DomainException;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
 
 class ParticipantPpaPacketService
 {
     public function __construct(
         private readonly EventProposalSubmissionGuard $submissionGuard,
         private readonly EventNotificationService $notifications,
+        private readonly ProposalWorkflowService $workflows,
     ) {}
 
     public function getOrCreatePacket(EventParticipationScope $scope, ?User $actor = null): CanonicalPpaPacket
@@ -153,18 +155,25 @@ class ParticipantPpaPacketService
         // Strictly assert all participant-specific required fields
         $this->submissionGuard->assertParticipantSubmittable($packet);
 
-        // Single-entry participant submission
-        $scope->update([
-            'ppa_status' => EventParticipationScope::PPA_SUBMITTED,
-            'submitted_by' => $actor->id,
-            'submitted_at' => now(),
-            'hardcopy_submitted' => true,
-            'org_head_signed' => true,
-            'adviser_signed' => true,
-            'review_remarks' => null,
-            'ppa_softcopy_path' => $packet->supporting_document_path,
-            'ppa_softcopy_original_name' => $packet->supporting_document_original_name,
-        ]);
+        DB::transaction(function () use ($scope, $actor, $packet): void {
+            // Single-entry participant submission
+            $scope->update([
+                'ppa_status' => EventParticipationScope::PPA_SUBMITTED,
+                'submitted_by' => $actor->id,
+                'submitted_at' => now(),
+                'hardcopy_submitted' => true,
+                'org_head_signed' => true,
+                'adviser_signed' => true,
+                'review_remarks' => null,
+                'ppa_softcopy_path' => $packet->supporting_document_path,
+                'ppa_softcopy_original_name' => $packet->supporting_document_original_name,
+            ]);
+
+            $this->workflows->bindParticipantSubmission(
+                $scope->fresh(['event.organization', 'organization']),
+                $actor
+            );
+        });
 
         $this->notifications->notifyParticipantScopeSubmitted(
             $scope->fresh(['event.organization', 'organization', 'delegatedOrganization'])

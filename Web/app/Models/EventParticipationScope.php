@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class EventParticipationScope extends Model
 {
@@ -163,6 +164,11 @@ class EventParticipationScope extends Model
     public function scannerSessions()
     {
         return $this->hasMany(ScannerSession::class, 'event_participation_scope_id');
+    }
+
+    public function workflowRun(): HasOne
+    {
+        return $this->hasOne(ProposalWorkflowRun::class, 'event_participation_scope_id');
     }
 
     public function rawScans()

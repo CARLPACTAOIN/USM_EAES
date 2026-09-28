@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Exceptions\WorkflowAssignmentResolutionException;
 use App\Models\Event;
+use App\Models\EventParticipationScope;
 use App\Models\ProposalProcessStep;
 use App\Models\ProposalProcessStepDependency;
 use App\Models\ProposalProcessTemplate;
@@ -27,57 +28,61 @@ class ProposalWorkflowService
      */
     public function bindFirstSubmission(Event $event, User $actor): ProposalWorkflowRun
     {
-        $existing = ProposalWorkflowRun::where('event_id', $event->id)->first();
+        $existing = ProposalWorkflowRun::where('event_id', $event->id)
+            ->whereNull('event_participation_scope_id')
+            ->first();
         if ($existing) {
             return $existing;
         }
 
         try {
             return DB::transaction(function () use ($event, $actor): ProposalWorkflowRun {
-                $existing = ProposalWorkflowRun::where('event_id', $event->id)->lockForUpdate()->first();
+                $existing = ProposalWorkflowRun::where('event_id', $event->id)
+                    ->whereNull('event_participation_scope_id')
+                    ->lockForUpdate()
+                    ->first();
                 if ($existing) {
                     return $existing;
                 }
 
                 $templateVersion = $this->resolveApplicableTemplateVersion($event);
-                $steps = $templateVersion->steps()->with('dependencies')->orderBy('display_order')->get();
 
-                $run = ProposalWorkflowRun::create([
-                    'event_id' => $event->id,
-                    'template_version_id' => $templateVersion->id,
-                    'status' => ProposalWorkflowRun::STATUS_IN_PROGRESS,
-                    'started_by' => $actor->id,
-                    'started_at' => now(),
-                    'submitted_at' => now(),
-                ]);
+                return $this->createRunFromTemplate($event, $actor, $templateVersion);
+            });
+        } catch (WorkflowAssignmentResolutionException $exception) {
+            $this->alertOsaAboutAssignmentFailure($event, $exception);
 
-                foreach ($steps as $step) {
-                    $hasPrerequisites = $step->dependencies->isNotEmpty();
+            throw $exception;
+        }
+    }
 
-                    $status = $hasPrerequisites
-                        ? ProposalWorkflowTask::STATUS_BLOCKED
-                        : ProposalWorkflowTask::STATUS_AVAILABLE;
+    /**
+     * Bind a participant scope packet to an immutable published participant template workflow run.
+     * Idempotent: returns existing run if the scope is already bound.
+     */
+    public function bindParticipantSubmission(EventParticipationScope $scope, User $actor): ProposalWorkflowRun
+    {
+        $scope->loadMissing(['event.organization', 'organization']);
 
-                    $assignment = $this->assignmentResolver->resolve($event, $step, $actor);
+        $existing = ProposalWorkflowRun::where('event_participation_scope_id', $scope->id)->first();
+        if ($existing) {
+            return $existing;
+        }
 
-                    ProposalWorkflowTask::create([
-                        'workflow_run_id' => $run->id,
-                        'process_step_id' => $step->id,
-                        'status' => $status,
-                        'display_order' => $step->display_order,
-                        'step_key' => $step->step_key,
-                        'step_type' => $step->step_type,
-                        'title' => $step->title,
-                        'description' => $step->description,
-                        'assigned_user_id' => $assignment['assigned_user_id'],
-                        'assigned_role' => $assignment['assigned_role'],
-                        'assigned_scope' => $assignment['assigned_scope'],
-                        'available_at' => $hasPrerequisites ? null : now(),
-                        'metadata' => $assignment['metadata'],
-                    ]);
+        $event = $scope->event;
+
+        try {
+            return DB::transaction(function () use ($scope, $event, $actor): ProposalWorkflowRun {
+                $existing = ProposalWorkflowRun::where('event_participation_scope_id', $scope->id)
+                    ->lockForUpdate()
+                    ->first();
+                if ($existing) {
+                    return $existing;
                 }
 
-                return $run->fresh(['tasks']);
+                $templateVersion = $this->resolveApplicableParticipantTemplateVersion($scope);
+
+                return $this->createRunFromTemplate($event, $actor, $templateVersion, $scope);
             });
         } catch (WorkflowAssignmentResolutionException $exception) {
             $this->alertOsaAboutAssignmentFailure($event, $exception);
@@ -93,6 +98,7 @@ class ProposalWorkflowService
     {
         $run = ProposalWorkflowRun::query()
             ->where('event_id', $event->id)
+            ->whereNull('event_participation_scope_id')
             ->lockForUpdate()
             ->first();
 
@@ -157,7 +163,23 @@ class ProposalWorkflowService
      */
     public function resolveApplicableTemplateVersion(Event $event): ProposalProcessTemplateVersion
     {
+        return $this->resolveApplicableTemplateVersionFor($event);
+    }
+
+    public function resolveApplicableParticipantTemplateVersion(EventParticipationScope $scope): ProposalProcessTemplateVersion
+    {
+        $scope->loadMissing(['event.organization', 'organization']);
+
+        return $this->resolveApplicableTemplateVersionFor($scope->event, $scope);
+    }
+
+    /**
+     * Resolve the highest priority applicable published template version for an event or participant scope.
+     */
+    private function resolveApplicableTemplateVersionFor(Event $event, ?EventParticipationScope $scope = null): ProposalProcessTemplateVersion
+    {
         $event->loadMissing(['organization']);
+        $scope?->loadMissing(['organization']);
 
         $now = now();
         $rules = ProposalTemplateApplicabilityRule::query()
@@ -177,17 +199,25 @@ class ProposalWorkflowService
             ->orderByDesc('priority')
             ->get();
 
+        $targetRole = $scope ? EventParticipationScope::ROLE_PARTICIPANT : EventParticipationScope::ROLE_ORGANIZER;
+        $subjectOrganization = $scope?->organization ?: $event->organization;
+        $subjectCollegeId = $scope?->college_id ?: $subjectOrganization?->college_id;
+        $subjectOrgType = $subjectOrganization?->type ?? $subjectOrganization?->organization_type;
+
         foreach ($rules as $rule) {
             if ($rule->is_default) {
                 continue;
             }
 
-            if ($rule->college_id !== null && $rule->college_id !== $event->organization?->college_id) {
+            if (! $this->ruleMatchesOrganizerRole($rule, $targetRole)) {
                 continue;
             }
 
-            $orgType = $event->organization?->type ?? $event->organization?->organization_type;
-            if ($rule->organization_type !== null && $rule->organization_type !== $orgType) {
+            if ($rule->college_id !== null && $rule->college_id !== $subjectCollegeId) {
+                continue;
+            }
+
+            if ($rule->organization_type !== null && $rule->organization_type !== $subjectOrgType) {
                 continue;
             }
 
@@ -206,12 +236,16 @@ class ProposalWorkflowService
             return $rule->templateVersion;
         }
 
-        $defaultRule = $rules->firstWhere('is_default', true);
+        $defaultRule = $rules
+            ->filter(fn (ProposalTemplateApplicabilityRule $rule): bool => $this->ruleMatchesOrganizerRole($rule, $targetRole, allowImplicitOrganizerDefault: true))
+            ->firstWhere('is_default', true);
         if ($defaultRule) {
             return $defaultRule->templateVersion;
         }
 
-        return $this->ensureDefaultPublishedTemplate();
+        return $scope
+            ? $this->ensureDefaultPublishedParticipantTemplate()
+            : $this->ensureDefaultPublishedTemplate();
     }
 
     /**
@@ -347,6 +381,136 @@ class ProposalWorkflowService
 
             return $version->fresh(['steps.dependencies']);
         });
+    }
+
+    public function ensureDefaultPublishedParticipantTemplate(): ProposalProcessTemplateVersion
+    {
+        return DB::transaction(function (): ProposalProcessTemplateVersion {
+            $template = ProposalProcessTemplate::firstOrCreate(
+                ['name' => 'Standard Participant PPA Workflow'],
+                [
+                    'description' => 'Canonical approval workflow for participant PPA packets under a parent event permit.',
+                    'status' => ProposalProcessTemplate::STATUS_ACTIVE,
+                ]
+            );
+
+            $publishedVersion = $template->publishedVersion;
+            if ($publishedVersion) {
+                return $publishedVersion;
+            }
+
+            $version = ProposalProcessTemplateVersion::create([
+                'template_id' => $template->id,
+                'version_number' => 1,
+                'status' => ProposalProcessTemplateVersion::STATUS_DRAFT,
+                'summary' => 'Initial participant PPA approval workflow template version.',
+            ]);
+
+            ProposalProcessStep::create([
+                'template_version_id' => $version->id,
+                'step_key' => 'participant_osa_approval',
+                'title' => 'Participant OSA Approval',
+                'description' => 'Final participant PPA review by the Office of Student Affairs.',
+                'step_type' => ProposalProcessStep::TYPE_APPROVAL,
+                'phase' => 'participant_ppa',
+                'display_order' => 1,
+                'is_required' => true,
+                'is_gate' => true,
+                'condition_config' => [
+                    'assigned_role' => 'osa',
+                    'assigned_scope' => 'university',
+                    'allow_unassigned_required' => true,
+                ],
+            ]);
+
+            ProposalTemplateApplicabilityRule::create([
+                'template_version_id' => $version->id,
+                'priority' => 0,
+                'organizer_role' => EventParticipationScope::ROLE_PARTICIPANT,
+                'is_default' => true,
+                'status' => ProposalTemplateApplicabilityRule::STATUS_ACTIVE,
+            ]);
+
+            $version->update([
+                'status' => ProposalProcessTemplateVersion::STATUS_PUBLISHED,
+                'published_at' => now(),
+            ]);
+
+            return $version->fresh(['steps.dependencies']);
+        });
+    }
+
+    private function createRunFromTemplate(
+        Event $event,
+        User $actor,
+        ProposalProcessTemplateVersion $templateVersion,
+        ?EventParticipationScope $scope = null,
+    ): ProposalWorkflowRun {
+        $steps = $templateVersion->steps()->with('dependencies')->orderBy('display_order')->get();
+        $submittedAt = now();
+
+        $run = ProposalWorkflowRun::create([
+            'event_id' => $event->id,
+            'event_participation_scope_id' => $scope?->id,
+            'template_version_id' => $templateVersion->id,
+            'status' => ProposalWorkflowRun::STATUS_IN_PROGRESS,
+            'started_by' => $actor->id,
+            'started_at' => $submittedAt,
+            'submitted_at' => $submittedAt,
+            'metadata' => [
+                'proposal_subject' => $scope ? EventParticipationScope::ROLE_PARTICIPANT : EventParticipationScope::ROLE_ORGANIZER,
+                'event_participation_scope_id' => $scope?->id,
+            ],
+        ]);
+
+        foreach ($steps as $step) {
+            $hasPrerequisites = $step->dependencies->isNotEmpty();
+
+            $status = $hasPrerequisites
+                ? ProposalWorkflowTask::STATUS_BLOCKED
+                : ProposalWorkflowTask::STATUS_AVAILABLE;
+
+            $assignment = $this->assignmentResolver->resolve($event, $step, $actor);
+
+            ProposalWorkflowTask::create([
+                'workflow_run_id' => $run->id,
+                'process_step_id' => $step->id,
+                'status' => $status,
+                'display_order' => $step->display_order,
+                'step_key' => $step->step_key,
+                'step_type' => $step->step_type,
+                'title' => $step->title,
+                'description' => $step->description,
+                'assigned_user_id' => $assignment['assigned_user_id'],
+                'assigned_role' => $assignment['assigned_role'],
+                'assigned_scope' => $assignment['assigned_scope'],
+                'available_at' => $hasPrerequisites ? null : $submittedAt,
+                'metadata' => $assignment['metadata'] + [
+                    'proposal_subject' => $scope ? EventParticipationScope::ROLE_PARTICIPANT : EventParticipationScope::ROLE_ORGANIZER,
+                    'event_participation_scope_id' => $scope?->id,
+                ],
+            ]);
+        }
+
+        return $run->fresh(['tasks']);
+    }
+
+    private function ruleMatchesOrganizerRole(
+        ProposalTemplateApplicabilityRule $rule,
+        string $targetRole,
+        bool $allowImplicitOrganizerDefault = false,
+    ): bool {
+        if ($targetRole === EventParticipationScope::ROLE_PARTICIPANT) {
+            return $rule->organizer_role === EventParticipationScope::ROLE_PARTICIPANT;
+        }
+
+        if ($rule->organizer_role === EventParticipationScope::ROLE_PARTICIPANT) {
+            return false;
+        }
+
+        return $rule->organizer_role === null
+            || $rule->organizer_role === EventParticipationScope::ROLE_ORGANIZER
+            || $allowImplicitOrganizerDefault;
     }
 
     private function alertOsaAboutAssignmentFailure(Event $event, WorkflowAssignmentResolutionException $exception): void
