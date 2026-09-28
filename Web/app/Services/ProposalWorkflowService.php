@@ -17,6 +17,7 @@ use App\Notifications\EventWorkflowNotification;
 use DomainException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
 class ProposalWorkflowService
 {
@@ -144,14 +145,108 @@ class ProposalWorkflowService
             'completed_at' => null,
         ]);
 
-        $returnedTasks->each(function (ProposalWorkflowTask $task) use ($availableAt): void {
+        $allTasks = ProposalWorkflowTask::query()
+            ->with('processStep.dependencies')
+            ->where('workflow_run_id', $run->id)
+            ->lockForUpdate()
+            ->get()
+            ->keyBy('process_step_id');
+
+        $returnedStepIds = $returnedTasks->pluck('process_step_id')->values();
+
+        $returnedTasks->each(function (ProposalWorkflowTask $task) use ($allTasks, $availableAt, $returnedStepIds): void {
+            $canOpen = $this->returnedTaskCanOpen($task, $allTasks, $returnedStepIds);
+
             $task->update([
-                'status' => ProposalWorkflowTask::STATUS_AVAILABLE,
+                'status' => $canOpen
+                    ? ProposalWorkflowTask::STATUS_AVAILABLE
+                    : ProposalWorkflowTask::STATUS_BLOCKED,
                 'decision' => null,
+                'remarks' => null,
                 'decided_by' => null,
                 'decided_at' => null,
                 'completed_at' => null,
-                'available_at' => $availableAt,
+                'available_at' => $canOpen ? $availableAt : null,
+            ]);
+        });
+
+        return $returnedTasks->map->fresh(['assignedUser', 'workflowRun.event.organization']);
+    }
+
+    /**
+     * Return venue-dependent workflow tasks to the organizer during a venue amendment.
+     *
+     * Prior Approval Trails are intentionally preserved. The live task rows are reopened on the
+     * same Workflow Run after the organizer submits replacement venue evidence.
+     *
+     * @return Collection<int, ProposalWorkflowTask>
+     */
+    public function returnVenueDependentTasksForAmendment(Event $event, User $actor, string $reason): Collection
+    {
+        $run = ProposalWorkflowRun::query()
+            ->where('event_id', $event->id)
+            ->whereNull('event_participation_scope_id')
+            ->lockForUpdate()
+            ->first();
+
+        if (! $run) {
+            return collect();
+        }
+
+        $tasks = ProposalWorkflowTask::query()
+            ->with('processStep')
+            ->where('workflow_run_id', $run->id)
+            ->lockForUpdate()
+            ->orderBy('display_order')
+            ->get();
+
+        $returnedAt = now();
+        $returnedTasks = $tasks->filter(fn (ProposalWorkflowTask $task): bool => $this->isVenueDependentTask($task));
+
+        if ($returnedTasks->isEmpty()) {
+            return collect();
+        }
+
+        $runMetadata = $run->metadata ?? [];
+        data_set($runMetadata, 'venue_amendment', [
+            'reason' => trim($reason),
+            'returned_by' => [
+                'id' => $actor->id,
+                'name' => $actor->name,
+            ],
+            'returned_at' => $returnedAt->toIso8601String(),
+            'permit_version' => $event->permit_version,
+        ]);
+
+        $run->update([
+            'status' => ProposalWorkflowRun::STATUS_REVISION_REQUESTED,
+            'completed_at' => null,
+            'metadata' => $runMetadata,
+        ]);
+
+        $returnedTasks->each(function (ProposalWorkflowTask $task) use ($actor, $event, $reason, $returnedAt): void {
+            $metadata = $task->metadata ?? [];
+            data_set($metadata, 'venue_amendment_return', [
+                'reason' => trim($reason),
+                'returned_by' => [
+                    'id' => $actor->id,
+                    'name' => $actor->name,
+                ],
+                'returned_at' => $returnedAt->toIso8601String(),
+                'permit_version' => $event->permit_version,
+                'previous_status' => $task->status,
+                'previous_decision' => $task->decision,
+            ]);
+
+            $task->update([
+                'status' => ProposalWorkflowTask::STATUS_REVISION_REQUESTED,
+                'decision' => null,
+                'remarks' => 'Venue amendment: '.trim($reason),
+                'decided_by' => null,
+                'decided_at' => $returnedAt,
+                'completed_at' => $returnedAt,
+                'available_at' => null,
+                'metadata' => $metadata,
             ]);
         });
 
@@ -511,6 +606,42 @@ class ProposalWorkflowService
         return $rule->organizer_role === null
             || $rule->organizer_role === EventParticipationScope::ROLE_ORGANIZER
             || $allowImplicitOrganizerDefault;
+    }
+
+    /**
+     * @param  Collection<string, ProposalWorkflowTask>  $allTasksByStep
+     * @param  Collection<int, string>  $returnedStepIds
+     */
+    private function returnedTaskCanOpen(ProposalWorkflowTask $task, Collection $allTasksByStep, Collection $returnedStepIds): bool
+    {
+        $task->loadMissing('processStep.dependencies');
+
+        return $task->processStep->dependencies->every(function (ProposalProcessStepDependency $dependency) use ($allTasksByStep, $returnedStepIds): bool {
+            if ($returnedStepIds->contains($dependency->prerequisite_step_id)) {
+                return false;
+            }
+
+            $prerequisiteTask = $allTasksByStep->get($dependency->prerequisite_step_id);
+
+            return $prerequisiteTask !== null
+                && in_array($prerequisiteTask->status, [
+                    ProposalWorkflowTask::STATUS_APPROVED,
+                    ProposalWorkflowTask::STATUS_NOT_REQUIRED,
+                ], true);
+        });
+    }
+
+    private function isVenueDependentTask(ProposalWorkflowTask $task): bool
+    {
+        $task->loadMissing('processStep');
+
+        $role = (string) $task->assigned_role;
+        $stepKey = Str::lower((string) $task->step_key);
+        $phase = Str::lower((string) $task->processStep?->phase);
+
+        return in_array($role, ['venue_admin', 'chief_security', 'osa'], true)
+            || Str::contains($stepKey, ['venue', 'security', 'permit'])
+            || in_array($phase, ['venue', 'venue_use', 'permit', 'clearance'], true);
     }
 
     private function alertOsaAboutAssignmentFailure(Event $event, WorkflowAssignmentResolutionException $exception): void

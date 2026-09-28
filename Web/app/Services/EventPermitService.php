@@ -230,6 +230,8 @@ class EventPermitService
             $event->scannerSessions()->where('status', ScannerSession::STATUS_ACTIVE)->get()
                 ->each(fn (ScannerSession $session) => $this->scannerSessions->revoke($session, $actor, 'Venue amendment started; approved permit superseded.'));
 
+            $returnedTasks = $this->proposalWorkflows->returnVenueDependentTasksForAmendment($event, $actor, $reason);
+
             $event->update([
                 'status' => Event::STATUS_REVISION_REQUESTED,
                 'pending_venue_amendment_reason' => trim($reason),
@@ -250,7 +252,10 @@ class EventPermitService
                 'review_remarks' => 'Venue amendment: '.trim($reason),
             ]);
             $this->audit($event, $actor, 'permit-version-superseded', ['permit_version' => $event->permit_version]);
-            $this->audit($event, $actor, 'venue-amendment-initiated', ['reason' => trim($reason)]);
+            $this->audit($event, $actor, 'venue-amendment-initiated', [
+                'reason' => trim($reason),
+                'returned_workflow_task_ids' => $returnedTasks->pluck('id')->values()->all(),
+            ]);
             $this->notifications->notifyPermitWorkflow($event, 'venue-amendment-initiated');
 
             return $event->fresh();

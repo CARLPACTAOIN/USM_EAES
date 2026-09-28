@@ -10,9 +10,11 @@ use App\Models\College;
 use App\Models\Department;
 use App\Models\Event;
 use App\Models\EventDay;
+use App\Models\EventScannerAssignment;
 use App\Models\Organization;
 use App\Models\OrganizationOfficer;
 use App\Models\OrganizationOfficerRoster;
+use App\Models\ProposalWorkflowRun;
 use App\Models\ProposalWorkflowTask;
 use App\Models\ScannerSession;
 use App\Models\SchoolYear;
@@ -22,6 +24,8 @@ use App\Models\Venue;
 use App\Services\AdminAssignmentService;
 use App\Services\EventPermitService;
 use App\Services\EventProposalDraftService;
+use App\Services\ParticipationScopeService;
+use App\Services\ProposalWorkflowTaskService;
 use App\Support\EvaluationQuestions;
 use App\Support\EventEvaluationForm;
 use Database\Seeders\RolePermissionSeeder;
@@ -234,6 +238,105 @@ class VenueConfirmationTest extends TestCase
         $this->assertSame(2, $approved->permit_version);
         $this->assertNull($approved->pending_venue_amendment_reason);
         $this->assertCount(2, $approved->permitVersions);
+    }
+
+    public function test_venue_amendment_reuses_workflow_run_and_requires_returned_task_reapproval(): void
+    {
+        [, $organization] = $this->hierarchy();
+        $osa = $this->admin('Super Admin (OSA)');
+        $organizer = $this->admin('Society Admin', $organization);
+        $oldVenue = Venue::factory()->create();
+        $newVenue = Venue::factory()->create();
+
+        $event = app(EventProposalDraftService::class)->create(
+            $organizer,
+            $this->proposalData($organization, $oldVenue),
+            UploadedFile::fake()->create('proposal.pdf', 100, 'application/pdf'),
+            UploadedFile::fake()->create('confirmation.jpg', 100, 'image/jpeg')
+        );
+        $event->update(['hardcopy_submitted' => true, 'hardcopy_submitted_at' => now()]);
+
+        app(EventPermitService::class)->submit($event->fresh(), $organizer);
+        $run = $event->fresh()->workflowRun()->firstOrFail();
+        $this->approveAvailableWorkflowTasks($event->fresh());
+        $approved = app(EventPermitService::class)->approve($event->fresh(), $osa);
+        $oldPermit = $approved->permitVersions()->where('version_number', 1)->firstOrFail();
+        $initialTrailIds = ApprovalTrail::where('workflow_run_id', $run->id)
+            ->orderBy('created_at')
+            ->pluck('id')
+            ->all();
+
+        $organizerScope = app(ParticipationScopeService::class)->ensureOrganizerScope($approved->fresh());
+        $assignment = EventScannerAssignment::create([
+            'event_id' => $approved->id,
+            'school_year_id' => $organizerScope->school_year_id ?: $approved->school_year_id,
+            'event_participation_scope_id' => $organizerScope->id,
+            'audience_scope_type' => $organizerScope->participant_type,
+            'scanner_user_id' => $organizer->id,
+            'assigned_by_user_id' => $organizer->id,
+            'status' => EventScannerAssignment::STATUS_ACTIVE,
+            'expires_at' => now()->addDay(),
+            'max_devices' => 1,
+        ]);
+        $session = ScannerSession::create([
+            'event_id' => $approved->id,
+            'event_scanner_assignment_id' => $assignment->id,
+            'assignment_id' => $assignment->id,
+            'scanner_user_id' => $organizer->id,
+            'token_id' => 'venue-amendment-session',
+            'issued_by' => $organizer->id,
+            'status' => ScannerSession::STATUS_ACTIVE,
+            'issued_at' => now(),
+            'expires_at' => now()->addDay(),
+            'device_id' => 'scanner-device-1',
+            'device_fingerprint_hash' => hash('sha256', 'scanner-device-1'),
+        ]);
+
+        app(EventPermitService::class)->beginVenueAmendment($approved->fresh(), $organizer, 'Campus hall unavailable.');
+
+        $this->assertSame(ScannerSession::STATUS_REVOKED, $session->fresh()->status);
+        $this->assertNotNull($oldPermit->fresh()->superseded_at);
+        $this->assertSame($initialTrailIds, ApprovalTrail::where('workflow_run_id', $run->id)->orderBy('created_at')->pluck('id')->all());
+        $this->assertSame('revision_requested', $run->fresh()->status);
+        $this->assertSame(ProposalWorkflowTask::STATUS_APPROVED, $this->workflowTask($run, 'adviser_endorsement')->status);
+        $this->assertSame(ProposalWorkflowTask::STATUS_REVISION_REQUESTED, $this->workflowTask($run, 'security_clearance')->status);
+        $this->assertSame(ProposalWorkflowTask::STATUS_REVISION_REQUESTED, $this->workflowTask($run, 'osa_review_and_approval')->status);
+
+        $mobileToken = $organizer->createToken('scanner-phone', ['scanner-assignments'])->plainTextToken;
+        $this->withToken($mobileToken)
+            ->postJson("/api/v1/scanner/assignments/{$assignment->id}/activate", [
+                'device_id' => 'scanner-device-2',
+            ])
+            ->assertStatus(423)
+            ->assertJsonFragment(['reason' => 'participant_ppa_locked']);
+
+        $this->travel(1)->seconds();
+
+        $updated = app(EventProposalDraftService::class)->update(
+            $approved->fresh(),
+            $organizer,
+            $this->proposalData($organization, $newVenue),
+            UploadedFile::fake()->create('replacement-proposal.pdf', 100, 'application/pdf'),
+            UploadedFile::fake()->create('replacement-confirmation.pdf', 100, 'application/pdf')
+        );
+        app(EventPermitService::class)->submit($updated->fresh(), $organizer, returnedTasksAddressed: true);
+
+        $this->assertSame(ProposalWorkflowTask::STATUS_AVAILABLE, $this->workflowTask($run, 'security_clearance')->status);
+        $this->assertSame(ProposalWorkflowTask::STATUS_BLOCKED, $this->workflowTask($run, 'osa_review_and_approval')->status);
+
+        $this->approveAvailableWorkflowTasks($updated->fresh());
+        $replacement = app(EventPermitService::class)->approve($updated->fresh(), $osa);
+
+        $this->assertSame($run->id, $replacement->workflowRun()->firstOrFail()->id);
+        $this->assertSame(2, $replacement->permit_version);
+        $this->assertNull($replacement->pending_venue_amendment_reason);
+        $this->assertDatabaseHas('event_permit_versions', [
+            'event_id' => $event->id,
+            'version_number' => 2,
+            'venue_id' => $newVenue->id,
+            'superseded_at' => null,
+        ]);
+        $this->assertGreaterThan(count($initialTrailIds), ApprovalTrail::where('workflow_run_id', $run->id)->count());
     }
 
     public function test_amendment_requires_a_reason_and_cannot_start_on_the_first_event_day(): void
@@ -537,6 +640,29 @@ class VenueConfirmationTest extends TestCase
                 ],
             ]);
         }
+    }
+
+    private function approveAvailableWorkflowTasks(Event $event): void
+    {
+        $workflowTasks = app(ProposalWorkflowTaskService::class);
+        $run = $event->workflowRun()->firstOrFail();
+
+        while ($task = ProposalWorkflowTask::query()
+            ->with(['assignedUser', 'processStep', 'workflowRun.event'])
+            ->where('workflow_run_id', $run->id)
+            ->where('status', ProposalWorkflowTask::STATUS_AVAILABLE)
+            ->orderBy('display_order')
+            ->first()) {
+            $workflowTasks->decide($task, $task->assignedUser, ProposalWorkflowTask::DECISION_APPROVED, 'Approved for venue amendment workflow coverage.');
+        }
+    }
+
+    private function workflowTask(ProposalWorkflowRun $run, string $stepKey): ProposalWorkflowTask
+    {
+        return ProposalWorkflowTask::query()
+            ->where('workflow_run_id', $run->id)
+            ->where('step_key', $stepKey)
+            ->firstOrFail();
     }
 
     /** @return array<string, mixed> */
