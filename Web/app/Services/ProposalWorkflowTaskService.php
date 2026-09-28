@@ -138,6 +138,7 @@ class ProposalWorkflowTaskService
                 ->lockForUpdate()
                 ->firstOrFail();
             $formerAssigneeId = $lockedTask->assigned_user_id;
+            $formerAssignee = $formerAssigneeId ? User::find($formerAssigneeId) : null;
             $metadata = $lockedTask->metadata ?? [];
 
             data_set($metadata, 'assignment.assigned_user_snapshot', [
@@ -169,6 +170,14 @@ class ProposalWorkflowTaskService
                 'assigned_user_id' => $replacement->id,
                 'metadata' => $metadata,
             ]);
+
+            $this->notifications->notifyWorkflowTaskReassigned(
+                $lockedTask->fresh(['workflowRun.event']),
+                $replacement,
+                $formerAssignee,
+                $reason,
+                $history->id
+            );
 
             return $history;
         });
@@ -243,8 +252,9 @@ class ProposalWorkflowTaskService
                 ],
             ]);
 
+            $unblockedTasks = new Collection;
             if (in_array($resultingStatus, self::SATISFIED_PREREQUISITE_STATUSES, true)) {
-                $this->unblockSatisfiedDependents($lockedTask, $decidedAt);
+                $unblockedTasks = $this->unblockSatisfiedDependents($lockedTask, $decidedAt);
                 $this->markRunApprovedWhenComplete($lockedTask->workflowRun, $decidedAt, $actor);
             } elseif ($resultingStatus === ProposalWorkflowTask::STATUS_REJECTED) {
                 $this->markRunAndProposalRejected($lockedTask->workflowRun, $event, $decidedAt, $actor, $remarks);
@@ -254,14 +264,21 @@ class ProposalWorkflowTaskService
 
             $this->syncLegacyProjection($lockedTask->workflowRun);
 
+            $freshTask = $lockedTask->fresh(['workflowRun.event.organization', 'assignedUser']);
+            if ($decision === ProposalWorkflowTask::DECISION_APPROVED) {
+                $this->notifications->notifyWorkflowTaskApproved($freshTask);
+                $this->notifications->notifyWorkflowAdvanced($freshTask);
+                foreach ($unblockedTasks as $unblockedTask) {
+                    $this->notifications->notifyWorkflowTaskUnblocked($unblockedTask);
+                }
+            } elseif ($decision === ProposalWorkflowTask::DECISION_REJECTED) {
+                $this->notifications->notifyWorkflowTaskRejected($freshTask);
+            } elseif ($decision === ProposalWorkflowTask::DECISION_REVISION_REQUESTED) {
+                $this->notifications->notifyWorkflowTaskRevisionRequested($freshTask);
+            }
+
             return $trail;
         });
-
-        if ($decision === ProposalWorkflowTask::DECISION_REVISION_REQUESTED) {
-            $this->notifications->notifyWorkflowTaskRevisionRequested(
-                $trail->workflowTask()->with(['workflowRun.event.organization', 'assignedUser'])->firstOrFail()
-            );
-        }
 
         return $trail;
     }
@@ -480,9 +497,13 @@ class ProposalWorkflowTaskService
         return 'AT-'.$task->id.'-'.Str::upper(Str::random(8));
     }
 
-    private function unblockSatisfiedDependents(ProposalWorkflowTask $task, \DateTimeInterface $availableAt): void
+    /**
+     * @return Collection<int, ProposalWorkflowTask>
+     */
+    private function unblockSatisfiedDependents(ProposalWorkflowTask $task, \DateTimeInterface $availableAt): Collection
     {
         $tasks = ProposalWorkflowTask::query()
+            ->with(['workflowRun.event.organization', 'assignedUser'])
             ->where('workflow_run_id', $task->workflow_run_id)
             ->lockForUpdate()
             ->get()
@@ -498,6 +519,9 @@ class ProposalWorkflowTaskService
             ->groupBy('step_id')
             ->map(fn ($dependencies) => $dependencies->pluck('prerequisite_step_id'));
 
+        /** @var Collection<int, ProposalWorkflowTask> $unblocked */
+        $unblocked = new Collection;
+
         foreach ($blockedTasks as $blockedTask) {
             $prerequisiteStepIds = $dependencyPrerequisites->get($blockedTask->process_step_id, collect());
             $prerequisitesSatisfied = $prerequisiteStepIds->every(function (string $prerequisiteStepId) use ($tasks): bool {
@@ -512,8 +536,11 @@ class ProposalWorkflowTaskService
                     'status' => ProposalWorkflowTask::STATUS_AVAILABLE,
                     'available_at' => $availableAt,
                 ]);
+                $unblocked->push($blockedTask);
             }
         }
+
+        return $unblocked;
     }
 
     private function markRunApprovedWhenComplete(ProposalWorkflowRun $run, \DateTimeInterface $completedAt, User $actor): void

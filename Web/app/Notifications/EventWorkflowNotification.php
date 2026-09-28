@@ -11,12 +11,12 @@ class EventWorkflowNotification extends Notification
 
     public function __construct(private readonly array $payload) {}
 
-    public function via(object $notifiable): array
+    public function via(mixed $notifiable = null): array
     {
         return ['database'];
     }
 
-    public function toDatabase(object $notifiable): array
+    public function toDatabase(mixed $notifiable = null): array
     {
         return $this->payload;
     }

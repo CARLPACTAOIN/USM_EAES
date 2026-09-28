@@ -13,7 +13,6 @@ use App\Models\ProposalTemplateApplicabilityRule;
 use App\Models\ProposalWorkflowRun;
 use App\Models\ProposalWorkflowTask;
 use App\Models\User;
-use App\Notifications\EventWorkflowNotification;
 use DomainException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -21,7 +20,10 @@ use Illuminate\Support\Str;
 
 class ProposalWorkflowService
 {
-    public function __construct(private readonly ProposalWorkflowAssignmentResolver $assignmentResolver) {}
+    public function __construct(
+        private readonly ProposalWorkflowAssignmentResolver $assignmentResolver,
+        private readonly EventNotificationService $notifications,
+    ) {}
 
     /**
      * Bind an event proposal to an immutable published template workflow run on first submission.
@@ -587,7 +589,14 @@ class ProposalWorkflowService
             ]);
         }
 
-        return $run->fresh(['tasks']);
+        $freshRun = $run->fresh(['tasks']);
+        foreach ($freshRun->tasks as $createdTask) {
+            if ($createdTask->assigned_user_id) {
+                $this->notifications->notifyWorkflowTaskAssigned($createdTask);
+            }
+        }
+
+        return $freshRun;
     }
 
     private function ruleMatchesOrganizerRole(
@@ -646,9 +655,10 @@ class ProposalWorkflowService
 
     private function alertOsaAboutAssignmentFailure(Event $event, WorkflowAssignmentResolutionException $exception): void
     {
-        User::role('Super Admin (OSA)')->get()->each(function (User $recipient) use ($event, $exception): void {
-            $recipient->notify(new EventWorkflowNotification([
-                'notification_key' => "proposal_workflow_assignment_failed:{$event->id}:{$exception->stepKey}:{$exception->roleKey}",
+        $key = "proposal_workflow_assignment_failed:{$event->id}:{$exception->stepKey}:{$exception->roleKey}";
+
+        User::role('Super Admin (OSA)')->get()->each(function (User $recipient) use ($event, $exception, $key): void {
+            $this->notifications->notifyUser($recipient, $key, [
                 'kind' => 'proposal_workflow_assignment_failed',
                 'event_id' => $event->id,
                 'event_title' => $event->title,
@@ -662,8 +672,7 @@ class ProposalWorkflowService
                 'action_url' => route('dashboard.events'),
                 'severity' => 'warning',
                 'needs_action' => true,
-                'created_label' => now()->diffForHumans(),
-            ]));
+            ]);
         });
     }
 }

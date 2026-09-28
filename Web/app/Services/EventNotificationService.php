@@ -10,9 +10,13 @@ use App\Models\User;
 use App\Notifications\EventWorkflowNotification;
 use Illuminate\Notifications\DatabaseNotification;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 
 class EventNotificationService
 {
+    /** @var array<string, bool> */
+    private array $dispatchedKeys = [];
+
     public function __construct(private readonly AdminScopeService $adminScopes) {}
 
     public function notifyParticipantScopeInvitation(EventParticipationScope $scope): int
@@ -151,11 +155,286 @@ class EventNotificationService
         );
     }
 
+    public function notifyWorkflowTaskAssigned(ProposalWorkflowTask $task): int
+    {
+        $task->loadMissing(['workflowRun.event.organization', 'assignedUser']);
+
+        if (! $task->assignedUser) {
+            return 0;
+        }
+
+        $event = $task->workflowRun?->event;
+        $key = 'workflow_task_assigned:'.$task->id.':'.$task->assigned_user_id;
+        $isAvailable = $task->status === ProposalWorkflowTask::STATUS_AVAILABLE;
+
+        $sent = $this->notifyUser($task->assignedUser, $key, [
+            'kind' => 'workflow_task_assigned',
+            'event_id' => $event?->id,
+            'event_title' => $event?->title,
+            'workflow_task_id' => $task->id,
+            'workflow_run_id' => $task->workflow_run_id,
+            'step_title' => $task->title,
+            'assigned_role' => $task->assigned_role,
+            'title' => 'Workflow task assigned',
+            'body' => "You were assigned to {$task->title} for {$event?->title}.",
+            'action_label' => 'Open Workflow Task',
+            'action_url' => route('dashboard.workflow-tasks.show', $task),
+            'severity' => 'info',
+            'needs_action' => $isAvailable,
+        ]);
+
+        return $sent ? 1 : 0;
+    }
+
+    public function notifyProposalSubmitted(Event $event): int
+    {
+        $scope = $this->participationScopesForNotification($event);
+        $organizers = $this->organizerRecipients($scope);
+        $submittedAt = optional($event->workflowRun?->submitted_at ?? $event->updated_at)->timestamp;
+        $key = 'event_proposal_submitted:'.$event->id.':'.$submittedAt;
+
+        return $this->notifyUsers(
+            $organizers,
+            $key,
+            'event_proposal_submitted',
+            $scope,
+            [
+                'title' => 'Event proposal submitted',
+                'body' => "{$event->title} was submitted for institutional workflow review.",
+                'action_label' => 'Open Organizer Checklist',
+                'action_url' => route('dashboard.events.checklist', $event),
+                'severity' => 'info',
+                'needs_action' => false,
+            ]
+        );
+    }
+
+    public function notifyWorkflowAdvanced(ProposalWorkflowTask $task): int
+    {
+        $task->loadMissing('workflowRun.event.organization');
+        $event = $task->workflowRun?->event;
+        if (! $event) {
+            return 0;
+        }
+
+        $scope = $this->participationScopesForNotification($event);
+        $organizers = $this->organizerRecipients($scope);
+        $decidedAt = optional($task->decided_at ?? now())->timestamp;
+        $key = 'workflow_advanced:'.$task->id.':'.$decidedAt;
+
+        return $this->notifyUsers(
+            $organizers,
+            $key,
+            'workflow_advanced',
+            $scope,
+            [
+                'title' => 'Proposal workflow advanced',
+                'body' => "{$task->title} was completed. Workflow advanced for {$event->title}.",
+                'action_label' => 'Open Organizer Checklist',
+                'action_url' => route('dashboard.events.checklist', $event),
+                'severity' => 'info',
+                'needs_action' => false,
+                'workflow_task_id' => $task->id,
+                'workflow_run_id' => $task->workflow_run_id,
+            ]
+        );
+    }
+
+    public function notifyWorkflowTaskApproved(ProposalWorkflowTask $task): int
+    {
+        $task->loadMissing('workflowRun.event.organization');
+        $event = $task->workflowRun?->event;
+        if (! $event) {
+            return 0;
+        }
+
+        $scope = $this->participationScopesForNotification($event);
+        $organizers = $this->organizerRecipients($scope);
+        $decidedAt = optional($task->decided_at ?? now())->timestamp;
+        $key = 'workflow_task_approved:'.$task->id.':'.$decidedAt;
+        $remarks = filled($task->remarks) ? " Remarks: {$task->remarks}" : '';
+
+        return $this->notifyUsers(
+            $organizers,
+            $key,
+            'workflow_task_approved',
+            $scope,
+            [
+                'title' => 'Workflow task approved',
+                'body' => "{$task->title} was approved for {$event->title}.{$remarks}",
+                'action_label' => 'Open Organizer Checklist',
+                'action_url' => route('dashboard.events.checklist', $event),
+                'severity' => 'success',
+                'needs_action' => false,
+                'workflow_task_id' => $task->id,
+                'workflow_run_id' => $task->workflow_run_id,
+                'remarks' => $task->remarks,
+            ]
+        );
+    }
+
+    public function notifyWorkflowTaskRejected(ProposalWorkflowTask $task): int
+    {
+        $task->loadMissing('workflowRun.event.organization');
+        $event = $task->workflowRun?->event;
+        if (! $event) {
+            return 0;
+        }
+
+        $scope = $this->participationScopesForNotification($event);
+        $organizers = $this->organizerRecipients($scope);
+        $decidedAt = optional($task->decided_at ?? now())->timestamp;
+        $key = 'workflow_task_rejected:'.$task->id.':'.$decidedAt;
+        $remarks = filled($task->remarks) ? " Remarks: {$task->remarks}" : '';
+
+        return $this->notifyUsers(
+            $organizers,
+            $key,
+            'workflow_task_rejected',
+            $scope,
+            [
+                'title' => 'Workflow task rejected',
+                'body' => "{$task->title} was rejected for {$event->title}.{$remarks}",
+                'action_label' => 'Open Organizer Checklist',
+                'action_url' => route('dashboard.events.checklist', $event),
+                'severity' => 'error',
+                'needs_action' => false,
+                'workflow_task_id' => $task->id,
+                'workflow_run_id' => $task->workflow_run_id,
+                'remarks' => $task->remarks,
+            ]
+        );
+    }
+
+    public function notifyWorkflowTaskReassigned(ProposalWorkflowTask $task, User $replacement, ?User $formerAssignee, string $reason, string $historyId): int
+    {
+        $task->loadMissing('workflowRun.event');
+        $event = $task->workflowRun?->event;
+        $isAvailable = $task->status === ProposalWorkflowTask::STATUS_AVAILABLE;
+        $sent = 0;
+
+        $replacementKey = 'workflow_task_reassigned:'.$task->id.':'.$replacement->id.':'.$historyId;
+        if ($this->notifyUser($replacement, $replacementKey, [
+            'kind' => 'workflow_task_reassigned',
+            'event_id' => $event?->id,
+            'event_title' => $event?->title,
+            'workflow_task_id' => $task->id,
+            'workflow_run_id' => $task->workflow_run_id,
+            'step_title' => $task->title,
+            'title' => 'Workflow task reassigned to you',
+            'body' => "{$task->title} for {$event?->title} was reassigned to you. Reason: {$reason}",
+            'action_label' => 'Open Workflow Task',
+            'action_url' => route('dashboard.workflow-tasks.show', $task),
+            'severity' => 'info',
+            'needs_action' => $isAvailable,
+        ])) {
+            $sent++;
+        }
+
+        if ($formerAssignee && $formerAssignee->id !== $replacement->id) {
+            $formerKey = 'workflow_task_unassigned:'.$task->id.':'.$formerAssignee->id.':'.$historyId;
+            if ($this->notifyUser($formerAssignee, $formerKey, [
+                'kind' => 'workflow_task_unassigned',
+                'event_id' => $event?->id,
+                'event_title' => $event?->title,
+                'workflow_task_id' => $task->id,
+                'workflow_run_id' => $task->workflow_run_id,
+                'step_title' => $task->title,
+                'title' => 'Workflow task reassigned',
+                'body' => "{$task->title} for {$event?->title} was reassigned to another reviewer. Reason: {$reason}",
+                'action_label' => 'View Workflow Tasks',
+                'action_url' => route('dashboard.workflow-tasks.index'),
+                'severity' => 'info',
+                'needs_action' => false,
+            ])) {
+                $sent++;
+            }
+        }
+
+        return $sent;
+    }
+
+    public function notifyWorkflowTaskUnblocked(ProposalWorkflowTask $task): int
+    {
+        $task->loadMissing(['workflowRun.event.organization', 'assignedUser']);
+
+        if (! $task->assignedUser) {
+            return 0;
+        }
+
+        $event = $task->workflowRun?->event;
+        $key = 'workflow_task_unblocked:'.$task->id.':'.optional($task->available_at ?? now())->timestamp;
+
+        $sent = $this->notifyUser($task->assignedUser, $key, [
+            'kind' => 'workflow_task_unblocked',
+            'event_id' => $event?->id,
+            'event_title' => $event?->title,
+            'workflow_task_id' => $task->id,
+            'workflow_run_id' => $task->workflow_run_id,
+            'step_title' => $task->title,
+            'assigned_role' => $task->assigned_role,
+            'title' => 'Workflow task ready for review',
+            'body' => "{$task->title} for {$event?->title} is now unblocked and ready for your review.",
+            'action_label' => 'Open Workflow Task',
+            'action_url' => route('dashboard.workflow-tasks.show', $task),
+            'severity' => 'info',
+            'needs_action' => true,
+        ]);
+
+        return $sent ? 1 : 0;
+    }
+
+    public function notifyFinalPermitApproved(Event $event, int $versionNumber): int
+    {
+        $scope = $this->participationScopesForNotification($event);
+        $organizers = $this->organizerRecipients($scope);
+        $key = 'final_permit_approved:'.$event->id.':'.$versionNumber;
+
+        return $this->notifyUsers(
+            $organizers,
+            $key,
+            'final_permit_approved',
+            $scope,
+            [
+                'title' => 'Digital Permit Approved',
+                'body' => "Digital permit version {$versionNumber} approved for {$event->title}.",
+                'action_label' => 'View Digital Permit',
+                'action_url' => route('dashboard.events.permit-preview', $event),
+                'severity' => 'success',
+                'needs_action' => false,
+                'permit_version' => $versionNumber,
+            ]
+        );
+    }
+
+    public function notifyEventRejected(Event $event): int
+    {
+        $scope = $this->participationScopesForNotification($event);
+        $organizers = $this->organizerRecipients($scope);
+        $key = 'event_proposal_rejected:'.$event->id.':'.optional($event->updated_at)->timestamp;
+
+        return $this->notifyUsers(
+            $organizers,
+            $key,
+            'event_proposal_rejected',
+            $scope,
+            [
+                'title' => 'Proposal rejected',
+                'body' => "{$event->title} was rejected.",
+                'action_label' => 'Open Organizer Checklist',
+                'action_url' => route('dashboard.events.checklist', $event),
+                'severity' => 'error',
+                'needs_action' => false,
+            ]
+        );
+    }
+
     public function notifyWorkflowTaskRevisionRequested(ProposalWorkflowTask $task): int
     {
         $task->loadMissing(['workflowRun.event.organization', 'assignedUser']);
         $event = $task->workflowRun->event;
         $scope = $this->participationScopesForNotification($event);
+        $remarks = filled($task->remarks) ? " Remarks: {$task->remarks}" : '';
 
         return $this->notifyUsers(
             $this->organizerRecipients($scope),
@@ -164,7 +443,7 @@ class EventNotificationService
             $scope,
             [
                 'title' => 'Workflow task returned for revision',
-                'body' => "{$task->title} returned {$event->title} for organizer correction.",
+                'body' => "{$task->title} returned {$event->title} for organizer correction.{$remarks}",
                 'action_label' => 'Open Organizer Checklist',
                 'action_url' => route('dashboard.events.checklist', $event),
                 'severity' => 'warning',
@@ -187,12 +466,7 @@ class EventNotificationService
         $event = $task->workflowRun->event;
         $key = 'workflow_task_resubmitted:'.$task->id.':'.optional($task->available_at)->timestamp;
 
-        if ($this->hasNotificationKey($task->assignedUser, $key)) {
-            return 0;
-        }
-
-        $task->assignedUser->notify(new EventWorkflowNotification([
-            'notification_key' => $key,
+        $sent = $this->notifyUser($task->assignedUser, $key, [
             'kind' => 'workflow_task_resubmitted',
             'event_id' => $event->id,
             'event_title' => $event->title,
@@ -205,10 +479,9 @@ class EventNotificationService
             'action_url' => route('dashboard.workflow-tasks.show', $task),
             'severity' => 'info',
             'needs_action' => true,
-            'created_label' => now()->diffForHumans(),
-        ]));
+        ]);
 
-        return 1;
+        return $sent ? 1 : 0;
     }
 
     public function notifyParticipantScopeReviewed(EventParticipationScope $scope, string $status): int
@@ -353,17 +626,54 @@ class EventNotificationService
             ->values();
     }
 
+    public function notifyUser(User $user, string $key, array $payload): bool
+    {
+        if ($this->hasNotificationKey($user, $key)) {
+            return false;
+        }
+
+        $this->dispatchedKeys[$user->id.':'.$key] = true;
+
+        $link = $payload['link'] ?? $payload['action_url'] ?? null;
+        $message = $payload['message'] ?? $payload['body'] ?? null;
+        $linkText = $payload['link_text'] ?? $payload['action_label'] ?? null;
+
+        $notificationPayload = array_merge([
+            'notification_key' => $key,
+            'created_label' => now()->diffForHumans(),
+        ], $payload);
+
+        if ($link !== null) {
+            $notificationPayload['link'] = $link;
+            $notificationPayload['action_url'] = $link;
+        }
+
+        if ($message !== null) {
+            $notificationPayload['message'] = $message;
+            $notificationPayload['body'] = $message;
+        }
+
+        if ($linkText !== null) {
+            $notificationPayload['link_text'] = $linkText;
+            $notificationPayload['action_label'] = $linkText;
+        }
+
+        DB::afterCommit(function () use ($user, $notificationPayload): void {
+            $user->notify(new EventWorkflowNotification($notificationPayload));
+        });
+
+        return true;
+    }
+
     private function notifyUsers(Collection $users, string $key, string $kind, EventParticipationScope $scope, array $payload): int
     {
         $sent = 0;
 
         foreach ($users->unique('id') as $user) {
-            if ($this->hasNotificationKey($user, $key)) {
-                continue;
+            $userPayload = $this->payload($key, $kind, $scope, $payload);
+            if ($this->notifyUser($user, $key, $userPayload)) {
+                $sent++;
             }
-
-            $user->notify(new EventWorkflowNotification($this->payload($key, $kind, $scope, $payload)));
-            $sent++;
         }
 
         return $sent;
@@ -386,6 +696,11 @@ class EventNotificationService
 
     private function hasNotificationKey(User $user, string $key): bool
     {
+        $memoryKey = $user->id.':'.$key;
+        if (isset($this->dispatchedKeys[$memoryKey])) {
+            return true;
+        }
+
         return $user->notifications()
             ->where('type', EventWorkflowNotification::class)
             ->get()

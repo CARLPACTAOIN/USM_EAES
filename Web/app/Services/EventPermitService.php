@@ -56,6 +56,8 @@ class EventPermitService
             $this->audit($event, $actor, $event->pending_venue_amendment_reason ? 'venue-amendment-submitted' : 'event-proposal-submitted');
             if ($event->pending_venue_amendment_reason) {
                 $this->notifications->notifyPermitWorkflow($event, 'venue-amendment-submitted');
+            } elseif ($reopenedTasks->isEmpty()) {
+                $this->notifications->notifyProposalSubmitted($event);
             }
 
             return $event->fresh();
@@ -160,6 +162,7 @@ class EventPermitService
             ]);
             $this->audit($lockedEvent, $actor, 'permit-version-created', ['permit_version' => $versionNumber]);
             $this->notifications->notifyPermitWorkflow($lockedEvent, $isAmendment ? 'venue-amendment-approved' : 'permit-version-created');
+            $this->notifications->notifyFinalPermitApproved($lockedEvent, $versionNumber);
 
             return $lockedEvent->fresh(['venue', 'permitVersions']);
         });
@@ -203,6 +206,8 @@ class EventPermitService
         $this->audit($event, $actor, $event->pending_venue_amendment_reason ? 'venue-amendment-rejected' : 'event-proposal-rejected');
         if ($event->pending_venue_amendment_reason) {
             $this->notifications->notifyPermitWorkflow($event, 'venue-amendment-rejected');
+        } else {
+            $this->notifications->notifyEventRejected($event);
         }
 
         return $event->fresh();
