@@ -149,6 +149,12 @@ class OrganizerProposalDraftTest extends TestCase
             ->assertSee('Proposal draft')
             ->assertSee('Saved just now');
 
+        $this->actingAs($this->organizerAdmin)
+            ->get(route('dashboard.events'))
+            ->assertOk()
+            ->assertSee('Continue draft')
+            ->assertSee(route('dashboard.proposal-drafts.edit', $event), false);
+
         $this->actingAs($otherAdmin)
             ->get(route('dashboard.proposal-drafts.edit', $event))
             ->assertForbidden();
@@ -158,6 +164,37 @@ class OrganizerProposalDraftTest extends TestCase
             ->assertForbidden();
 
         $this->assertNull($event->fresh()->title);
+    }
+
+    public function test_guests_cannot_start_view_or_autosave_an_organizer_draft(): void
+    {
+        $event = $this->startDraft();
+        $this->app['auth']->guard('web')->logout();
+
+        $this->post(route('dashboard.proposal-drafts.start'))
+            ->assertRedirect(route('login'));
+        $this->get(route('dashboard.proposal-drafts.edit', $event))
+            ->assertRedirect(route('login'));
+        $this->patch(route('dashboard.proposal-drafts.save', $event), ['title' => 'Attempted change'])
+            ->assertRedirect(route('login'));
+
+        $this->postJson('/api/v1/proposal-drafts')->assertUnauthorized();
+        $this->getJson('/api/v1/proposal-drafts/'.$event->id)->assertUnauthorized();
+        $this->patchJson('/api/v1/proposal-drafts/'.$event->id, ['title' => 'Attempted change'])
+            ->assertUnauthorized();
+    }
+
+    public function test_an_organizer_cannot_change_the_packet_role(): void
+    {
+        $event = $this->startDraft();
+
+        $this->actingAs($this->organizerAdmin)
+            ->patch(route('dashboard.proposal-drafts.save', $event), [
+                'canonical_packet' => ['activity_role' => CanonicalPpaPacket::ROLE_PARTICIPANT],
+            ])
+            ->assertSessionHasErrors('canonical_packet.activity_role');
+
+        $this->assertSame(CanonicalPpaPacket::ROLE_ORGANIZER, $event->canonicalPpaPacket()->value('activity_role'));
     }
 
     public function test_api_can_create_and_patch_a_permissive_organizer_draft(): void

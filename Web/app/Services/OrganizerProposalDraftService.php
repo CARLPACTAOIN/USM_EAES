@@ -42,7 +42,6 @@ class OrganizerProposalDraftService
 
     /** @var list<string> */
     private const PACKET_FIELDS = [
-        'activity_role',
         'proposal_category',
         'title',
         'proponent_name',
@@ -205,6 +204,11 @@ class OrganizerProposalDraftService
     private function packetUpdates(array $data, array $eventUpdates): array
     {
         $packet = is_array($data['canonical_packet'] ?? null) ? $data['canonical_packet'] : [];
+
+        if (Arr::has($packet, 'activity_role')) {
+            throw new DomainException('The organizer packet role cannot be changed from the proposal draft path.');
+        }
+
         $updates = [];
 
         foreach (self::PACKET_FIELDS as $field) {
@@ -217,10 +221,6 @@ class OrganizerProposalDraftService
             if (array_key_exists($field, $eventUpdates)) {
                 $updates[$field] = $eventUpdates[$field];
             }
-        }
-
-        if (($updates['activity_role'] ?? null) === CanonicalPpaPacket::ROLE_PARTICIPANT) {
-            throw new DomainException('Participant packets cannot be created from organizer proposal paths.');
         }
 
         return $updates;

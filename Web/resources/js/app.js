@@ -21,6 +21,30 @@ Alpine.data('sidebar', () => ({
     close() { this.open = false; }
 }));
 
+Alpine.data('proposalDraftAutosave', ({ saveUrl }) => ({
+    saveUrl,
+    status: 'Saved just now',
+    async save(input) {
+        this.status = 'Saving…';
+
+        try {
+            const response = await fetch(this.saveUrl, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content,
+                },
+                body: JSON.stringify({ [input.name]: input.value }),
+            });
+
+            this.status = response.ok ? 'Saved just now' : 'Could not save';
+        } catch (error) {
+            this.status = 'Could not save';
+        }
+    },
+}));
+
 /* ─── Dynamic Event Day Rows + Evaluation Form ───────────── */
 Alpine.data('eventDaysForm', (initialDays = [], initialQuestions = []) => ({
     days: Array.isArray(initialDays) && initialDays.length

@@ -397,13 +397,22 @@
                                         Checklist
                                     </a>
                                     @endif
-                                    <button type="button"
-                                            class="btn btn-sm btn-secondary"
-                                            title="{{ $event->status === 'revision_requested' ? 'Revise returned proposal' : 'Edit draft proposal' }}"
-                                            wire:click="openModal('proposal-edit', '{{ $event->id }}')">
-                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M11 5.5H6.75A2.25 2.25 0 004.5 7.75v9.5a2.25 2.25 0 002.25 2.25h9.5a2.25 2.25 0 002.25-2.25V13m-2.25-9.75l3 3m0 0l-9.5 9.5H6.75v-3l9.5-9.5z"/></svg>
-                                        {{ $event->status === 'revision_requested' ? 'Revise' : 'Edit' }}
-                                    </button>
+                                    @if($event->status === \App\Models\Event::STATUS_DRAFT)
+                                        <a class="btn btn-sm btn-secondary"
+                                           href="{{ route('dashboard.proposal-drafts.edit', $event) }}"
+                                           title="Continue draft proposal">
+                                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M11 5.5H6.75A2.25 2.25 0 004.5 7.75v9.5a2.25 2.25 0 002.25 2.25h9.5a2.25 2.25 0 002.25-2.25V13m-2.25-9.75l3 3m0 0l-9.5 9.5H6.75v-3l9.5-9.5z"/></svg>
+                                            Continue draft
+                                        </a>
+                                    @else
+                                        <button type="button"
+                                                class="btn btn-sm btn-secondary"
+                                                title="{{ $event->status === 'revision_requested' ? 'Revise returned proposal' : 'Edit draft proposal' }}"
+                                                wire:click="openModal('proposal-edit', '{{ $event->id }}')">
+                                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M11 5.5H6.75A2.25 2.25 0 004.5 7.75v9.5a2.25 2.25 0 002.25 2.25h9.5a2.25 2.25 0 002.25-2.25V13m-2.25-9.75l3 3m0 0l-9.5 9.5H6.75v-3l9.5-9.5z"/></svg>
+                                            {{ $event->status === 'revision_requested' ? 'Revise' : 'Edit' }}
+                                        </button>
+                                    @endif
                                     @endif
 
                                     {{-- Scopes --}}
