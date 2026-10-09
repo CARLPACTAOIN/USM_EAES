@@ -1,0 +1,507 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>EAES PPA Packet Workspace Prototype</title>
+    <!-- PROTOTYPE ONLY: Three variants of the dedicated Canonical PPA Packet workspace, switchable via ?variant=A|B|C. -->
+    <style>
+        :root {
+            --surface: #ffffff;
+            --raised: #f8fafc;
+            --overlay: #f1f5f9;
+            --ink: #0f172a;
+            --muted: #475569;
+            --faint: #94a3b8;
+            --border: #dbe4ea;
+            --accent: #0e5d36;
+            --accent-hover: #0a4527;
+            --accent-soft: #eaf5ee;
+            --gold: #d4af37;
+            --warning: #b45309;
+            --warning-soft: #fff7ed;
+            --danger: #b91c1c;
+            --danger-soft: #fef2f2;
+            --info: #0369a1;
+            --info-soft: #f0f9ff;
+            --sidebar: #0b4326;
+            --shadow: 0 12px 34px rgb(15 23 42 / 0.09);
+            --radius: 14px;
+        }
+
+        * { box-sizing: border-box; }
+        html { scroll-behavior: smooth; }
+        body {
+            margin: 0;
+            background: #eef3f0;
+            color: var(--ink);
+            font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            line-height: 1.45;
+        }
+        button, input, select, textarea { font: inherit; }
+        button { cursor: pointer; }
+        button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, a:focus-visible {
+            outline: 3px solid rgb(14 93 54 / 0.28);
+            outline-offset: 2px;
+        }
+        .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+        .prototype-note { background: #172033; color: #e2e8f0; padding: 8px 24px; font-size: 12px; text-align: center; }
+        .app-shell { min-height: 100vh; display: grid; grid-template-columns: 226px minmax(0, 1fr); }
+        .app-sidebar { background: var(--sidebar); color: #d1eae0; padding: 22px 16px; }
+        .brand { display: flex; gap: 11px; align-items: center; margin-bottom: 28px; }
+        .brand-mark { width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; background: var(--gold); color: #173c28; font-weight: 900; }
+        .brand strong { display: block; color: white; font-size: 14px; }
+        .brand span { display: block; font-size: 11px; opacity: .78; }
+        .nav-group { margin: 22px 10px 8px; font-size: 10px; text-transform: uppercase; letter-spacing: .12em; opacity: .65; }
+        .nav-item { display: flex; gap: 10px; align-items: center; color: inherit; text-decoration: none; border-radius: 9px; padding: 10px 12px; margin-bottom: 4px; font-size: 13px; }
+        .nav-item.active { background: #09351e; color: white; box-shadow: inset 3px 0 var(--gold); }
+        .app-main { min-width: 0; }
+        .topbar { height: 66px; padding: 0 28px; background: var(--surface); border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+        .crumb { color: var(--muted); font-size: 13px; }
+        .user { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 13px; }
+        .avatar { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-weight: 800; }
+        .page { padding: 24px 28px 104px; max-width: 1600px; margin: auto; }
+        .page-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 18px; }
+        .eyebrow { color: var(--accent); text-transform: uppercase; letter-spacing: .11em; font-weight: 800; font-size: 11px; margin: 0 0 5px; }
+        h1 { margin: 0; font-size: clamp(24px, 3vw, 34px); letter-spacing: -.035em; }
+        .subtitle { margin: 6px 0 0; color: var(--muted); max-width: 780px; font-size: 14px; }
+        .heading-actions { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; justify-content: flex-end; }
+        .save-state { min-width: 122px; color: var(--accent); font-size: 12px; font-weight: 700; text-align: right; }
+        .btn { border: 1px solid var(--border); background: var(--surface); color: var(--ink); border-radius: 9px; padding: 9px 13px; font-size: 13px; font-weight: 750; display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
+        .btn:hover { border-color: #aab8c3; background: var(--raised); }
+        .btn-primary { background: var(--accent); border-color: var(--accent); color: white; }
+        .btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+        .btn-quiet { border-color: transparent; background: transparent; color: var(--muted); }
+        .btn-danger { color: var(--danger); border-color: #fecaca; background: white; }
+        .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 1px 2px rgb(15 23 42 / .04); }
+        .badge { display: inline-flex; align-items: center; gap: 5px; border-radius: 999px; padding: 4px 9px; background: var(--overlay); color: var(--muted); font-size: 11px; font-weight: 800; }
+        .badge.green { background: var(--accent-soft); color: var(--accent); }
+        .badge.orange { background: var(--warning-soft); color: var(--warning); }
+        .completion-ring { --value: 68%; width: 58px; height: 58px; border-radius: 50%; display: grid; place-items: center; background: conic-gradient(var(--accent) var(--value), #dce7e0 0); position: relative; flex: 0 0 auto; }
+        .completion-ring::before { content: ""; position: absolute; inset: 7px; border-radius: 50%; background: white; }
+        .completion-ring span { position: relative; font-size: 12px; font-weight: 900; }
+        .field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 15px; }
+        .field.full { grid-column: 1 / -1; }
+        label { display: block; font-size: 12px; font-weight: 800; margin-bottom: 6px; color: #243244; }
+        .required { color: var(--danger); }
+        input, select, textarea { width: 100%; border: 1px solid #cbd5e1; border-radius: 8px; background: white; color: var(--ink); padding: 10px 11px; font-size: 13px; }
+        input[readonly] { background: var(--raised); color: var(--muted); }
+        textarea { min-height: 88px; resize: vertical; }
+        .helper { margin: 5px 0 0; color: var(--muted); font-size: 11px; }
+        .prefill { display: flex; align-items: center; gap: 8px; background: var(--accent-soft); border: 1px solid #cce4d4; border-radius: 9px; padding: 9px 11px; color: #174c31; font-size: 12px; }
+        .conditional { background: var(--info-soft); border: 1px solid #bae6fd; border-radius: 10px; padding: 15px; margin-top: 15px; }
+        .conditional h4 { margin: 0 0 10px; color: var(--info); font-size: 13px; }
+        .step-kicker { margin: 0 0 5px; color: var(--accent); font-size: 11px; font-weight: 850; text-transform: uppercase; letter-spacing: .08em; }
+        .step-title { margin: 0; font-size: 21px; letter-spacing: -.02em; }
+        .step-copy { margin: 5px 0 0; color: var(--muted); font-size: 13px; }
+        .form-actions { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding-top: 18px; border-top: 1px solid var(--border); margin-top: 20px; }
+        .state-list { display: grid; gap: 9px; font-size: 12px; }
+        .state-row { display: flex; justify-content: space-between; gap: 14px; }
+        .state-row span:first-child { color: var(--muted); }
+        .state-row strong { text-align: right; }
+        .issue-group { border-top: 1px solid var(--border); padding-top: 13px; margin-top: 13px; }
+        .issue-group h4 { margin: 0 0 7px; font-size: 12px; }
+        .issue-link { border: 0; background: transparent; color: var(--danger); padding: 4px 0; display: block; text-align: left; font-size: 12px; text-decoration: underline; text-underline-offset: 3px; }
+        .binding-note { border-radius: 10px; background: #f8fafc; border: 1px solid var(--border); padding: 12px; color: var(--muted); font-size: 12px; }
+
+        /* Variant A: focused stepper */
+        .variant-a .workspace { display: grid; grid-template-columns: 230px minmax(0, 1fr) 260px; gap: 16px; align-items: start; }
+        .rail { padding: 13px; position: sticky; top: 16px; }
+        .rail-step { width: 100%; border: 0; background: transparent; display: grid; grid-template-columns: 30px 1fr auto; gap: 9px; align-items: center; text-align: left; padding: 10px 8px; border-radius: 9px; color: var(--muted); }
+        .rail-step + .rail-step { margin-top: 2px; }
+        .rail-step:hover { background: var(--raised); }
+        .rail-step.active { background: var(--accent-soft); color: var(--accent); }
+        .step-number { width: 26px; height: 26px; border-radius: 50%; background: var(--overlay); display: grid; place-items: center; font-size: 11px; font-weight: 900; }
+        .active .step-number { background: var(--accent); color: white; }
+        .step-status { font-size: 10px; font-weight: 800; }
+        .form-card { padding: 22px; }
+        .form-card .prefill { margin: 16px 0; }
+        .right-summary { padding: 17px; position: sticky; top: 16px; }
+        .completion-head { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+        .completion-head h3 { margin: 0; font-size: 14px; }
+        .completion-head p { margin: 3px 0 0; color: var(--muted); font-size: 11px; }
+
+        /* Variant B: document workspace */
+        .variant-b .packet-banner { padding: 17px 19px; display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 14px; }
+        .packet-banner h2 { margin: 0; font-size: 17px; }
+        .packet-banner p { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
+        .horizontal-steps { display: grid; grid-template-columns: repeat(6, minmax(120px, 1fr)); overflow-x: auto; border-bottom: 1px solid var(--border); background: white; }
+        .tab-step { border: 0; border-right: 1px solid var(--border); border-bottom: 3px solid transparent; background: white; padding: 13px 10px 10px; color: var(--muted); text-align: left; font-size: 11px; min-width: 120px; }
+        .tab-step strong { display: block; color: var(--ink); font-size: 12px; margin-bottom: 3px; }
+        .tab-step.active { border-bottom-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+        .document-layout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 15px; align-items: start; }
+        .document { min-height: 720px; padding: 30px clamp(22px, 5vw, 68px); }
+        .document-header { border-bottom: 2px solid var(--ink); padding-bottom: 15px; margin-bottom: 23px; }
+        .document-header h2 { margin: 0; font-family: Georgia, serif; font-size: 24px; }
+        .document-header p { margin: 5px 0 0; color: var(--muted); font-size: 12px; }
+        .review-drawer { position: sticky; top: 16px; overflow: hidden; }
+        .drawer-section { padding: 17px; border-bottom: 1px solid var(--border); }
+        .drawer-section:last-child { border-bottom: 0; }
+        .drawer-section h3 { margin: 0 0 9px; font-size: 13px; }
+
+        /* Variant C: checklist first */
+        .variant-c .command-bar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; align-items: center; padding: 15px 18px; margin-bottom: 14px; }
+        .command-bar h2 { margin: 0; font-size: 16px; }
+        .command-bar p { margin: 3px 0 0; color: var(--muted); font-size: 12px; }
+        .command-stats { display: flex; gap: 18px; }
+        .command-stat { text-align: right; }
+        .command-stat strong { display: block; font-size: 18px; }
+        .command-stat span { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
+        .checklist-layout { display: grid; grid-template-columns: minmax(260px, 350px) minmax(0, 1fr); gap: 15px; align-items: start; }
+        .action-list { overflow: hidden; position: sticky; top: 16px; }
+        .action-list-header { padding: 16px; background: #162c22; color: white; }
+        .action-list-header h3 { margin: 0; font-size: 14px; }
+        .action-list-header p { margin: 4px 0 0; color: #b9d2c5; font-size: 11px; }
+        .action-group { padding: 14px 15px; border-bottom: 1px solid var(--border); }
+        .action-group h4 { margin: 0 0 9px; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+        .action-item { width: 100%; display: grid; grid-template-columns: 22px 1fr; gap: 9px; text-align: left; border: 1px solid transparent; background: transparent; border-radius: 8px; padding: 8px; }
+        .action-item:hover, .action-item.active { border-color: #f3c9c9; background: var(--danger-soft); }
+        .action-dot { width: 18px; height: 18px; border-radius: 50%; background: var(--danger-soft); color: var(--danger); display: grid; place-items: center; font-size: 11px; font-weight: 900; }
+        .action-item strong { display: block; font-size: 12px; }
+        .action-item span { display: block; color: var(--muted); font-size: 10px; margin-top: 2px; }
+        .editor-stack { display: grid; gap: 14px; }
+        .context-strip { padding: 13px 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+        .context-strip p { margin: 0; font-size: 12px; color: var(--muted); }
+        .context-strip strong { color: var(--ink); }
+        .correction-card { padding: 22px; border-left: 4px solid var(--danger); }
+        .correction-callout { background: var(--danger-soft); color: #7f1d1d; border-radius: 9px; padding: 11px 13px; margin: 15px 0; font-size: 12px; }
+        .section-map { display: grid; grid-template-columns: repeat(6, 1fr); gap: 5px; }
+        .map-cell { height: 6px; border-radius: 999px; background: #cbd5e1; }
+        .map-cell.done { background: var(--accent); }
+        .map-cell.current { background: var(--gold); }
+
+        .variant { display: none; }
+        .variant.active { display: block; }
+        .prototype-switcher { position: fixed; z-index: 50; left: 50%; bottom: 20px; transform: translateX(-50%); display: grid; grid-template-columns: 42px minmax(220px, auto) 42px; align-items: center; border-radius: 999px; overflow: hidden; background: #101827; color: white; box-shadow: 0 16px 42px rgb(15 23 42 / .35); border: 1px solid #334155; }
+        .prototype-switcher button { height: 44px; border: 0; background: transparent; color: white; font-size: 20px; }
+        .prototype-switcher button:hover { background: #263247; }
+        .variant-label { text-align: center; font-size: 12px; font-weight: 800; padding: 0 15px; }
+        dialog { border: 0; border-radius: 16px; padding: 0; width: min(520px, calc(100vw - 32px)); box-shadow: 0 25px 70px rgb(15 23 42 / .35); }
+        dialog::backdrop { background: rgb(15 23 42 / .58); }
+        .dialog-body { padding: 22px; }
+        .dialog-body h2 { margin: 0 0 8px; font-size: 20px; }
+        .dialog-body p { color: var(--muted); font-size: 13px; }
+        .dialog-actions { display: flex; justify-content: flex-end; gap: 9px; border-top: 1px solid var(--border); padding: 14px 22px; }
+
+        @media (max-width: 1180px) {
+            .variant-a .workspace { grid-template-columns: 205px minmax(0, 1fr); }
+            .variant-a .right-summary { grid-column: 1 / -1; position: static; display: grid; grid-template-columns: 210px 1fr; gap: 18px; }
+            .document-layout { grid-template-columns: minmax(0, 1fr) 280px; }
+        }
+        @media (max-width: 880px) {
+            .app-shell { grid-template-columns: 1fr; }
+            .app-sidebar { display: none; }
+            .page { padding: 18px 16px 96px; }
+            .topbar { padding: 0 16px; }
+            .page-heading { display: block; }
+            .heading-actions { justify-content: flex-start; margin-top: 15px; }
+            .variant-a .workspace, .document-layout, .checklist-layout { grid-template-columns: 1fr; }
+            .rail, .right-summary, .review-drawer, .action-list { position: static; }
+            .rail { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
+            .rail-step { grid-template-columns: 26px 1fr; }
+            .rail-step .step-status { display: none; }
+            .variant-a .right-summary { display: block; }
+            .action-list { max-height: none; }
+        }
+        @media (max-width: 580px) {
+            body { overflow-x: hidden; }
+            .page, .page-heading, .page-heading > *, .heading-actions, .heading-actions > *, .card { min-width: 0; max-width: 100%; }
+            .subtitle, .command-bar p { overflow-wrap: anywhere; }
+            .btn { min-width: 0; white-space: normal; }
+            .topbar { gap: 8px; }
+            .topbar .crumb { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+            .topbar .user { display: none; }
+            .field-grid { grid-template-columns: 1fr; }
+            .field.full { grid-column: auto; }
+            .heading-actions { display: grid; grid-template-columns: 1fr 1fr; width: 100%; }
+            .heading-actions .save-state { grid-column: 1 / -1; text-align: left; }
+            .heading-actions .btn { width: 100%; }
+            .heading-actions .btn-quiet { grid-column: 1 / -1; }
+            .rail { grid-template-columns: 1fr 1fr; }
+            .variant-b .packet-banner, .variant-c .command-bar { grid-template-columns: 1fr; display: grid; }
+            .command-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; gap: 8px; }
+            .command-stat { text-align: left; }
+            .command-stat span { font-size: 9px; overflow-wrap: anywhere; }
+            .document { padding: 21px 17px; }
+            .context-strip, .form-actions { flex-wrap: wrap; }
+            .prototype-switcher { width: calc(100vw - 28px); grid-template-columns: 42px 1fr 42px; }
+        }
+        @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+    </style>
+</head>
+<body>
+    <div class="prototype-note">Throwaway Wayfinder prototype — no data is saved and no production routes are called.</div>
+    <div class="app-shell">
+        <aside class="app-sidebar" aria-label="Dashboard navigation">
+            <div class="brand"><div class="brand-mark">U</div><div><strong>USM EAES</strong><span>Event operations</span></div></div>
+            <p class="nav-group">Workspace</p>
+            <a class="nav-item" href="#">Dashboard</a>
+            <a class="nav-item active" href="#">Events &amp; proposals</a>
+            <a class="nav-item" href="#">Workflow tasks</a>
+            <a class="nav-item" href="#">Notifications</a>
+            <p class="nav-group">Organization</p>
+            <a class="nav-item" href="#">Organization profile</a>
+            <a class="nav-item" href="#">Reports</a>
+        </aside>
+        <main class="app-main">
+            <header class="topbar"><div class="crumb">Events / Draft proposals / PSITS General Assembly</div><div class="user"><span class="avatar">CS</span><span>Carla Santos</span></div></header>
+            <div class="page">
+                <div class="page-heading">
+                    <div>
+                        <p class="eyebrow">Canonical PPA Packet</p>
+                        <h1>PSITS General Assembly 2026</h1>
+                        <p class="subtitle">Prepare the proposal and permit from one guided packet. You can leave at any time; this draft remains available from Events.</p>
+                    </div>
+                    <div class="heading-actions">
+                        <span class="save-state" data-save-state role="status" aria-live="polite">Saved just now</span>
+                        <button class="btn" type="button" data-preview="proposal">Proposal preview</button>
+                        <button class="btn" type="button" data-preview="permit">Permit preview</button>
+                        <button class="btn btn-quiet" type="button">Exit draft</button>
+                    </div>
+                </div>
+
+                <section class="variant variant-a" data-variant="A" aria-label="Variant A: Focused stepper">
+                    <div class="workspace">
+                        <nav class="card rail" aria-label="Packet sections">
+                            <button class="rail-step" data-step="1"><span class="step-number">1</span><span><strong>Basics</strong></span><span class="step-status">Complete</span></button>
+                            <button class="rail-step active" data-step="2"><span class="step-number">2</span><span><strong>Schedule &amp; venue</strong></span><span class="step-status">2 missing</span></button>
+                            <button class="rail-step" data-step="3"><span class="step-number">3</span><span><strong>Program &amp; beneficiaries</strong></span><span class="step-status">1 missing</span></button>
+                            <button class="rail-step" data-step="4"><span class="step-number">4</span><span><strong>Budget</strong></span><span class="step-status">Complete</span></button>
+                            <button class="rail-step" data-step="5"><span class="step-number">5</span><span><strong>Evaluation &amp; files</strong></span><span class="step-status">Started</span></button>
+                            <button class="rail-step" data-step="6"><span class="step-number">6</span><span><strong>Review &amp; submit</strong></span><span class="step-status">Locked</span></button>
+                        </nav>
+                        <section class="card form-card" aria-labelledby="a-step-title">
+                            <p class="step-kicker">Step <span data-step-number>2</span> of 6</p>
+                            <h2 class="step-title" id="a-step-title" data-step-title>Schedule and venue</h2>
+                            <p class="step-copy" data-step-copy>Set when and where the activity will happen. Venue requirements adapt to the location type.</p>
+                            <div class="prefill"><strong>Organizer:</strong> Philippine Society of Information Technology Students <span aria-hidden="true">·</span> <strong>Proponent:</strong> Carla M. Santos, Secretary</div>
+                            <div class="field-grid">
+                                <div class="field"><label for="a-start">Start date <span class="required">*</span></label><input id="a-start" type="date" value="2026-11-14" data-autosave></div>
+                                <div class="field"><label for="a-end">End date <span class="required">*</span></label><input id="a-end" type="date" value="2026-11-14" data-autosave></div>
+                                <div class="field full"><label for="a-location">Location type <span class="required">*</span></label><select id="a-location" data-location data-autosave><option>On-campus</option><option selected>Off-campus</option><option>Online</option></select><p class="helper">Only relevant venue requirements will be shown.</p></div>
+                            </div>
+                            <div class="conditional" data-off-campus>
+                                <h4>Off-campus confirmation</h4>
+                                <div class="field-grid">
+                                    <div class="field full"><label for="a-venue">Venue name and address <span class="required">*</span></label><input id="a-venue" value="Southpoint Convention Center, Kabacan" data-autosave></div>
+                                    <div class="field"><label for="a-office">Confirming office <span class="required">*</span></label><input id="a-office" value="Municipal Tourism Office" data-autosave></div>
+                                    <div class="field"><label for="a-confirmed">Confirmation date <span class="required">*</span></label><input id="a-confirmed" type="date" data-autosave data-missing></div>
+                                    <div class="field full"><label for="a-evidence">Confirmation evidence <span class="required">*</span></label><input id="a-evidence" type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" data-autosave data-missing><p class="helper">PDF, DOC, DOCX, JPG, JPEG, or PNG; up to 10 MB. Kept private.</p></div>
+                                </div>
+                            </div>
+                            <div class="form-actions"><button class="btn" type="button" data-previous>Previous</button><button class="btn btn-primary" type="button" data-next>Continue to program</button></div>
+                        </section>
+                        <aside class="card right-summary" aria-label="Packet status">
+                            <div class="completion-head"><div class="completion-ring"><span data-score>68%</span></div><div><h3>Packet completion</h3><p>One authoritative score</p></div></div>
+                            <div class="state-list">
+                                <div class="state-row"><span>Status</span><strong>Draft</strong></div>
+                                <div class="state-row"><span>Organizer</span><strong>PSITS</strong></div>
+                                <div class="state-row"><span>Location</span><strong data-location-state>Off-campus</strong></div>
+                                <div class="state-row"><span>Missing</span><strong data-missing-count>3 items</strong></div>
+                            </div>
+                            <div class="issue-group"><h4>Schedule &amp; venue</h4><button class="issue-link" data-jump="a-confirmed">Add confirmation date</button><button class="issue-link" data-jump="a-evidence">Upload venue confirmation</button></div>
+                            <div class="issue-group"><h4>Program &amp; beneficiaries</h4><button class="issue-link" data-step="3">Add beneficiary count</button></div>
+                            <div class="binding-note" style="margin-top:14px">The active workflow template is not bound while this is a draft. It becomes fixed after your first successful submission.</div>
+                        </aside>
+                    </div>
+                </section>
+
+                <section class="variant variant-b" data-variant="B" aria-label="Variant B: Document workspace">
+                    <div class="card packet-banner">
+                        <div><span class="badge green">Draft PPA-2026-0041</span><h2 style="margin-top:7px">One packet, two official views</h2><p>Work through the packet like a document; validation and previews stay alongside it.</p></div>
+                        <div class="completion-head" style="margin:0"><div class="completion-ring"><span data-score>68%</span></div><div><strong>3 items missing</strong><p>Last saved just now</p></div></div>
+                    </div>
+                    <div class="card" style="overflow:hidden; margin-bottom:14px">
+                        <nav class="horizontal-steps" aria-label="Packet sections">
+                            <button class="tab-step" data-step="1"><strong>01 Basics</strong>Complete</button>
+                            <button class="tab-step active" data-step="2"><strong>02 Schedule &amp; venue</strong>2 missing</button>
+                            <button class="tab-step" data-step="3"><strong>03 Program</strong>1 missing</button>
+                            <button class="tab-step" data-step="4"><strong>04 Budget</strong>Complete</button>
+                            <button class="tab-step" data-step="5"><strong>05 Evaluation &amp; files</strong>Started</button>
+                            <button class="tab-step" data-step="6"><strong>06 Review &amp; submit</strong>Locked</button>
+                        </nav>
+                    </div>
+                    <div class="document-layout">
+                        <article class="card document">
+                            <header class="document-header"><p class="step-kicker">Canonical PPA Packet · Section <span data-step-number>2</span></p><h2 data-step-title>Schedule and venue</h2><p data-step-copy>Set when and where the activity will happen. Venue requirements adapt to the location type.</p></header>
+                            <div class="prefill" style="margin-bottom:20px"><strong>Prepared for:</strong> PSITS <span aria-hidden="true">·</span> <strong>Prepared by:</strong> Carla M. Santos, Secretary</div>
+                            <div class="field-grid">
+                                <div class="field"><label for="b-start">Activity starts <span class="required">*</span></label><input id="b-start" type="date" value="2026-11-14" data-autosave></div>
+                                <div class="field"><label for="b-end">Activity ends <span class="required">*</span></label><input id="b-end" type="date" value="2026-11-14" data-autosave></div>
+                                <div class="field full"><label for="b-location">Where will this activity happen? <span class="required">*</span></label><select id="b-location" data-location data-autosave><option>On-campus</option><option selected>Off-campus</option><option>Online</option></select></div>
+                            </div>
+                            <div class="conditional" data-off-campus><h4>External venue confirmation</h4><div class="field-grid"><div class="field full"><label for="b-venue">Venue and full address <span class="required">*</span></label><input id="b-venue" value="Southpoint Convention Center, Kabacan" data-autosave></div><div class="field"><label for="b-office">Confirmed by <span class="required">*</span></label><input id="b-office" value="Municipal Tourism Office" data-autosave></div><div class="field"><label for="b-confirmed">Confirmed on <span class="required">*</span></label><input id="b-confirmed" type="date" data-autosave data-missing></div><div class="field full"><label for="b-evidence">Private evidence file <span class="required">*</span></label><input id="b-evidence" type="file" data-autosave data-missing></div></div></div>
+                            <div class="form-actions"><button class="btn" type="button" data-previous>Back</button><span class="save-state" data-save-state role="status" aria-live="polite">Saved just now</span><button class="btn btn-primary" type="button" data-next>Next section</button></div>
+                        </article>
+                        <aside class="card review-drawer" aria-label="Review drawer">
+                            <div class="drawer-section"><h3>Packet state</h3><div class="state-list"><div class="state-row"><span>Completion</span><strong data-score>68%</strong></div><div class="state-row"><span>Location branch</span><strong data-location-state>Off-campus</strong></div><div class="state-row"><span>Missing</span><strong data-missing-count>3 items</strong></div></div></div>
+                            <div class="drawer-section"><h3>Needs attention</h3><div class="issue-group" style="margin:0; padding:0; border:0"><h4>Schedule &amp; venue</h4><button class="issue-link" data-jump="b-confirmed">Confirmation date</button><button class="issue-link" data-jump="b-evidence">Evidence file</button></div><div class="issue-group"><h4>Program &amp; beneficiaries</h4><button class="issue-link" data-step="3">Beneficiary count</button></div></div>
+                            <div class="drawer-section"><h3>Generated views</h3><div style="display:grid; gap:7px"><button class="btn" type="button" data-preview="proposal">Open proposal</button><button class="btn" type="button" data-preview="permit">Open permit</button></div></div>
+                            <div class="drawer-section"><div class="binding-note">Submitting binds the active Published Template Version to one Workflow Run. Later template edits will not change it.</div><button class="btn btn-primary" style="width:100%; margin-top:10px" type="button" data-submit>Review submission</button></div>
+                        </aside>
+                    </div>
+                </section>
+
+                <section class="variant variant-c" data-variant="C" aria-label="Variant C: Checklist-first workspace">
+                    <div class="card command-bar">
+                        <div><span class="badge orange">3 corrections before submission</span><h2 style="margin-top:7px">Finish what needs attention</h2><p>Issues are grouped by packet section. Select one to open its exact field with the reviewer context preserved.</p></div>
+                        <div class="command-stats"><div class="command-stat"><strong data-score>68%</strong><span>Complete</span></div><div class="command-stat"><strong data-missing-count>3</strong><span>Missing</span></div><div class="command-stat"><strong>Draft</strong><span>State</span></div></div>
+                    </div>
+                    <div class="checklist-layout">
+                        <aside class="card action-list" aria-label="Packet completion checklist">
+                            <div class="action-list-header"><h3>Completion checklist</h3><p>All six sections remain visible</p></div>
+                            <div class="action-group"><h4>Schedule &amp; venue · 2</h4><button class="action-item active" data-jump="c-confirmed"><span class="action-dot">!</span><span><strong>Add confirmation date</strong><span>Required for off-campus venues</span></span></button><button class="action-item" data-jump="c-evidence"><span class="action-dot">!</span><span><strong>Upload confirmation evidence</strong><span>PDF, document, or image</span></span></button></div>
+                            <div class="action-group"><h4>Program &amp; beneficiaries · 1</h4><button class="action-item" data-step="3"><span class="action-dot">!</span><span><strong>Enter beneficiary count</strong><span>Program section</span></span></button></div>
+                            <div class="action-group"><h4>Other sections</h4><div class="state-list"><div class="state-row"><span>Basics</span><strong style="color:var(--accent)">Complete</strong></div><div class="state-row"><span>Budget</span><strong style="color:var(--accent)">Complete</strong></div><div class="state-row"><span>Evaluation &amp; files</span><strong>Started</strong></div><div class="state-row"><span>Review &amp; submit</span><strong>Waiting</strong></div></div></div>
+                            <div class="action-group"><button class="btn" style="width:100%" type="button" data-preview="proposal">Preview proposal</button><button class="btn" style="width:100%; margin-top:7px" type="button" data-preview="permit">Preview permit</button></div>
+                        </aside>
+                        <div class="editor-stack">
+                            <div class="card context-strip"><p><strong>PSITS</strong> · Carla M. Santos, Secretary · Off-campus activity</p><span class="save-state" data-save-state role="status" aria-live="polite">Saved just now</span></div>
+                            <section class="card correction-card" aria-labelledby="c-step-title">
+                                <div class="section-map" aria-label="Section progress"><span class="map-cell done"></span><span class="map-cell current"></span><span class="map-cell"></span><span class="map-cell done"></span><span class="map-cell"></span><span class="map-cell"></span></div>
+                                <p class="step-kicker" style="margin-top:18px">Schedule &amp; venue</p><h2 class="step-title" id="c-step-title">External confirmation</h2><p class="step-copy">This branch appears because the activity is off-campus.</p>
+                                <div class="correction-callout"><strong>Why this is needed:</strong> Before submission, record when the external office confirmed the venue and attach the private evidence.</div>
+                                <div class="field-grid">
+                                    <div class="field full"><label for="c-location">Location type</label><select id="c-location" data-location data-autosave><option>On-campus</option><option selected>Off-campus</option><option>Online</option></select></div>
+                                </div>
+                                <div data-off-campus><div class="field-grid" style="margin-top:15px"><div class="field full"><label for="c-venue">Venue and address <span class="required">*</span></label><input id="c-venue" value="Southpoint Convention Center, Kabacan" data-autosave></div><div class="field"><label for="c-office">Confirming office <span class="required">*</span></label><input id="c-office" value="Municipal Tourism Office" data-autosave></div><div class="field"><label for="c-confirmed">Confirmation date <span class="required">*</span></label><input id="c-confirmed" type="date" data-autosave data-missing></div><div class="field full"><label for="c-evidence">Evidence attachment <span class="required">*</span></label><input id="c-evidence" type="file" data-autosave data-missing></div></div></div>
+                                <div class="form-actions"><button class="btn" type="button">Back to checklist</button><button class="btn btn-primary" type="button" data-next>Save and open next issue</button></div>
+                            </section>
+                            <div class="card" style="padding:16px; display:flex; justify-content:space-between; align-items:center; gap:14px"><div class="binding-note" style="border:0; padding:0; background:transparent"><strong style="color:var(--ink)">Ready to submit later</strong><br>The active workflow template becomes fixed only after first successful submission.</div><button class="btn btn-primary" type="button" data-submit>Review submission</button></div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <div class="prototype-switcher" aria-label="Prototype variant switcher">
+        <button type="button" data-variant-previous aria-label="Previous prototype variant">&#8592;</button>
+        <div class="variant-label" data-variant-label aria-live="polite">A — Focused stepper</div>
+        <button type="button" data-variant-next aria-label="Next prototype variant">&#8594;</button>
+    </div>
+
+    <dialog id="prototype-dialog" aria-labelledby="dialog-title">
+        <div class="dialog-body"><p class="step-kicker">Prototype interaction</p><h2 id="dialog-title">Review before submission</h2><div id="dialog-copy"><p>Your packet is 68% complete. Resolve the three linked items before submission.</p></div></div>
+        <div class="dialog-actions"><button class="btn" type="button" data-dialog-close>Close</button><button class="btn btn-primary" type="button" data-dialog-confirm>Continue</button></div>
+    </dialog>
+
+    <script>
+        (() => {
+            const variants = [
+                { key: 'A', name: 'Focused stepper' },
+                { key: 'B', name: 'Document workspace' },
+                { key: 'C', name: 'Checklist first' },
+            ];
+            const stepContent = {
+                1: ['Basics', 'Identify the activity, organizer, proponent, category, and activity role.'],
+                2: ['Schedule and venue', 'Set when and where the activity will happen. Venue requirements adapt to the location type.'],
+                3: ['Program and beneficiaries', 'Describe the rationale, objectives, activities, outputs, and intended beneficiaries.'],
+                4: ['Budget', 'Record funding sources and an itemized expense plan.'],
+                5: ['Evaluation and supporting files', 'Define evaluation questions and attach only the evidence required for this packet.'],
+                6: ['Review and submit', 'Review one completion score, fix linked issues, preview both documents, and confirm workflow binding.'],
+            };
+            const dialog = document.getElementById('prototype-dialog');
+            const dialogTitle = document.getElementById('dialog-title');
+            const dialogCopy = document.getElementById('dialog-copy');
+            let saveTimer;
+
+            function activeVariantKey() {
+                const requested = new URLSearchParams(window.location.search).get('variant')?.toUpperCase();
+                return variants.some(item => item.key === requested) ? requested : 'A';
+            }
+
+            function showVariant(key) {
+                document.querySelectorAll('[data-variant]').forEach(node => node.classList.toggle('active', node.dataset.variant === key));
+                const choice = variants.find(item => item.key === key) ?? variants[0];
+                document.querySelector('[data-variant-label]').textContent = `${choice.key} — ${choice.name}`;
+                const url = new URL(window.location.href);
+                url.searchParams.set('variant', choice.key);
+                history.replaceState({}, '', url);
+            }
+
+            function cycleVariant(direction) {
+                const currentIndex = variants.findIndex(item => item.key === activeVariantKey());
+                const nextIndex = (currentIndex + direction + variants.length) % variants.length;
+                showVariant(variants[nextIndex].key);
+            }
+
+            function activeVariant() {
+                return document.querySelector('.variant.active');
+            }
+
+            function showStep(step) {
+                const root = activeVariant();
+                if (!root) return;
+                const [title, copy] = stepContent[step];
+                root.querySelectorAll('[data-step-number]').forEach(node => node.textContent = step);
+                root.querySelectorAll('[data-step-title]').forEach(node => node.textContent = title);
+                root.querySelectorAll('[data-step-copy]').forEach(node => node.textContent = copy);
+                root.querySelectorAll('[data-step]').forEach(node => node.classList.toggle('active', Number(node.dataset.step) === Number(step)));
+                const titleNode = root.querySelector('[data-step-title]');
+                titleNode?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+
+            function setSaveState(text) {
+                document.querySelectorAll('[data-save-state]').forEach(node => node.textContent = text);
+            }
+
+            function simulateAutosave() {
+                clearTimeout(saveTimer);
+                setSaveState('Saving…');
+                saveTimer = setTimeout(() => setSaveState('Saved just now'), 650);
+            }
+
+            function syncLocation(select) {
+                const root = select.closest('.variant');
+                const isOffCampus = select.value === 'Off-campus';
+                root.querySelectorAll('[data-off-campus]').forEach(node => node.hidden = !isOffCampus);
+                root.querySelectorAll('[data-location-state]').forEach(node => node.textContent = select.value);
+            }
+
+            document.addEventListener('click', event => {
+                const target = event.target.closest('button');
+                if (!target) return;
+                if (target.matches('[data-variant-previous]')) cycleVariant(-1);
+                if (target.matches('[data-variant-next]')) cycleVariant(1);
+                if (target.dataset.step) showStep(Number(target.dataset.step));
+                if (target.matches('[data-next]')) showStep(3);
+                if (target.matches('[data-previous]')) showStep(1);
+                if (target.dataset.jump) {
+                    const field = document.getElementById(target.dataset.jump);
+                    field?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    window.setTimeout(() => field?.focus(), 350);
+                }
+                if (target.dataset.preview) {
+                    dialogTitle.textContent = `${target.dataset.preview === 'proposal' ? 'Proposal' : 'Permit'} preview`;
+                    dialogCopy.innerHTML = '<p>This prototype would open the generated read-only view in a new tab while preserving the draft workspace.</p>';
+                    dialog.showModal();
+                }
+                if (target.matches('[data-submit]')) {
+                    dialogTitle.textContent = 'Bind workflow and submit?';
+                    dialogCopy.innerHTML = '<p>First successful submission creates one Workflow Run bound to the currently active Published Template Version. Later template edits will not change this proposal\'s run.</p><p><strong>Submission remains unavailable until all linked missing items are resolved.</strong></p>';
+                    dialog.showModal();
+                }
+                if (target.matches('[data-dialog-close], [data-dialog-confirm]')) dialog.close();
+            });
+
+            document.addEventListener('input', event => {
+                if (event.target.matches('[data-autosave]')) simulateAutosave();
+                if (event.target.matches('[data-location]')) syncLocation(event.target);
+            });
+            document.addEventListener('change', event => {
+                if (event.target.matches('[data-autosave]')) simulateAutosave();
+                if (event.target.matches('[data-location]')) syncLocation(event.target);
+            });
+            document.addEventListener('keydown', event => {
+                const tag = document.activeElement?.tagName;
+                if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tag) || document.activeElement?.isContentEditable) return;
+                if (event.key === 'ArrowLeft') cycleVariant(-1);
+                if (event.key === 'ArrowRight') cycleVariant(1);
+            });
+
+            showVariant(activeVariantKey());
+        })();
+    </script>
+</body>
+</html>
