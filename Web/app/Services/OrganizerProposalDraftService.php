@@ -2,14 +2,18 @@
 
 namespace App\Services;
 
+use App\Models\CanonicalPpaAttachment;
 use App\Models\CanonicalPpaPacket;
 use App\Models\Event;
 use App\Models\Organization;
 use App\Models\User;
+use App\Models\Venue;
 use DomainException;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 
 class OrganizerProposalDraftService
 {
@@ -69,6 +73,7 @@ class OrganizerProposalDraftService
         'program_activities',
         'expected_output',
         'beneficiaries',
+        'delegate_count',
         'budget_breakdown',
         'schedule_summary',
         'venue_summary',
@@ -131,19 +136,105 @@ class OrganizerProposalDraftService
             throw new DomainException('Only a draft proposal can be autosaved.');
         }
 
-        return DB::transaction(function () use ($data, $event): Event {
+        return DB::transaction(function () use ($actor, $data, $event): Event {
             $eventUpdates = $this->eventUpdates($data);
+
+            if (array_key_exists('location_type', $eventUpdates)) {
+                $locType = $eventUpdates['location_type'];
+                if ($locType === 'off-campus' || $locType === 'online') {
+                    $eventUpdates['venue_id'] = null;
+                }
+                if ($locType === 'on-campus' || $locType === 'online') {
+                    $eventUpdates['venue_confirmation_office'] = null;
+                    $eventUpdates['venue_confirmation_date'] = null;
+                    $eventUpdates['venue_confirmation_reference_number'] = null;
+                }
+            }
+
+            if (array_key_exists('venue_id', $eventUpdates) && $eventUpdates['venue_id']) {
+                $venue = Venue::active()->find($eventUpdates['venue_id']);
+                if ($venue && empty($eventUpdates['location_details'])) {
+                    $eventUpdates['location_details'] = $venue->displayName();
+                }
+            }
+
+            if (Arr::has($data, 'evaluation_questions')) {
+                $demographics = $event->target_demographics ?? [];
+                $demographics['evaluation_questions'] = $data['evaluation_questions'];
+                $eventUpdates['target_demographics'] = $demographics;
+            }
+            if (Arr::has($data, 'event_days')) {
+                $demographics = $eventUpdates['target_demographics'] ?? ($event->target_demographics ?? []);
+                $demographics['event_days'] = $data['event_days'];
+                $eventUpdates['target_demographics'] = $demographics;
+            }
+
+            // Handle file uploads for event:
+            if (isset($data['proposal_document']) && $data['proposal_document'] instanceof UploadedFile) {
+                $file = $data['proposal_document'];
+                $path = $file->store('events/proposals');
+                $eventUpdates['proposal_document_path'] = $path;
+                $eventUpdates['proposal_document_original_name'] = $file->getClientOriginalName();
+            } elseif ($this->booleanFlag($data, 'clear_proposal_document')) {
+                if ($event->proposal_document_path) {
+                    Storage::delete($event->proposal_document_path);
+                }
+                $eventUpdates['proposal_document_path'] = null;
+                $eventUpdates['proposal_document_original_name'] = null;
+            }
+
+            if (isset($data['venue_confirmation_document']) && $data['venue_confirmation_document'] instanceof UploadedFile) {
+                $file = $data['venue_confirmation_document'];
+                $path = $file->store('events/venue-confirmations');
+                $eventUpdates['venue_confirmation_document_path'] = $path;
+                $eventUpdates['venue_confirmation_document_original_name'] = $file->getClientOriginalName();
+            } elseif ($this->booleanFlag($data, 'clear_venue_confirmation_document')) {
+                if ($event->venue_confirmation_document_path) {
+                    Storage::delete($event->venue_confirmation_document_path);
+                }
+                $eventUpdates['venue_confirmation_document_path'] = null;
+                $eventUpdates['venue_confirmation_document_original_name'] = null;
+            }
+
             if ($eventUpdates !== []) {
                 $event->update($eventUpdates);
             }
 
             $packet = $event->canonicalPpaPacket()->firstOrFail();
             $packetUpdates = $this->packetUpdates($data, $eventUpdates);
+
+            if (array_key_exists('venue_confirmation_document_path', $eventUpdates)) {
+                $packetUpdates['venue_confirmation_document_path'] = $eventUpdates['venue_confirmation_document_path'];
+                $packetUpdates['venue_confirmation_document_original_name'] = $eventUpdates['venue_confirmation_document_original_name'];
+            }
+
+            if (isset($data['supporting_document']) && $data['supporting_document'] instanceof UploadedFile) {
+                $file = $data['supporting_document'];
+                $path = $file->store('events/supporting');
+                $packetUpdates['supporting_document_path'] = $path;
+                $packetUpdates['supporting_document_original_name'] = $file->getClientOriginalName();
+            } elseif ($this->booleanFlag($data, 'clear_supporting_document')) {
+                if ($packet->supporting_document_path) {
+                    Storage::delete($packet->supporting_document_path);
+                }
+                $packetUpdates['supporting_document_path'] = null;
+                $packetUpdates['supporting_document_original_name'] = null;
+            }
+
             if ($packetUpdates !== []) {
                 $packet->update($packetUpdates);
             }
 
-            return $event->fresh(['canonicalPpaPacket.preparedBy', 'organization', 'schoolYear']);
+            $this->syncCanonicalAttachments($packet, $event, $actor);
+
+            return $event->fresh([
+                'canonicalPpaPacket.attachments.uploadedBy',
+                'canonicalPpaPacket.preparedBy',
+                'canonicalPpaPacket.venue',
+                'organization',
+                'schoolYear',
+                'venue',
+            ]);
         });
     }
 
@@ -151,7 +242,14 @@ class OrganizerProposalDraftService
     {
         $this->authorize($event, $actor);
 
-        return $event->load(['canonicalPpaPacket.preparedBy', 'organization', 'schoolYear']);
+        return $event->load([
+            'canonicalPpaPacket.attachments.uploadedBy',
+            'canonicalPpaPacket.preparedBy',
+            'canonicalPpaPacket.venue',
+            'organization',
+            'schoolYear',
+            'venue',
+        ]);
     }
 
     private function authorize(Event $event, User $actor): void
@@ -161,6 +259,12 @@ class OrganizerProposalDraftService
         if ($event->organization_id !== $organization->id) {
             throw new AuthorizationException('This proposal draft is outside your organizer scope.');
         }
+    }
+
+    /** @param array<string, mixed> $data */
+    private function booleanFlag(array $data, string $key): bool
+    {
+        return filter_var($data[$key] ?? false, FILTER_VALIDATE_BOOLEAN);
     }
 
     private function authorizedOrganization(User $actor): Organization
@@ -205,7 +309,7 @@ class OrganizerProposalDraftService
     {
         $packet = is_array($data['canonical_packet'] ?? null) ? $data['canonical_packet'] : [];
 
-        if (Arr::has($packet, 'activity_role')) {
+        if (Arr::has($packet, 'activity_role') || Arr::has($data, 'activity_role')) {
             throw new DomainException('The organizer packet role cannot be changed from the proposal draft path.');
         }
 
@@ -214,6 +318,8 @@ class OrganizerProposalDraftService
         foreach (self::PACKET_FIELDS as $field) {
             if (Arr::has($packet, $field)) {
                 $updates[$field] = $this->normalize($field, $packet[$field]);
+            } elseif (Arr::has($data, $field)) {
+                $updates[$field] = $this->normalize($field, $data[$field]);
             }
         }
 
@@ -226,9 +332,84 @@ class OrganizerProposalDraftService
         return $updates;
     }
 
+    private function syncCanonicalAttachments(CanonicalPpaPacket $packet, Event $event, User $actor): void
+    {
+        $this->syncCanonicalAttachment(
+            packet: $packet,
+            type: CanonicalPpaAttachment::TYPE_PROPOSAL,
+            path: $event->proposal_document_path,
+            originalName: $event->proposal_document_original_name,
+            actor: $actor,
+        );
+
+        $this->syncCanonicalAttachment(
+            packet: $packet,
+            type: CanonicalPpaAttachment::TYPE_VENUE_CONFIRMATION,
+            path: $event->location_type === 'off-campus' ? ($event->venue_confirmation_document_path ?? $packet->venue_confirmation_document_path) : null,
+            originalName: $event->location_type === 'off-campus' ? ($event->venue_confirmation_document_original_name ?? $packet->venue_confirmation_document_original_name) : null,
+            actor: $actor,
+        );
+
+        $this->syncCanonicalAttachment(
+            packet: $packet,
+            type: CanonicalPpaAttachment::TYPE_SUPPORTING,
+            path: $packet->supporting_document_path,
+            originalName: $packet->supporting_document_original_name,
+            actor: $actor,
+        );
+    }
+
+    private function syncCanonicalAttachment(
+        CanonicalPpaPacket $packet,
+        string $type,
+        ?string $path,
+        ?string $originalName,
+        User $actor,
+    ): void {
+        $query = $packet->attachments()->where('attachment_type', $type);
+
+        if (blank($path)) {
+            $query->delete();
+
+            return;
+        }
+
+        $packet->attachments()->updateOrCreate(
+            ['attachment_type' => $type],
+            [
+                'path' => $path,
+                'original_name' => $originalName ?: basename($path),
+                'mime_type' => Storage::exists($path) ? Storage::mimeType($path) : null,
+                'size_bytes' => Storage::exists($path) ? Storage::size($path) : null,
+                'uploaded_by_user_id' => $actor->id,
+            ]
+        );
+    }
+
     private function normalize(string $field, mixed $value): mixed
     {
-        if (in_array($field, ['target_demographics', 'budget_allocations', 'specific_objectives', 'major_activities', 'program_activities', 'budget_breakdown', 'schedule_summary', 'venue_summary'], true)) {
+        if (in_array($field, ['target_demographics', 'budget_allocations', 'program_activities', 'budget_breakdown', 'schedule_summary', 'venue_summary'], true)) {
+            return $value;
+        }
+
+        if ($field === 'delegate_count') {
+            return is_numeric($value) ? (int) $value : null;
+        }
+
+        if ($field === 'budget_cost') {
+            return is_numeric($value) ? (float) $value : null;
+        }
+
+        if (in_array($field, ['specific_objectives', 'major_activities'], true)) {
+            if (is_array($value)) {
+                return array_values(array_filter($value, fn ($v) => ! blank($v)));
+            }
+            if (is_string($value)) {
+                $lines = array_filter(array_map('trim', preg_split('/\r\n|\r|\n/', $value)));
+
+                return array_values($lines);
+            }
+
             return $value;
         }
 

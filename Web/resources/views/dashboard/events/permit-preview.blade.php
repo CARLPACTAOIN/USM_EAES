@@ -8,6 +8,12 @@
         <a href="{{ route('dashboard.events') }}" class="btn btn-secondary">Back to Events</a>
     </div>
 
+    @if($event->permit_version < 1)
+        <div class="rounded-lg border border-amber-500/40 bg-amber-950/20 px-4 py-3 text-sm text-amber-200" role="status">
+            Preview only — this is not an issued permit. It becomes an official Digital Permit only after every required gate is complete and OSA gives final approval.
+        </div>
+    @endif
+
     <div class="grid gap-4">
         <section class="card p-5">
             <h2 class="text-lg font-semibold">Activity Details</h2>

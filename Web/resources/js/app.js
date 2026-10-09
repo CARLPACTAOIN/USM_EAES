@@ -45,6 +45,313 @@ Alpine.data('proposalDraftAutosave', ({ saveUrl }) => ({
     },
 }));
 
+Alpine.data('ppaPacketWorkspace', ({
+    eventId,
+    saveUrl,
+    initialLocationType = 'on-campus',
+    initialScore = 0,
+    initialMissingCount = 0,
+    initialIssues = [],
+    initialGroupedIssues = {},
+    initialBudgetBreakdown = [],
+    initialProgramActivities = [],
+    initialEvaluationQuestions = [],
+}) => ({
+    eventId,
+    saveUrl,
+    activeSection: 1,
+    status: 'Saved just now',
+    saveFailed: false,
+    failedPayload: null,
+    saveInFlight: false,
+    saveSequence: 0,
+    lastDispatchedSeq: 0,
+    hasUnsavedChanges: false,
+    dirtyPayload: {},
+    locationType: initialLocationType,
+    score: initialScore,
+    missingCount: initialMissingCount,
+    issues: initialIssues,
+    groupedIssues: initialGroupedIssues,
+    focusedIssue: '',
+    budgetBreakdown: Array.isArray(initialBudgetBreakdown) && initialBudgetBreakdown.length ? initialBudgetBreakdown : [{ item: '', amount: '', notes: '' }],
+    programActivities: Array.isArray(initialProgramActivities) && initialProgramActivities.length ? initialProgramActivities : [{ time: '', activity: '', person_in_charge: '' }],
+    evaluationQuestions: Array.isArray(initialEvaluationQuestions) && initialEvaluationQuestions.length ? initialEvaluationQuestions : [],
+    debounceTimer: null,
+
+    sectionMap: {
+        'basics': 1,
+        'schedule_and_venue': 2,
+        'program_and_beneficiaries': 3,
+        'budget': 4,
+        'evaluation_and_supporting_files': 5,
+        'review_and_submit': 6,
+    },
+
+    init() {
+        const savedSection = sessionStorage.getItem('eaes_ppa_draft_section_' + this.eventId);
+        const urlParams = new URLSearchParams(window.location.search);
+        const paramSection = urlParams.get('section');
+        const hashSection = window.location.hash ? window.location.hash.replace('#section-', '') : null;
+
+        const candidate = paramSection || hashSection || savedSection;
+        if (candidate) {
+            const num = parseInt(candidate, 10);
+            if (num >= 1 && num <= 6) {
+                this.activeSection = num;
+            } else if (this.sectionMap[candidate]) {
+                this.activeSection = this.sectionMap[candidate];
+            }
+        }
+    },
+
+    setSection(num) {
+        if (num < 1 || num > 6) return;
+        this.activeSection = num;
+        sessionStorage.setItem('eaes_ppa_draft_section_' + this.eventId, num);
+        const url = new URL(window.location.href);
+        url.searchParams.set('section', num);
+        window.history.replaceState({}, '', url);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    },
+
+    jumpTo(issue) {
+        if (issue.section_index) {
+            this.setSection(issue.section_index);
+        }
+        this.focusedIssue = issue.message;
+        this.$nextTick(() => {
+            const el = document.getElementById(issue.target_id);
+            if (el) {
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                setTimeout(() => {
+                    el.focus();
+                    el.classList.add('ring-2', 'ring-(--color-accent)');
+                    setTimeout(() => el.classList.remove('ring-2', 'ring-(--color-accent)'), 2000);
+                }, 250);
+            }
+        });
+    },
+
+    queueSave(key, value) {
+        this.status = 'Unsaved changes';
+        this.hasUnsavedChanges = true;
+        this.dirtyPayload[key] = value;
+        this.saveFailed = false;
+
+        clearTimeout(this.debounceTimer);
+        this.debounceTimer = setTimeout(() => {
+            this.performSave();
+        }, 600);
+    },
+
+    async performSave() {
+        if (!this.hasUnsavedChanges && !this.saveFailed) return;
+        if (this.saveInFlight) return;
+
+        const payloadToSend = { ...this.dirtyPayload };
+        this.dirtyPayload = {};
+        this.hasUnsavedChanges = false;
+        this.saveInFlight = true;
+        this.status = 'Saving…';
+
+        const thisSeq = ++this.saveSequence;
+        this.lastDispatchedSeq = thisSeq;
+
+        try {
+            const response = await fetch(this.saveUrl, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content,
+                },
+                body: JSON.stringify(payloadToSend),
+            });
+
+            if (!response.ok) {
+                throw new Error('Save response failed with status ' + response.status);
+            }
+
+            const data = await response.json();
+
+            if (thisSeq === this.lastDispatchedSeq) {
+                if (this.hasUnsavedChanges) {
+                    this.status = 'Unsaved changes';
+                    this.performSave();
+                } else {
+                    this.status = 'Saved just now';
+                    this.saveFailed = false;
+                    this.failedPayload = null;
+                }
+
+                if (data.readiness) {
+                    this.score = data.readiness.score;
+                    this.missingCount = data.readiness.missing_count;
+                    this.issues = data.readiness.issues || [];
+                    this.groupedIssues = data.readiness.grouped_issues || {};
+                }
+            }
+        } catch (error) {
+            this.saveFailed = true;
+            this.failedPayload = payloadToSend;
+            this.dirtyPayload = { ...payloadToSend, ...this.dirtyPayload };
+            this.status = 'Could not save';
+        } finally {
+            this.saveInFlight = false;
+        }
+    },
+
+    retrySave() {
+        this.saveFailed = false;
+        this.status = 'Saving…';
+        this.hasUnsavedChanges = true;
+        this.performSave();
+    },
+
+    async flushPendingChanges() {
+        clearTimeout(this.debounceTimer);
+
+        if (this.hasUnsavedChanges) {
+            await this.performSave();
+        }
+
+        while (this.saveInFlight) {
+            await new Promise(resolve => setTimeout(resolve, 25));
+        }
+
+        if (this.hasUnsavedChanges) {
+            return this.flushPendingChanges();
+        }
+
+        return !this.saveFailed;
+    },
+
+    async flushPendingBefore(targetUrl) {
+        const saved = await this.flushPendingChanges();
+        if (saved && targetUrl) {
+            window.open(targetUrl, '_blank');
+        } else if (!saved) {
+            this.status = 'Resolve the save error before continuing';
+        }
+    },
+
+    async submitAfterFlushing(event) {
+        const saved = await this.flushPendingChanges();
+        if (!saved) {
+            this.status = 'Resolve the save error before submitting';
+            return;
+        }
+
+        if (window.confirm('Confirm first submission of this Canonical PPA Packet. It will bind the active Published Template Version to this workflow and start the institutional approval route.')) {
+            event.target.submit();
+        }
+    },
+
+    async uploadFile(fileInput, fieldName) {
+        if (!fileInput.files || !fileInput.files[0]) return;
+        const file = fileInput.files[0];
+        const formData = new FormData();
+        formData.append(fieldName, file);
+        formData.append('_method', 'PATCH');
+
+        this.status = 'Saving…';
+        this.saveInFlight = true;
+
+        try {
+            const response = await fetch(this.saveUrl, {
+                method: 'POST',
+                headers: {
+                    'Accept': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content,
+                },
+                body: formData,
+            });
+
+            if (!response.ok) throw new Error('Upload failed');
+            const data = await response.json();
+            this.status = 'Saved just now';
+            this.saveFailed = false;
+            if (data.readiness) {
+                this.score = data.readiness.score;
+                this.missingCount = data.readiness.missing_count;
+                this.issues = data.readiness.issues || [];
+                this.groupedIssues = data.readiness.grouped_issues || {};
+            }
+            window.location.reload();
+        } catch (err) {
+            this.status = 'Could not save';
+            this.saveFailed = true;
+        } finally {
+            this.saveInFlight = false;
+        }
+    },
+
+    async removeFile(clearFlagName) {
+        this.status = 'Saving…';
+        try {
+            const response = await fetch(this.saveUrl, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content,
+                },
+                body: JSON.stringify({ [clearFlagName]: true }),
+            });
+            if (!response.ok) throw new Error('Removal failed');
+            window.location.reload();
+        } catch (err) {
+            this.status = 'Could not save';
+        }
+    },
+
+    addBudgetRow() {
+        this.budgetBreakdown.push({ item: '', amount: '', notes: '' });
+        this.saveBudgetBreakdown();
+    },
+
+    removeBudgetRow(index) {
+        this.budgetBreakdown.splice(index, 1);
+        if (this.budgetBreakdown.length === 0) {
+            this.budgetBreakdown.push({ item: '', amount: '', notes: '' });
+        }
+        this.saveBudgetBreakdown();
+    },
+
+    saveBudgetBreakdown() {
+        this.queueSave('canonical_packet', {
+            budget_breakdown: this.budgetBreakdown
+                .filter(row => (row.item && row.item.trim() !== '') || row.amount !== '')
+                .map(row => ({
+                    item: row.item,
+                    amount: isNaN(parseFloat(row.amount)) ? 0 : parseFloat(row.amount),
+                    notes: row.notes || '',
+                }))
+        });
+    },
+
+    addActivityRow() {
+        this.programActivities.push({ time: '', activity: '', person_in_charge: '' });
+        this.saveProgramActivities();
+    },
+
+    removeActivityRow(index) {
+        this.programActivities.splice(index, 1);
+        if (this.programActivities.length === 0) {
+            this.programActivities.push({ time: '', activity: '', person_in_charge: '' });
+        }
+        this.saveProgramActivities();
+    },
+
+    saveProgramActivities() {
+        this.queueSave('canonical_packet', {
+            program_activities: this.programActivities
+                .filter(row => row.activity && row.activity.trim() !== '')
+        });
+    },
+}));
+
 /* ─── Dynamic Event Day Rows + Evaluation Form ───────────── */
 Alpine.data('eventDaysForm', (initialDays = [], initialQuestions = []) => ({
     days: Array.isArray(initialDays) && initialDays.length

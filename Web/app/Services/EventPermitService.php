@@ -31,16 +31,25 @@ class EventPermitService
     public function submit(Event $event, User $actor, bool $returnedTasksAddressed = false): Event
     {
         $this->authorizeOrganizer($event, $actor);
-
-        if (! in_array($event->status, [Event::STATUS_DRAFT, Event::STATUS_REVISION_REQUESTED], true)) {
-            throw new DomainException('Only draft or revision-requested proposals can be submitted.');
-        }
-
-        $this->submissionGuard->assertSubmittable($event);
-        $isRevisionResubmission = $event->status === Event::STATUS_REVISION_REQUESTED;
         $reopenedTasks = collect();
+        $submitted = false;
 
-        $submittedEvent = DB::transaction(function () use ($event, $actor, $isRevisionResubmission, $returnedTasksAddressed, &$reopenedTasks): Event {
+        $submittedEvent = DB::transaction(function () use ($event, $actor, $returnedTasksAddressed, &$reopenedTasks, &$submitted): Event {
+            $event = Event::query()->lockForUpdate()->findOrFail($event->id);
+
+            if (in_array($event->status, [Event::STATUS_SUBMITTED, Event::STATUS_UNDER_REVIEW], true)) {
+                if ($event->workflowRun()->exists()) {
+                    return $event->fresh();
+                }
+            }
+
+            if (! in_array($event->status, [Event::STATUS_DRAFT, Event::STATUS_REVISION_REQUESTED], true)) {
+                throw new DomainException('Only draft or revision-requested proposals can be submitted.');
+            }
+
+            $this->submissionGuard->assertSubmittable($event);
+            $isRevisionResubmission = $event->status === Event::STATUS_REVISION_REQUESTED;
+
             if ($isRevisionResubmission) {
                 $reopenedTasks = $this->proposalWorkflows->reopenReturnedTasksForResubmission($event, $returnedTasksAddressed);
             }
@@ -60,10 +69,14 @@ class EventPermitService
                 $this->notifications->notifyProposalSubmitted($event);
             }
 
+            $submitted = true;
+
             return $event->fresh();
         });
 
-        $this->notifyResubmittedWorkflowTasks($reopenedTasks);
+        if ($submitted) {
+            $this->notifyResubmittedWorkflowTasks($reopenedTasks);
+        }
 
         return $submittedEvent;
     }

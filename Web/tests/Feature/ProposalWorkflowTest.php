@@ -112,14 +112,41 @@ class ProposalWorkflowTest extends TestCase
         [$organization, $organizer] = $this->setupOrganizationWithOrganizer();
         $event = $this->createSubmittableEvent($organization, $organizer);
 
-        $workflowService = app(ProposalWorkflowService::class);
+        $permitService = app(EventPermitService::class);
 
-        $run1 = $workflowService->bindFirstSubmission($event, $organizer);
-        $run2 = $workflowService->bindFirstSubmission($event, $organizer);
+        $firstSubmission = $permitService->submit($event, $organizer);
+        $secondSubmission = $permitService->submit($event->fresh(), $organizer);
+        $run1 = $firstSubmission->workflowRun()->firstOrFail();
+        $run2 = $secondSubmission->workflowRun()->firstOrFail();
 
         $this->assertSame($run1->id, $run2->id);
         $this->assertSame(1, ProposalWorkflowRun::where('event_id', $event->id)->count());
         $this->assertSame(5, ProposalWorkflowTask::where('workflow_run_id', $run1->id)->count());
+    }
+
+    public function test_failed_first_submission_rolls_back_the_event_and_workflow_records(): void
+    {
+        [$organization, $organizer] = $this->setupOrganizationWithOrganizer();
+        $event = $this->createSubmittableEvent($organization, $organizer);
+        $initialScopeCount = EventParticipationScope::count();
+
+        $this->mock(ProposalWorkflowService::class, function ($mock): void {
+            $mock->shouldReceive('bindFirstSubmission')
+                ->once()
+                ->andThrow(new DomainException('Unable to bind workflow.'));
+        });
+
+        try {
+            app(EventPermitService::class)->submit($event, $organizer);
+            $this->fail('Expected first submission to fail.');
+        } catch (DomainException $exception) {
+            $this->assertSame('Unable to bind workflow.', $exception->getMessage());
+        }
+
+        $this->assertSame(Event::STATUS_DRAFT, $event->fresh()->status);
+        $this->assertDatabaseCount('proposal_workflow_runs', 0);
+        $this->assertDatabaseCount('proposal_workflow_tasks', 0);
+        $this->assertSame($initialScopeCount, EventParticipationScope::count());
     }
 
     public function test_published_template_version_is_immutable(): void
