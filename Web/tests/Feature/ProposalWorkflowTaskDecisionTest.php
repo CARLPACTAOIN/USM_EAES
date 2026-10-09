@@ -2,10 +2,13 @@
 
 namespace Tests\Feature;
 
+use App\Livewire\Dashboard\EventProposalWorkflow;
+use App\Models\AdminAssignment;
 use App\Models\ApprovalTrail;
 use App\Models\CanonicalPpaAttachment;
 use App\Models\College;
 use App\Models\Event;
+use App\Models\EventParticipationScope;
 use App\Models\Organization;
 use App\Models\ProposalProcessStep;
 use App\Models\ProposalProcessStepDependency;
@@ -21,6 +24,8 @@ use DomainException;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Route;
+use Livewire\Livewire;
 use Tests\TestCase;
 
 class ProposalWorkflowTaskDecisionTest extends TestCase
@@ -128,6 +133,185 @@ class ProposalWorkflowTaskDecisionTest extends TestCase
             ->assertOk()
             ->assertSee('Approval Trail')
             ->assertSee('Approved');
+    }
+
+    public function test_global_event_decision_shortcuts_are_unavailable(): void
+    {
+        $actor = $this->osaUser('osa.no-shortcuts');
+        [$event] = $this->workflowRun($actor);
+
+        $this->assertFalse(Route::has('dashboard.events.review'));
+        $this->assertFalse(Route::has('dashboard.events.approve'));
+        $this->assertFalse(Route::has('dashboard.events.revision'));
+        $this->assertFalse(Route::has('dashboard.events.reject'));
+
+        foreach (['review', 'approve', 'revision', 'reject'] as $action) {
+            $this->actingAs($actor)
+                ->post("/dashboard/events/{$event->id}/{$action}", [
+                    'review_remarks' => 'This shortcut must not be reachable.',
+                ])
+                ->assertNotFound();
+
+            $this->actingAs($actor)
+                ->postJson("/api/v1/events/{$event->id}/{$action}", [
+                    'review_remarks' => 'This shortcut must not be reachable.',
+                ])
+                ->assertNotFound();
+        }
+
+        Livewire::actingAs($actor)
+            ->test(EventProposalWorkflow::class, ['eventId' => $event->id])
+            ->assertDontSeeHtml('wire:click="startReview"')
+            ->assertDontSeeHtml('wire:click="approveProposal"')
+            ->assertDontSeeHtml('wire:submit="requestRevision"')
+            ->assertDontSeeHtml('wire:click="rejectProposal"');
+
+        $this->assertSame(Event::STATUS_UNDER_REVIEW, $event->fresh()->status);
+        $this->assertDatabaseCount('approval_trails', 0);
+    }
+
+    public function test_unassigned_out_of_order_completed_cross_tenant_and_wrong_scope_decisions_do_not_change_state(): void
+    {
+        $assignedApprover = $this->osaUser('osa.assigned');
+        $otherApprover = $this->osaUser('osa.unassigned');
+        $step = $this->step('osa_review', 'OSA Review', 1);
+        $this->publishVersion();
+
+        [$unassignedEvent, $unassignedRun] = $this->workflowRun($assignedApprover);
+        $unassignedTask = $this->task($unassignedRun, $step, $assignedApprover, ProposalWorkflowTask::STATUS_AVAILABLE);
+
+        $this->actingAs($otherApprover)
+            ->post(route('dashboard.workflow-tasks.decide', $unassignedTask), [
+                'decision' => ProposalWorkflowTask::DECISION_APPROVED,
+            ])
+            ->assertForbidden();
+
+        [$blockedEvent, $blockedRun] = $this->workflowRun($assignedApprover);
+        $blockedTask = $this->task($blockedRun, $step, $assignedApprover, ProposalWorkflowTask::STATUS_BLOCKED);
+
+        $this->actingAs($assignedApprover)
+            ->post(route('dashboard.workflow-tasks.decide', $blockedTask), [
+                'decision' => ProposalWorkflowTask::DECISION_APPROVED,
+            ])
+            ->assertSessionHasErrors('task');
+
+        [$completedEvent, $completedRun] = $this->workflowRun($assignedApprover);
+        $completedTask = $this->task($completedRun, $step, $assignedApprover, ProposalWorkflowTask::STATUS_APPROVED);
+
+        $this->actingAs($assignedApprover)
+            ->post(route('dashboard.workflow-tasks.decide', $completedTask), [
+                'decision' => ProposalWorkflowTask::DECISION_APPROVED,
+            ])
+            ->assertForbidden();
+
+        [$wrongScopeEvent, $wrongScopeRun] = $this->workflowRun($assignedApprover);
+        $wrongScopeTask = $this->task($wrongScopeRun, $step, $assignedApprover, ProposalWorkflowTask::STATUS_AVAILABLE);
+        $wrongScopeTask->update([
+            'assigned_role' => 'dept_chair',
+            'assigned_scope' => 'department',
+        ]);
+
+        $this->actingAs($assignedApprover)
+            ->post(route('dashboard.workflow-tasks.decide', $wrongScopeTask), [
+                'decision' => ProposalWorkflowTask::DECISION_APPROVED,
+            ])
+            ->assertForbidden();
+
+        $otherOrganization = Organization::create([
+            'college_id' => $this->organization->college_id,
+            'name' => 'Other Tenant Society',
+            'acronym' => 'OTS',
+            'type' => 'society',
+            'status' => 'active',
+        ]);
+        $crossTenantApprover = User::factory()->create([
+            'email' => 'venue.cross-tenant@usm.edu.ph',
+        ]);
+        $crossTenantApprover->assignRole('Office Event Admin');
+
+        foreach (['Office Event Admin', 'Venue Custodian'] as $roleName) {
+            AdminAssignment::create([
+                'user_id' => $crossTenantApprover->id,
+                'role_name' => $roleName,
+                'organization_id' => $otherOrganization->id,
+                'college_id' => $otherOrganization->college_id,
+                'school_year_id' => $this->schoolYear->id,
+                'academic_year' => $this->schoolYear->label,
+                'status' => AdminAssignment::STATUS_ACTIVE,
+                'is_primary_admin' => false,
+                'approved_at' => now(),
+            ]);
+        }
+
+        [$crossTenantEvent, $crossTenantRun] = $this->workflowRun($crossTenantApprover);
+        $crossTenantScope = EventParticipationScope::create([
+            'event_id' => $crossTenantEvent->id,
+            'school_year_id' => $this->schoolYear->id,
+            'participation_role' => EventParticipationScope::ROLE_ORGANIZER,
+            'participant_type' => 'organization',
+            'organization_id' => $this->organization->id,
+            'participant_name_snapshot' => $this->organization->name,
+            'ppa_required' => true,
+            'ppa_status' => EventParticipationScope::PPA_UNDER_REVIEW,
+            'status' => EventParticipationScope::STATUS_ACTIVE,
+        ]);
+        $crossTenantTask = $this->task($crossTenantRun, $step, $crossTenantApprover, ProposalWorkflowTask::STATUS_AVAILABLE);
+        $crossTenantMetadata = $crossTenantTask->metadata;
+        data_set($crossTenantMetadata, 'assignment.role_key', 'venue_admin');
+        $crossTenantTask->update([
+            'assigned_role' => 'venue_admin',
+            'assigned_scope' => 'organization',
+            'metadata' => $crossTenantMetadata,
+        ]);
+
+        $this->actingAs($crossTenantApprover)
+            ->post(route('dashboard.workflow-tasks.decide', $crossTenantTask), [
+                'decision' => ProposalWorkflowTask::DECISION_APPROVED,
+            ])
+            ->assertForbidden();
+
+        foreach ([$unassignedEvent, $blockedEvent, $completedEvent, $wrongScopeEvent, $crossTenantEvent] as $event) {
+            $this->assertSame(Event::STATUS_UNDER_REVIEW, $event->fresh()->status);
+        }
+
+        foreach ([$unassignedRun, $blockedRun, $completedRun, $wrongScopeRun, $crossTenantRun] as $run) {
+            $this->assertSame(ProposalWorkflowRun::STATUS_IN_PROGRESS, $run->fresh()->status);
+        }
+
+        $this->assertSame(ProposalWorkflowTask::STATUS_AVAILABLE, $unassignedTask->fresh()->status);
+        $this->assertSame(ProposalWorkflowTask::STATUS_BLOCKED, $blockedTask->fresh()->status);
+        $this->assertSame(ProposalWorkflowTask::STATUS_APPROVED, $completedTask->fresh()->status);
+        $this->assertSame(ProposalWorkflowTask::STATUS_AVAILABLE, $wrongScopeTask->fresh()->status);
+        $this->assertSame(ProposalWorkflowTask::STATUS_AVAILABLE, $crossTenantTask->fresh()->status);
+        $this->assertSame(EventParticipationScope::PPA_UNDER_REVIEW, $crossTenantScope->fresh()->ppa_status);
+        $this->assertDatabaseCount('approval_trails', 0);
+        $this->assertDatabaseCount('audit_logs', 0);
+    }
+
+    public function test_first_accepted_task_decision_activates_review_internally(): void
+    {
+        $actor = $this->osaUser('osa.internal-review');
+        $firstStep = $this->step('osa_intake', 'OSA Intake', 1);
+        $secondStep = $this->step('osa_final', 'OSA Final Approval', 2);
+        $this->dependency($secondStep, $firstStep);
+        $this->publishVersion();
+
+        [$event, $run] = $this->workflowRun($actor);
+        $event->update(['status' => Event::STATUS_SUBMITTED]);
+        $task = $this->task($run, $firstStep, $actor, ProposalWorkflowTask::STATUS_AVAILABLE);
+        $this->task($run, $secondStep, $actor, ProposalWorkflowTask::STATUS_BLOCKED);
+
+        $this->actingAs($actor)
+            ->post(route('dashboard.workflow-tasks.decide', $task), [
+                'decision' => ProposalWorkflowTask::DECISION_APPROVED,
+            ])
+            ->assertRedirect(route('dashboard.workflow-tasks.show', $task));
+
+        $this->assertSame(Event::STATUS_UNDER_REVIEW, $event->fresh()->status);
+        $this->assertDatabaseHas('approval_trails', [
+            'workflow_task_id' => $task->id,
+            'decision' => ProposalWorkflowTask::DECISION_APPROVED,
+        ]);
     }
 
     public function test_rejected_and_revision_requested_decisions_require_remarks(): void

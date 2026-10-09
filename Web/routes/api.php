@@ -35,10 +35,6 @@ Route::prefix('v1')->group(function () {
         Route::get('/venues', [VenueController::class, 'index']);
         Route::post('/events', [EventProposalController::class, 'store'])->middleware(['tenant.scope:create-proposals', 'throttle:api-write']);
         Route::post('/events/{event}/submit', [EventProposalController::class, 'submit'])->middleware(['tenant.scope:create-proposals', 'throttle:api-write']);
-        Route::post('/events/{event}/review', [EventProposalController::class, 'startReview'])->middleware(['tenant.scope:approve-proposals', 'throttle:api-write']);
-        Route::post('/events/{event}/approve', [EventProposalController::class, 'approve'])->middleware(['tenant.scope:approve-proposals', 'throttle:api-write']);
-        Route::post('/events/{event}/revision', [EventProposalController::class, 'requestRevision'])->middleware(['tenant.scope:approve-proposals', 'throttle:api-write']);
-        Route::post('/events/{event}/reject', [EventProposalController::class, 'reject'])->middleware(['tenant.scope:approve-proposals', 'throttle:api-write']);
         Route::patch('/events/{event}', [EventProposalController::class, 'update'])->middleware(['tenant.scope:create-proposals', 'throttle:api-write']);
         Route::post('/events/{event}/link', [EventProposalController::class, 'linkSubEvent'])->middleware(['tenant.scope:create-proposals', 'throttle:api-write']);
         Route::post('/events/{event}/venue-amendment', [EventProposalController::class, 'startVenueAmendment'])->middleware(['tenant.scope:create-proposals', 'throttle:api-write']);

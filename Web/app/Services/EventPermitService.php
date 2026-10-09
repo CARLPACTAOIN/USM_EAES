@@ -8,6 +8,7 @@ use App\Models\Event;
 use App\Models\EventParticipationScope;
 use App\Models\EventPermitVersion;
 use App\Models\PermitCopyOwner;
+use App\Models\ProposalWorkflowRun;
 use App\Models\ProposalWorkflowTask;
 use App\Models\ScannerSession;
 use App\Models\User;
@@ -68,30 +69,18 @@ class EventPermitService
         return $submittedEvent;
     }
 
-    public function startReview(Event $event, User $actor): Event
+    public function issueIfCompletedOrganizerOsaPermitGateDecision(ProposalWorkflowTask $task, User $actor): ?Event
     {
-        $this->authorizeOsa($actor);
+        $task->loadMissing(['processStep', 'workflowRun.event', 'workflowRun.participationScope']);
 
-        if ($event->status !== Event::STATUS_SUBMITTED) {
-            throw new DomainException('Only submitted proposals can be reviewed.');
+        if (! $this->isCompletedOrganizerOsaPermitGateDecision($task, $actor)) {
+            return null;
         }
 
-        $event->update(['status' => Event::STATUS_UNDER_REVIEW]);
-        $this->participationScopes->ensureOrganizerScope($event)->update([
-            'ppa_status' => EventParticipationScope::PPA_UNDER_REVIEW,
-            'reviewed_by' => $actor->id,
-            'reviewed_at' => now(),
-        ]);
-
-        return $event->fresh();
-    }
-
-    public function approve(Event $event, User $actor): Event
-    {
-        $this->authorizeOsa($actor);
+        $event = $task->workflowRun->event;
 
         if (! in_array($event->status, [Event::STATUS_SUBMITTED, Event::STATUS_UNDER_REVIEW], true)) {
-            throw new DomainException('Proposal must be submitted or under review to approve.');
+            throw new DomainException('Proposal must be submitted or under review before permit issuance.');
         }
 
         if (! EventEvaluationForm::hasLockedForm($event)) {
@@ -100,10 +89,18 @@ class EventPermitService
 
         $this->submissionGuard->assertSubmittable($event);
 
-        return DB::transaction(function () use ($event, $actor): Event {
+        return DB::transaction(function () use ($task, $event, $actor): Event {
+            $lockedTask = ProposalWorkflowTask::with(['processStep', 'workflowRun.event', 'workflowRun.participationScope'])
+                ->whereKey($task->id)
+                ->lockForUpdate()
+                ->firstOrFail();
+            if (! $this->isCompletedOrganizerOsaPermitGateDecision($lockedTask, $actor)) {
+                throw new DomainException('Permit issuance requires the completed organizer OSA gate decision that approved the workflow run.');
+            }
+
             $lockedEvent = Event::whereKey($event->id)->lockForUpdate()->firstOrFail();
             if (! in_array($lockedEvent->status, [Event::STATUS_SUBMITTED, Event::STATUS_UNDER_REVIEW], true)) {
-                throw new DomainException('Proposal was already processed by another reviewer.');
+                throw new DomainException('Proposal was already processed by another workflow decision.');
             }
             $lockedEvent->loadMissing(['canonicalPpaPacket.attachments', 'organization', 'venue']);
             $this->assertDigitalPermitGateSatisfied($lockedEvent);
@@ -168,51 +165,6 @@ class EventPermitService
         });
     }
 
-    public function requestRevision(Event $event, User $actor, string $remarks): Event
-    {
-        $this->authorizeOsa($actor);
-        $this->assertReviewable($event);
-
-        return DB::transaction(function () use ($event, $actor, $remarks): Event {
-            $event->update(['status' => Event::STATUS_REVISION_REQUESTED]);
-            $organizerScope = $this->participationScopes->ensureOrganizerScope($event);
-            $organizerScope->update([
-                'ppa_status' => EventParticipationScope::PPA_REVISION_REQUESTED,
-                'reviewed_by' => $actor->id,
-                'reviewed_at' => now(),
-                'review_remarks' => trim($remarks),
-            ]);
-            $this->notifications->notifyProposalRevisionRequested($organizerScope->fresh(['event.organization', 'organization', 'delegatedOrganization']));
-            $this->audit($event, $actor, $event->pending_venue_amendment_reason ? 'venue-amendment-revision-requested' : 'event-proposal-revision-requested');
-            if ($event->pending_venue_amendment_reason) {
-                $this->notifications->notifyPermitWorkflow($event, 'venue-amendment-revision-requested');
-            }
-
-            return $event->fresh();
-        });
-    }
-
-    public function reject(Event $event, User $actor): Event
-    {
-        $this->authorizeOsa($actor);
-        $this->assertReviewable($event);
-
-        $event->update(['status' => Event::STATUS_REJECTED]);
-        $this->participationScopes->ensureOrganizerScope($event)->update([
-            'ppa_status' => EventParticipationScope::PPA_REJECTED,
-            'reviewed_by' => $actor->id,
-            'reviewed_at' => now(),
-        ]);
-        $this->audit($event, $actor, $event->pending_venue_amendment_reason ? 'venue-amendment-rejected' : 'event-proposal-rejected');
-        if ($event->pending_venue_amendment_reason) {
-            $this->notifications->notifyPermitWorkflow($event, 'venue-amendment-rejected');
-        } else {
-            $this->notifications->notifyEventRejected($event);
-        }
-
-        return $event->fresh();
-    }
-
     public function beginVenueAmendment(Event $event, User $actor, string $reason): Event
     {
         $this->authorizeOrganizer($event, $actor);
@@ -269,11 +221,17 @@ class EventPermitService
         });
     }
 
-    private function assertReviewable(Event $event): void
+    private function isCompletedOrganizerOsaPermitGateDecision(ProposalWorkflowTask $task, User $actor): bool
     {
-        if (! in_array($event->status, [Event::STATUS_SUBMITTED, Event::STATUS_UNDER_REVIEW], true)) {
-            throw new DomainException('Proposal must be submitted or under review.');
-        }
+        return $task->assigned_user_id === $actor->id
+            && $task->assigned_role === 'osa'
+            && $task->status === ProposalWorkflowTask::STATUS_APPROVED
+            && $task->decision === ProposalWorkflowTask::DECISION_APPROVED
+            && $task->decided_by === $actor->id
+            && (bool) $task->processStep?->is_gate
+            && $task->workflowRun->participationScope === null
+            && $task->workflowRun->status === ProposalWorkflowRun::STATUS_APPROVED
+            && $task->approvalTrails()->where('actor_id', $actor->id)->where('decision', ProposalWorkflowTask::DECISION_APPROVED)->exists();
     }
 
     private function assertDigitalPermitGateSatisfied(Event $event): void
@@ -478,13 +436,6 @@ class EventPermitService
         $scope = $this->adminScopes->forUser($actor);
         if (! $actor->can('create-proposals') || ! $scope || $scope->isSuperAdmin() || $scope->organizationId !== $event->organization_id) {
             throw new DomainException('Only the event organizer can perform this action.');
-        }
-    }
-
-    private function authorizeOsa(User $actor): void
-    {
-        if (! $actor->hasRole('Super Admin (OSA)') || ! $actor->can('approve-proposals')) {
-            throw new DomainException('Only OSA may review event proposals.');
         }
     }
 

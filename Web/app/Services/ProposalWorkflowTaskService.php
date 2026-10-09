@@ -25,6 +25,7 @@ class ProposalWorkflowTaskService
 {
     public function __construct(
         private readonly EventNotificationService $notifications,
+        private readonly EventPermitService $eventPermits,
         private readonly LegacyProposalCompatibilityProjection $legacyProjection,
         private readonly ProposalRevisionTargets $revisionTargets,
     ) {}
@@ -274,10 +275,14 @@ class ProposalWorkflowTaskService
                 ],
             ]);
 
+            $this->activateOrganizerReview($lockedTask->workflowRun, $event);
+
             $unblockedTasks = new Collection;
             if (in_array($resultingStatus, self::SATISFIED_PREREQUISITE_STATUSES, true)) {
                 $unblockedTasks = $this->unblockSatisfiedDependents($lockedTask, $decidedAt);
                 $this->markRunApprovedWhenComplete($lockedTask->workflowRun, $decidedAt, $actor);
+                $lockedTask->workflowRun->refresh();
+                $this->eventPermits->issueIfCompletedOrganizerOsaPermitGateDecision($lockedTask, $actor);
             } elseif ($resultingStatus === ProposalWorkflowTask::STATUS_REJECTED) {
                 $this->markRunAndProposalRejected($lockedTask->workflowRun, $event, $decidedAt, $actor, $remarks);
             } elseif ($resultingStatus === ProposalWorkflowTask::STATUS_REVISION_REQUESTED) {
@@ -617,6 +622,21 @@ class ProposalWorkflowTaskService
         }
     }
 
+    private function activateOrganizerReview(ProposalWorkflowRun $run, Event $event): void
+    {
+        if ($run->participationScope || $event->status !== Event::STATUS_SUBMITTED) {
+            return;
+        }
+
+        $event->update(['status' => Event::STATUS_UNDER_REVIEW]);
+
+        EventParticipationScope::query()
+            ->where('event_id', $event->id)
+            ->where('participation_role', EventParticipationScope::ROLE_ORGANIZER)
+            ->where('ppa_status', EventParticipationScope::PPA_SUBMITTED)
+            ->update(['ppa_status' => EventParticipationScope::PPA_UNDER_REVIEW]);
+    }
+
     private function markRunAndProposalRejected(ProposalWorkflowRun $run, Event $event, \DateTimeInterface $completedAt, User $actor, ?string $remarks): void
     {
         $run->update([
@@ -639,6 +659,7 @@ class ProposalWorkflowTaskService
         $event->update([
             'status' => Event::STATUS_REJECTED,
         ]);
+        $this->updateOrganizerScopeDecision($event, EventParticipationScope::PPA_REJECTED, $actor, $remarks, $completedAt);
     }
 
     private function markRunAndProposalRevisionRequested(ProposalWorkflowRun $run, Event $event, User $actor, ?string $remarks): void
@@ -663,6 +684,26 @@ class ProposalWorkflowTaskService
         $event->update([
             'status' => Event::STATUS_REVISION_REQUESTED,
         ]);
+        $this->updateOrganizerScopeDecision($event, EventParticipationScope::PPA_REVISION_REQUESTED, $actor, $remarks, now());
+    }
+
+    private function updateOrganizerScopeDecision(
+        Event $event,
+        string $status,
+        User $actor,
+        ?string $remarks,
+        \DateTimeInterface $decidedAt,
+    ): void {
+        EventParticipationScope::query()
+            ->where('event_id', $event->id)
+            ->where('participation_role', EventParticipationScope::ROLE_ORGANIZER)
+            ->update([
+                'ppa_status' => $status,
+                'reviewed_by' => $actor->id,
+                'reviewed_at' => $decidedAt,
+                'review_remarks' => $remarks,
+                'approved_at' => null,
+            ]);
     }
 
     private function markParticipantScopeApproved(ProposalWorkflowRun $run, \DateTimeInterface $completedAt, User $actor): void

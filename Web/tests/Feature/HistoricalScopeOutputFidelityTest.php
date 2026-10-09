@@ -342,7 +342,8 @@ class HistoricalScopeOutputFidelityTest extends TestCase
         $run = $this->createApprovedWorkflowRun($event, $osa);
 
         $permitService = app(EventPermitService::class);
-        $approvedEvent = $permitService->approve($event->fresh(), $osa);
+        $approvedEvent = $permitService->issueIfCompletedOrganizerOsaPermitGateDecision($run->tasks()->firstOrFail(), $osa);
+        $this->assertNotNull($approvedEvent);
         $version = $approvedEvent->currentPermitVersion()->firstOrFail();
 
         // Check proposal_snapshot locked contents

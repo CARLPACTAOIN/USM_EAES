@@ -557,65 +557,6 @@ class DashboardController extends Controller
         return redirect()->back()->with('error', 'Legacy hardcopy and signature fields are read-only workflow projections.');
     }
 
-    /**
-     * Start review of a submitted proposal (OSA).
-     */
-    public function reviewEvent(Request $request, $eventId)
-    {
-        try {
-            $this->eventPermits->startReview(Event::findOrFail($eventId), $request->user());
-        } catch (DomainException $exception) {
-            return redirect()->back()->with('error', $exception->getMessage());
-        }
-
-        return redirect()->back()->with('success', 'Proposal is now under review.');
-    }
-
-    /**
-     * Approve a proposal (OSA).
-     */
-    public function approveEvent(Request $request, $eventId)
-    {
-        try {
-            $this->eventPermits->approve(Event::findOrFail($eventId), $request->user());
-        } catch (DomainException $exception) {
-            return redirect()->back()->with('error', $exception->getMessage());
-        }
-
-        return redirect()->back()->with('success', 'Event proposal approved. Scanning is now unlocked.');
-    }
-
-    public function requestEventRevision(Request $request, $eventId)
-    {
-        $validated = $request->validate([
-            'review_remarks' => 'required|string|max:1000',
-        ], [], [
-            'review_remarks' => 'revision note',
-        ]);
-
-        try {
-            $this->eventPermits->requestRevision(Event::findOrFail($eventId), $request->user(), $validated['review_remarks']);
-        } catch (DomainException $exception) {
-            return redirect()->back()->with('error', $exception->getMessage());
-        }
-
-        return redirect()->back()->with('success', 'Event proposal returned for revision.');
-    }
-
-    /**
-     * Reject a proposal (OSA).
-     */
-    public function rejectEvent(Request $request, $eventId)
-    {
-        try {
-            $this->eventPermits->reject(Event::findOrFail($eventId), $request->user());
-        } catch (DomainException $exception) {
-            return redirect()->back()->with('error', $exception->getMessage());
-        }
-
-        return redirect()->back()->with('success', 'Event proposal rejected.');
-    }
-
     public function startVenueAmendment(Request $request, Event $event): RedirectResponse
     {
         $validated = $request->validate(['reason' => ['required', 'string', 'max:1000']]);

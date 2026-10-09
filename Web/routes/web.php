@@ -80,10 +80,6 @@ Route::middleware(['auth'])->group(function () {
             Route::post('/events/{event}/update', [DashboardController::class, 'updateEvent'])->name('dashboard.events.update');
             Route::post('/events/{event}/submit', [DashboardController::class, 'submitEvent'])->name('dashboard.events.submit');
             Route::get('/events/{event}/checklist', [DashboardController::class, 'organizerChecklist'])->name('dashboard.events.checklist');
-            Route::post('/events/{event}/review', [DashboardController::class, 'reviewEvent'])->name('dashboard.events.review');
-            Route::post('/events/{event}/approve', [DashboardController::class, 'approveEvent'])->name('dashboard.events.approve');
-            Route::post('/events/{event}/revision', [DashboardController::class, 'requestEventRevision'])->name('dashboard.events.revision');
-            Route::post('/events/{event}/reject', [DashboardController::class, 'rejectEvent'])->name('dashboard.events.reject');
             Route::post('/events/{event}/venue-amendment', [DashboardController::class, 'startVenueAmendment'])->name('dashboard.events.venue-amendment');
             Route::get('/events/{event}/proposal-preview', [DashboardController::class, 'proposalPreview'])->name('dashboard.events.proposal-preview');
             Route::get('/events/{event}/permit-preview', [DashboardController::class, 'permitPreview'])->name('dashboard.events.permit-preview');

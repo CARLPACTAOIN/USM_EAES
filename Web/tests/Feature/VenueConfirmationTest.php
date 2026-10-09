@@ -14,6 +14,9 @@ use App\Models\EventScannerAssignment;
 use App\Models\Organization;
 use App\Models\OrganizationOfficer;
 use App\Models\OrganizationOfficerRoster;
+use App\Models\ProposalProcessStep;
+use App\Models\ProposalProcessTemplate;
+use App\Models\ProposalProcessTemplateVersion;
 use App\Models\ProposalWorkflowRun;
 use App\Models\ProposalWorkflowTask;
 use App\Models\ScannerSession;
@@ -96,8 +99,7 @@ class VenueConfirmationTest extends TestCase
         $event->update(['hardcopy_submitted' => true, 'hardcopy_submitted_at' => now()]);
 
         app(EventPermitService::class)->submit($event->fresh(), $organizer);
-        $this->satisfyPermitGates($event->fresh(), $osa);
-        $approved = app(EventPermitService::class)->approve($event->fresh(), $osa);
+        $approved = $this->approveAvailableWorkflowTasks($event->fresh());
 
         $this->assertSame(1, $approved->permit_version);
         $this->assertDatabaseHas('event_permit_versions', ['event_id' => $event->id, 'version_number' => 1, 'venue_name_snapshot' => $venue->name, 'superseded_at' => null]);
@@ -182,7 +184,7 @@ class VenueConfirmationTest extends TestCase
         Storage::delete($event->venue_confirmation_document_path);
 
         try {
-            app(EventPermitService::class)->approve($event, $osa);
+            $this->approveThroughAssignedOsaTask($event, $osa);
             $this->fail('Approval should fail when venue evidence is missing from private storage.');
         } catch (DomainException $exception) {
             $this->assertStringContainsString('venue confirmation evidence', $exception->getMessage());
@@ -215,7 +217,7 @@ class VenueConfirmationTest extends TestCase
         $newVenue = Venue::factory()->create();
         $event = $this->confirmedEvent($organization, $oldVenue);
         EventEvaluationForm::createForEvent($event, $organizer, EvaluationQuestions::defaultSchema(), 'Evaluation');
-        app(EventPermitService::class)->approve($event, $osa);
+        $this->approveThroughAssignedOsaTask($event, $osa);
         $oldPermit = $event->fresh()->permitVersions()->firstOrFail();
         $session = ScannerSession::create(['event_id' => $event->id, 'scanner_user_id' => $organizer->id, 'token_id' => '123', 'issued_by' => $organizer->id, 'status' => ScannerSession::STATUS_ACTIVE, 'issued_at' => now(), 'expires_at' => now()->addDay()]);
 
@@ -228,12 +230,16 @@ class VenueConfirmationTest extends TestCase
         Storage::assertExists($oldPermit->ppa_document_path);
         Storage::assertExists($oldPermit->confirmation_document_path);
 
-        Storage::put('proposal-documents/replacement.pdf', 'new ppa');
-        Storage::put('venue-confirmations/replacement.pdf', 'new evidence');
-        $event->refresh()->update(['venue_id' => $newVenue->id, 'location_type' => 'on-campus', 'location_details' => $newVenue->displayName(), 'venue_confirmation_office' => $newVenue->managing_office, 'venue_confirmation_date' => today(), 'venue_confirmation_document_path' => 'venue-confirmations/replacement.pdf', 'venue_confirmation_document_original_name' => 'replacement.pdf', 'proposal_document_path' => 'proposal-documents/replacement.pdf', 'proposal_document_original_name' => 'replacement.pdf']);
-        app(EventPermitService::class)->submit($event->fresh(), $organizer);
-        $this->satisfyPermitGates($event->fresh(), $osa);
-        $approved = app(EventPermitService::class)->approve($event->fresh(), $osa);
+        $this->travel(1)->seconds();
+        $updated = app(EventProposalDraftService::class)->update(
+            $event->fresh(),
+            $organizer,
+            $this->proposalData($organization, $newVenue),
+            UploadedFile::fake()->create('replacement.pdf', 100, 'application/pdf'),
+            UploadedFile::fake()->create('replacement-confirmation.pdf', 100, 'application/pdf')
+        );
+        app(EventPermitService::class)->submit($updated->fresh(), $organizer, returnedTasksAddressed: true);
+        $approved = $this->approveAvailableWorkflowTasks($updated->fresh());
 
         $this->assertSame(2, $approved->permit_version);
         $this->assertNull($approved->pending_venue_amendment_reason);
@@ -258,8 +264,7 @@ class VenueConfirmationTest extends TestCase
 
         app(EventPermitService::class)->submit($event->fresh(), $organizer);
         $run = $event->fresh()->workflowRun()->firstOrFail();
-        $this->approveAvailableWorkflowTasks($event->fresh());
-        $approved = app(EventPermitService::class)->approve($event->fresh(), $osa);
+        $approved = $this->approveAvailableWorkflowTasks($event->fresh());
         $oldPermit = $approved->permitVersions()->where('version_number', 1)->firstOrFail();
         $initialTrailIds = ApprovalTrail::where('workflow_run_id', $run->id)
             ->orderBy('created_at')
@@ -324,8 +329,7 @@ class VenueConfirmationTest extends TestCase
         $this->assertSame(ProposalWorkflowTask::STATUS_AVAILABLE, $this->workflowTask($run, 'security_clearance')->status);
         $this->assertSame(ProposalWorkflowTask::STATUS_BLOCKED, $this->workflowTask($run, 'osa_review_and_approval')->status);
 
-        $this->approveAvailableWorkflowTasks($updated->fresh());
-        $replacement = app(EventPermitService::class)->approve($updated->fresh(), $osa);
+        $replacement = $this->approveAvailableWorkflowTasks($updated->fresh());
 
         $this->assertSame($run->id, $replacement->workflowRun()->firstOrFail()->id);
         $this->assertSame(2, $replacement->permit_version);
@@ -347,7 +351,7 @@ class VenueConfirmationTest extends TestCase
         $venue = Venue::factory()->create();
         $event = $this->confirmedEvent($organization, $venue);
         EventEvaluationForm::createForEvent($event, $organizer, EvaluationQuestions::defaultSchema(), 'Evaluation');
-        app(EventPermitService::class)->approve($event, $osa);
+        $this->approveThroughAssignedOsaTask($event, $osa);
 
         try {
             app(EventPermitService::class)->beginVenueAmendment($event->fresh(), $organizer, '   ');
@@ -372,24 +376,29 @@ class VenueConfirmationTest extends TestCase
         $newVenue = Venue::factory()->create();
         $event = $this->confirmedEvent($organization, $oldVenue);
         EventEvaluationForm::createForEvent($event, $organizer, EvaluationQuestions::defaultSchema(), 'Evaluation');
-        app(EventPermitService::class)->approve($event, $osa);
+        $this->approveThroughAssignedOsaTask($event, $osa);
         app(EventPermitService::class)->beginVenueAmendment($event->fresh(), $organizer, 'Move to the alternate hall.');
 
-        Storage::put('proposal-documents/rejected-replacement.pdf', 'new ppa');
-        Storage::put('venue-confirmations/rejected-replacement.pdf', 'new evidence');
-        $event->refresh()->update([
-            'venue_id' => $newVenue->id,
-            'location_type' => 'on-campus',
-            'location_details' => $newVenue->displayName(),
-            'venue_confirmation_office' => $newVenue->managing_office,
-            'venue_confirmation_date' => today(),
-            'venue_confirmation_document_path' => 'venue-confirmations/rejected-replacement.pdf',
-            'venue_confirmation_document_original_name' => 'rejected-replacement.pdf',
-            'proposal_document_path' => 'proposal-documents/rejected-replacement.pdf',
-            'proposal_document_original_name' => 'rejected-replacement.pdf',
-        ]);
-        app(EventPermitService::class)->submit($event->fresh(), $organizer);
-        $rejected = app(EventPermitService::class)->reject($event->fresh(), $osa);
+        $this->travel(1)->seconds();
+        $updated = app(EventProposalDraftService::class)->update(
+            $event->fresh(),
+            $organizer,
+            $this->proposalData($organization, $newVenue),
+            UploadedFile::fake()->create('rejected-replacement.pdf', 100, 'application/pdf'),
+            UploadedFile::fake()->create('rejected-replacement-evidence.pdf', 100, 'application/pdf')
+        );
+        app(EventPermitService::class)->submit($updated->fresh(), $organizer, returnedTasksAddressed: true);
+        $returnedTask = ProposalWorkflowTask::query()
+            ->where('workflow_run_id', $event->workflowRun()->firstOrFail()->id)
+            ->where('status', ProposalWorkflowTask::STATUS_AVAILABLE)
+            ->firstOrFail();
+        app(ProposalWorkflowTaskService::class)->decide(
+            $returnedTask,
+            $returnedTask->assignedUser,
+            ProposalWorkflowTask::DECISION_REJECTED,
+            'The replacement venue is not acceptable.'
+        );
+        $rejected = $event->fresh();
 
         $this->assertSame(Event::STATUS_REJECTED, $rejected->status);
         $this->assertSame(1, $rejected->permit_version);
@@ -599,50 +608,76 @@ class VenueConfirmationTest extends TestCase
         ]);
     }
 
-    private function satisfyPermitGates(Event $event, User $actor): void
+    private function approveThroughAssignedOsaTask(Event $event, User $osa): Event
     {
-        $event->loadMissing('workflowRun.tasks.processStep');
-
-        foreach ($event->workflowRun?->tasks ?? [] as $task) {
-            if (! $task->processStep?->is_gate || ! $task->processStep?->is_required) {
-                continue;
-            }
-
-            $decidedAt = now();
-            $task->update([
-                'status' => ProposalWorkflowTask::STATUS_APPROVED,
-                'decision' => ProposalWorkflowTask::DECISION_APPROVED,
-                'decided_by' => $actor->id,
-                'decided_at' => $decidedAt,
-                'completed_at' => $decidedAt,
-            ]);
-
-            ApprovalTrail::create([
-                'proposal_id' => $event->id,
-                'workflow_run_id' => $event->workflowRun->id,
-                'workflow_task_id' => $task->id,
-                'actor_id' => $actor->id,
-                'decision' => ProposalWorkflowTask::DECISION_APPROVED,
-                'remarks' => 'Permit gate satisfied for venue confirmation regression.',
-                'reference_id' => 'AT-'.$task->id,
-                'previous_status' => ProposalWorkflowTask::STATUS_AVAILABLE,
-                'resulting_status' => ProposalWorkflowTask::STATUS_APPROVED,
-                'assigned_role' => $task->assigned_role,
-                'assigned_scope' => $task->assigned_scope,
-                'decided_at' => $decidedAt,
-                'metadata' => [
-                    'actor' => [
-                        'id' => $actor->id,
-                        'name' => $actor->name,
-                        'email' => $actor->email,
+        $template = ProposalProcessTemplate::create([
+            'name' => 'Assigned OSA Permit Test '.uniqid(),
+            'status' => ProposalProcessTemplate::STATUS_ACTIVE,
+        ]);
+        $version = ProposalProcessTemplateVersion::create([
+            'template_id' => $template->id,
+            'version_number' => 1,
+            'status' => ProposalProcessTemplateVersion::STATUS_DRAFT,
+        ]);
+        $step = ProposalProcessStep::create([
+            'template_version_id' => $version->id,
+            'step_key' => 'osa_final_approval',
+            'title' => 'OSA Final Permit Approval',
+            'step_type' => ProposalProcessStep::TYPE_APPROVAL,
+            'phase' => 'permit',
+            'display_order' => 1,
+            'is_required' => true,
+            'is_gate' => true,
+            'condition_config' => ['assigned_role' => 'osa', 'assigned_scope' => 'university'],
+        ]);
+        $version->update([
+            'status' => ProposalProcessTemplateVersion::STATUS_PUBLISHED,
+            'published_at' => now(),
+        ]);
+        $run = ProposalWorkflowRun::create([
+            'event_id' => $event->id,
+            'template_version_id' => $version->id,
+            'status' => ProposalWorkflowRun::STATUS_IN_PROGRESS,
+            'started_by' => $osa->id,
+            'started_at' => now(),
+            'submitted_at' => now(),
+        ]);
+        $task = ProposalWorkflowTask::create([
+            'workflow_run_id' => $run->id,
+            'process_step_id' => $step->id,
+            'status' => ProposalWorkflowTask::STATUS_AVAILABLE,
+            'display_order' => 1,
+            'step_key' => $step->step_key,
+            'step_type' => $step->step_type,
+            'title' => $step->title,
+            'assigned_user_id' => $osa->id,
+            'assigned_role' => 'osa',
+            'assigned_scope' => 'university',
+            'available_at' => now(),
+            'metadata' => [
+                'assignment' => [
+                    'role_key' => 'osa',
+                    'scope_key' => 'university',
+                    'assigned_user_snapshot' => [
+                        'id' => $osa->id,
+                        'name' => $osa->name,
+                        'email' => $osa->email,
                     ],
-                    'assignment' => $task->metadata['assignment'] ?? [],
                 ],
-            ]);
-        }
+            ],
+        ]);
+
+        app(ProposalWorkflowTaskService::class)->decide(
+            $task,
+            $osa,
+            ProposalWorkflowTask::DECISION_APPROVED,
+            'Approved through the assigned OSA Workflow Task.'
+        );
+
+        return $event->fresh();
     }
 
-    private function approveAvailableWorkflowTasks(Event $event): void
+    private function approveAvailableWorkflowTasks(Event $event): Event
     {
         $workflowTasks = app(ProposalWorkflowTaskService::class);
         $run = $event->workflowRun()->firstOrFail();
@@ -655,6 +690,8 @@ class VenueConfirmationTest extends TestCase
             ->first()) {
             $workflowTasks->decide($task, $task->assignedUser, ProposalWorkflowTask::DECISION_APPROVED, 'Approved for venue amendment workflow coverage.');
         }
+
+        return $event->fresh();
     }
 
     private function workflowTask(ProposalWorkflowRun $run, string $stepKey): ProposalWorkflowTask

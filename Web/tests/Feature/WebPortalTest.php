@@ -18,7 +18,6 @@ use App\Livewire\Dashboard\NotificationCenter;
 use App\Livewire\Dashboard\NotificationSidebarBadge;
 use App\Livewire\Dashboard\PendingQrLinks;
 use App\Models\AdminAssignment;
-use App\Models\ApprovalTrail;
 use App\Models\AttendanceRecord;
 use App\Models\CanonicalPpaPacket;
 use App\Models\College;
@@ -46,6 +45,7 @@ use App\Services\AdminAssignmentService;
 use App\Services\Contracts\AiServiceInterface;
 use App\Services\GeminiService;
 use App\Services\ParticipationScopeService;
+use App\Services\ProposalWorkflowTaskService;
 use App\Services\ScannerAssignmentService;
 use App\Services\ScannerSessionService;
 use App\Support\EvaluationQuestions;
@@ -178,47 +178,26 @@ class WebPortalTest extends TestCase
         ]);
     }
 
-    private function satisfyPermitGates(Event $event, User $actor): void
+    private function approveAvailableWorkflowTasks(Event $event): Event
     {
-        $event->loadMissing('workflowRun.tasks.processStep');
+        $workflowTasks = app(ProposalWorkflowTaskService::class);
+        $run = $event->workflowRun()->firstOrFail();
 
-        foreach ($event->workflowRun?->tasks ?? [] as $task) {
-            if (! $task->processStep?->is_gate || ! $task->processStep?->is_required) {
-                continue;
-            }
-
-            $decidedAt = now();
-            $task->update([
-                'status' => ProposalWorkflowTask::STATUS_APPROVED,
-                'decision' => ProposalWorkflowTask::DECISION_APPROVED,
-                'decided_by' => $actor->id,
-                'decided_at' => $decidedAt,
-                'completed_at' => $decidedAt,
-            ]);
-
-            ApprovalTrail::create([
-                'proposal_id' => $event->id,
-                'workflow_run_id' => $event->workflowRun->id,
-                'workflow_task_id' => $task->id,
-                'actor_id' => $actor->id,
-                'decision' => ProposalWorkflowTask::DECISION_APPROVED,
-                'remarks' => 'Permit gate satisfied for status transition regression.',
-                'reference_id' => 'AT-'.$task->id,
-                'previous_status' => ProposalWorkflowTask::STATUS_AVAILABLE,
-                'resulting_status' => ProposalWorkflowTask::STATUS_APPROVED,
-                'assigned_role' => $task->assigned_role,
-                'assigned_scope' => $task->assigned_scope,
-                'decided_at' => $decidedAt,
-                'metadata' => [
-                    'actor' => [
-                        'id' => $actor->id,
-                        'name' => $actor->name,
-                        'email' => $actor->email,
-                    ],
-                    'assignment' => $task->metadata['assignment'] ?? [],
-                ],
-            ]);
+        while ($task = ProposalWorkflowTask::query()
+            ->with(['assignedUser', 'processStep', 'workflowRun.event'])
+            ->where('workflow_run_id', $run->id)
+            ->where('status', ProposalWorkflowTask::STATUS_AVAILABLE)
+            ->orderBy('display_order')
+            ->first()) {
+            $workflowTasks->decide(
+                $task,
+                $task->assignedUser,
+                ProposalWorkflowTask::DECISION_APPROVED,
+                'Approved through the assigned Workflow Task.'
+            );
         }
+
+        return $event->fresh();
     }
 
     private function createAdmin(string $role, ?Organization $org = null): User
@@ -1387,11 +1366,11 @@ class WebPortalTest extends TestCase
     {
         $h = $this->createHierarchy();
         $societyAdmin = $this->createAdmin('Society Admin', $h['org']);
-        $osaAdmin = $this->createAdmin('Super Admin (OSA)');
 
         // Create event as Society Admin
         $event = Event::create([
             'organization_id' => $h['org']->id,
+            'school_year_id' => $h['schoolYear']->id,
             'title' => 'Status Test Event',
             'proposal_category' => 'activity',
             'status' => 'draft',
@@ -1414,20 +1393,13 @@ class WebPortalTest extends TestCase
         $event->refresh();
         $this->assertEquals('submitted', $event->status);
 
-        // Review (OSA)
-        $this->actingAs($osaAdmin)
-            ->post(route('dashboard.events.review', $event->id))
-            ->assertSessionHas('success');
-        $event->refresh();
-        $this->assertEquals('under_review', $event->status);
-        $this->satisfyPermitGates($event, $osaAdmin);
+        $approved = $this->approveAvailableWorkflowTasks($event);
 
-        // Approve (OSA)
-        $this->actingAs($osaAdmin)
-            ->post(route('dashboard.events.approve', $event->id))
-            ->assertSessionHas('success');
-        $event->refresh();
-        $this->assertEquals('approved', $event->status);
+        $this->assertEquals('approved', $approved->status);
+        $this->assertDatabaseHas('approval_trails', [
+            'proposal_id' => $event->id,
+            'decision' => ProposalWorkflowTask::DECISION_APPROVED,
+        ]);
     }
 
     public function test_livewire_event_proposal_workflow_submits_draft_without_page_reload(): void
@@ -1502,7 +1474,7 @@ class WebPortalTest extends TestCase
             ->assertSee('ppa-status-item--warn', false);
     }
 
-    public function test_livewire_event_proposal_workflow_osa_reviews_and_approves_without_page_reload(): void
+    public function test_livewire_event_proposal_workflow_does_not_expose_global_osa_decisions(): void
     {
         $h = $this->createHierarchy();
         $societyAdmin = $this->createAdmin('Society Admin', $h['org']);
@@ -1527,22 +1499,14 @@ class WebPortalTest extends TestCase
 
         Livewire::actingAs($osaAdmin)
             ->test(EventProposalWorkflow::class, ['eventId' => $event->id])
-            ->assertSee('Review')
-            ->call('startReview')
-            ->assertSet('notice', 'Proposal is now under review.')
-            ->assertSee('Approve')
-            ->call('approveProposal')
-            ->assertSet('notice', 'Event proposal approved. Scanning is now unlocked.')
-            ->assertSee('Analytics');
+            ->assertDontSeeHtml('wire:click="startReview"')
+            ->assertDontSeeHtml('wire:click="approveProposal"')
+            ->assertDontSeeHtml('wire:submit="requestRevision"')
+            ->assertDontSeeHtml('wire:click="rejectProposal"');
 
         $this->assertDatabaseHas('events', [
             'id' => $event->id,
-            'status' => 'approved',
-        ]);
-        $this->assertDatabaseHas('event_participation_scopes', [
-            'event_id' => $event->id,
-            'participation_role' => EventParticipationScope::ROLE_ORGANIZER,
-            'ppa_status' => EventParticipationScope::PPA_APPROVED,
+            'status' => 'submitted',
         ]);
     }
 
@@ -1552,13 +1516,13 @@ class WebPortalTest extends TestCase
 
         $h = $this->createHierarchy();
         $societyAdmin = $this->createAdmin('Society Admin', $h['org']);
-        $osaAdmin = $this->createAdmin('Super Admin (OSA)');
 
         $event = Event::create([
             'organization_id' => $h['org']->id,
+            'school_year_id' => $h['schoolYear']->id,
             'title' => 'Revision Candidate Proposal',
             'proposal_category' => 'activity',
-            'status' => Event::STATUS_SUBMITTED,
+            'status' => Event::STATUS_DRAFT,
             'start_date' => today()->addDays(7),
             'end_date' => today()->addDays(7),
             'proposal_document_path' => 'proposal-documents/original.docx',
@@ -1578,12 +1542,24 @@ class WebPortalTest extends TestCase
         EventEvaluationForm::createForEvent($event, $societyAdmin, $this->customEvaluationQuestions(), 'Evaluation - '.$event->title);
         $revisionVenue = $this->confirmVenueForEvent($event);
 
-        Livewire::actingAs($osaAdmin)
+        Livewire::actingAs($societyAdmin)
             ->test(EventProposalWorkflow::class, ['eventId' => $event->id])
-            ->set('reviewRemarks', 'Update venue, budget, and evaluation questions.')
-            ->call('requestRevision')
-            ->assertSet('notice', 'Event proposal returned for revision.')
-            ->assertDispatched('notifications-updated');
+            ->call('submitProposal')
+            ->assertSet('errorNotice', null)
+            ->assertSet('notice', 'Proposal submitted for review.');
+
+        $revisionTask = ProposalWorkflowTask::query()
+            ->where('workflow_run_id', $event->fresh()->workflowRun()->firstOrFail()->id)
+            ->where('status', ProposalWorkflowTask::STATUS_AVAILABLE)
+            ->orderBy('display_order')
+            ->firstOrFail();
+        app(ProposalWorkflowTaskService::class)->decide(
+            $revisionTask,
+            $revisionTask->assignedUser,
+            ProposalWorkflowTask::DECISION_REVISION_REQUESTED,
+            'Update venue, budget, and evaluation questions.',
+            ['type' => 'packet_section', 'key' => 'budget']
+        );
 
         $this->assertDatabaseHas('events', [
             'id' => $event->id,
@@ -1595,7 +1571,13 @@ class WebPortalTest extends TestCase
             'ppa_status' => EventParticipationScope::PPA_REVISION_REQUESTED,
             'review_remarks' => 'Update venue, budget, and evaluation questions.',
         ]);
-        $this->assertSame('event_proposal_revision_requested', $societyAdmin->fresh()->notifications()->first()?->data['kind']);
+        $this->assertTrue(
+            $societyAdmin->fresh()->notifications->contains(
+                fn ($notification): bool => data_get($notification->data, 'kind') === 'workflow_task_revision_requested'
+            )
+        );
+
+        $this->travel(1)->seconds();
 
         Livewire::actingAs($societyAdmin)
             ->test(EventProposalCreate::class, ['eventId' => $event->id])
@@ -1610,7 +1592,7 @@ class WebPortalTest extends TestCase
             ->set('implementingOffice', 'PSITS')
             ->set('targetParticipants', 'All society members')
             ->set('sourceOfFund', 'Organization fund')
-            ->set('budgetCost', '1500')
+            ->set('budgetCost', '1750')
             ->set('majorActivities', "Planning workshop\nOperations review")
             ->set('resolutionNumber', 'RES-2026-01')
             ->set('hardcopySubmitted', true)
@@ -1636,7 +1618,7 @@ class WebPortalTest extends TestCase
         $this->assertSame('Revised Candidate Proposal', $event->title);
         $this->assertSame('revised-proposal.docx', $event->proposal_document_original_name);
         $this->assertSame($revisionVenue->displayName(), $event->location_details);
-        $this->assertSame('1500', (string) ($event->budget_allocations['budget_cost'] ?? ''));
+        $this->assertSame('1750', (string) ($event->budget_allocations['budget_cost'] ?? ''));
         $this->assertDatabaseHas('event_days', [
             'event_id' => $event->id,
             'day_number' => 1,
@@ -1647,6 +1629,7 @@ class WebPortalTest extends TestCase
         Livewire::actingAs($societyAdmin)
             ->test(EventProposalWorkflow::class, ['eventId' => $event->id])
             ->call('submitProposal')
+            ->assertSet('errorNotice', null)
             ->assertSet('notice', 'Proposal submitted for review.');
 
         $this->assertDatabaseHas('events', [
@@ -1661,7 +1644,7 @@ class WebPortalTest extends TestCase
         ]);
     }
 
-    public function test_livewire_event_proposal_workflow_keeps_locked_evaluation_form_approval_guard(): void
+    public function test_livewire_event_proposal_workflow_keeps_global_approval_unavailable(): void
     {
         $h = $this->createHierarchy();
         $osaAdmin = $this->createAdmin('Super Admin (OSA)');
@@ -1681,13 +1664,12 @@ class WebPortalTest extends TestCase
 
         Livewire::actingAs($osaAdmin)
             ->test(EventProposalWorkflow::class, ['eventId' => $event->id])
-            ->call('approveProposal')
-            ->assertSet('errorNotice', 'A locked evaluation form with at least one question is required before approval.');
+            ->assertDontSeeHtml('wire:click="approveProposal"');
 
         $this->assertSame('submitted', $event->fresh()->status);
     }
 
-    public function test_osa_cannot_approve_proposal_without_locked_evaluation_form(): void
+    public function test_osa_cannot_use_retired_event_approval_route(): void
     {
         $h = $this->createHierarchy();
         $osaAdmin = $this->createAdmin('Super Admin (OSA)');
@@ -1706,8 +1688,8 @@ class WebPortalTest extends TestCase
         ]);
 
         $this->actingAs($osaAdmin)
-            ->post(route('dashboard.events.approve', $event->id))
-            ->assertSessionHas('error', 'A locked evaluation form with at least one question is required before approval.');
+            ->post("/dashboard/events/{$event->id}/approve")
+            ->assertNotFound();
 
         $this->assertSame('submitted', $event->fresh()->status);
     }

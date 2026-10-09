@@ -79,15 +79,12 @@ class DigitalPermitGateTest extends TestCase
         $event = $this->eventReadyForApproval($osa);
         $run = $this->workflowRun($event, $osa);
         $this->workflowTask($run, $this->step($run, 'security_clearance', 'Security Clearance', 1, isGate: true), $osa, ProposalWorkflowTask::STATUS_AVAILABLE);
-        $this->workflowTask($run, $this->step($run, 'osa_final_approval', 'OSA Final Permit Approval', 2, isGate: true), $osa, ProposalWorkflowTask::STATUS_BLOCKED);
+        $osaTask = $this->workflowTask($run, $this->step($run, 'osa_final_approval', 'OSA Final Permit Approval', 2, isGate: true), $osa, ProposalWorkflowTask::STATUS_BLOCKED);
 
-        try {
-            app(EventPermitService::class)->approve($event->fresh(), $osa);
-            $this->fail('Final approval should be locked while permit gates are unmet.');
-        } catch (DomainException $exception) {
-            $this->assertStringContainsString('permit-gating workflow tasks', $exception->getMessage());
-        }
+        $issuedEvent = app(EventPermitService::class)
+            ->issueIfCompletedOrganizerOsaPermitGateDecision($osaTask, $osa);
 
+        $this->assertNull($issuedEvent);
         $this->assertSame(Event::STATUS_UNDER_REVIEW, $event->fresh()->status);
         $this->assertDatabaseCount('event_permit_versions', 0);
     }
@@ -102,7 +99,7 @@ class DigitalPermitGateTest extends TestCase
             'adviser_signed' => false,
         ]);
         $run = $this->workflowRun($event, $osa);
-        $this->workflowTask($run, $this->step($run, 'osa_final_approval', 'OSA Final Permit Approval', 1, isGate: true), $osa, ProposalWorkflowTask::STATUS_AVAILABLE);
+        $osaTask = $this->workflowTask($run, $this->step($run, 'osa_final_approval', 'OSA Final Permit Approval', 1, isGate: true), $osa, ProposalWorkflowTask::STATUS_AVAILABLE);
 
         $event->forceFill([
             'hardcopy_submitted' => true,
@@ -111,15 +108,43 @@ class DigitalPermitGateTest extends TestCase
             'adviser_signed' => true,
         ])->save();
 
-        try {
-            app(EventPermitService::class)->approve($event->fresh(), $osa);
-            $this->fail('Legacy signature projections must not unlock permit issuance.');
-        } catch (DomainException $exception) {
-            $this->assertStringContainsString('permit-gating workflow tasks', $exception->getMessage());
-        }
+        $issuedEvent = app(EventPermitService::class)
+            ->issueIfCompletedOrganizerOsaPermitGateDecision($osaTask, $osa);
 
+        $this->assertNull($issuedEvent);
         $this->assertDatabaseCount('event_permit_versions', 0);
         $this->assertSame(Event::STATUS_UNDER_REVIEW, $event->fresh()->status);
+    }
+
+    public function test_final_task_decision_rolls_back_when_locked_evaluation_form_is_missing(): void
+    {
+        $osa = $this->osaUser();
+        $event = $this->eventReadyForApproval($osa);
+        $event->update(['evaluation_form_version_id' => null]);
+        $run = $this->workflowRun($event, $osa);
+        $task = $this->workflowTask(
+            $run,
+            $this->step($run, 'osa_final_approval', 'OSA Final Permit Approval', 1, isGate: true),
+            $osa,
+            ProposalWorkflowTask::STATUS_AVAILABLE
+        );
+
+        try {
+            app(ProposalWorkflowTaskService::class)->decide(
+                $task,
+                $osa,
+                ProposalWorkflowTask::DECISION_APPROVED
+            );
+            $this->fail('The task decision should roll back when the permit cannot be issued.');
+        } catch (DomainException $exception) {
+            $this->assertStringContainsString('locked evaluation form', $exception->getMessage());
+        }
+
+        $this->assertSame(ProposalWorkflowTask::STATUS_AVAILABLE, $task->fresh()->status);
+        $this->assertSame(ProposalWorkflowRun::STATUS_IN_PROGRESS, $run->fresh()->status);
+        $this->assertSame(Event::STATUS_UNDER_REVIEW, $event->fresh()->status);
+        $this->assertDatabaseCount('approval_trails', 0);
+        $this->assertDatabaseCount('event_permit_versions', 0);
     }
 
     public function test_legacy_signature_flags_are_projected_from_workflow_task_decisions(): void
@@ -175,20 +200,27 @@ class DigitalPermitGateTest extends TestCase
         $osa = $this->osaUser();
         $organizer = $this->organizerUser();
         $event = $this->eventReadyForApproval($osa, ['organization_name_snapshot' => 'Digital Permit Society']);
-        $run = $this->workflowRun($event, $osa, ProposalWorkflowRun::STATUS_APPROVED);
+        $run = $this->workflowRun($event, $osa);
         $securityStep = $this->step($run, 'security_clearance', 'Security Clearance', 1, isGate: true, role: 'chief_security');
         $osaStep = $this->step($run, 'osa_final_approval', 'OSA Final Permit Approval', 2, isGate: true);
         $securityTask = $this->workflowTask($run, $securityStep, $osa, ProposalWorkflowTask::STATUS_APPROVED, ProposalWorkflowTask::DECISION_APPROVED);
-        $osaTask = $this->workflowTask($run, $osaStep, $osa, ProposalWorkflowTask::STATUS_APPROVED, ProposalWorkflowTask::DECISION_APPROVED);
+        $osaTask = $this->workflowTask($run, $osaStep, $osa, ProposalWorkflowTask::STATUS_AVAILABLE);
         $securityTrail = $this->approvalTrail($event, $run, $securityTask, $osa, 'AT-SECURITY-001');
-        $osaTrail = $this->approvalTrail($event, $run, $osaTask, $osa, 'AT-OSA-001');
 
-        $approved = app(EventPermitService::class)->approve($event->fresh(), $osa);
+        app(ProposalWorkflowTaskService::class)->decide(
+            $osaTask,
+            $osa,
+            ProposalWorkflowTask::DECISION_APPROVED,
+            'Final packet and permit approved.'
+        );
+
+        $approved = $event->fresh();
+        $osaTrail = ApprovalTrail::where('workflow_task_id', $osaTask->id)->firstOrFail();
         $version = $approved->currentPermitVersion()->firstOrFail();
 
         $this->assertSame(1, $approved->permit_version);
         $this->assertSame($run->id, $version->workflow_run_id);
-        $this->assertSame('AT-OSA-001', $version->verification_reference);
+        $this->assertSame($osaTrail->reference_id, $version->verification_reference);
         $this->assertSame('Digital Permit Packet', data_get($version->canonical_packet_snapshot, 'title'));
         $this->assertSame($event->venue_confirmation_document_path, data_get($version->evidence_snapshot, 'venue_confirmation_document_path'));
         $this->assertSame([$securityTrail->id, $osaTrail->id], collect($version->approval_metadata_snapshot)->pluck('approval_trail_id')->all());
@@ -212,7 +244,7 @@ class DigitalPermitGateTest extends TestCase
 
         $this->assertTrue($updateWasBlocked);
         $this->assertTrue($databaseUpdateWasBlocked);
-        $this->assertSame('AT-OSA-001', $version->fresh()->verification_reference);
+        $this->assertSame($osaTrail->reference_id, $version->fresh()->verification_reference);
 
         $response = $this->actingAs($organizer)->get(route('dashboard.events.permit-history.certificate', [$event, $version]));
         $response->assertOk();

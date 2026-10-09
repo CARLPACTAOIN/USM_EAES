@@ -27,8 +27,6 @@ class EventProposalWorkflow extends Component
 
     public ?string $errorNotice = null;
 
-    public string $reviewRemarks = '';
-
     public string $amendmentReason = '';
 
     public function mount(string $eventId, bool $isParticipatingWorkspace = false, ?string $primaryParticipantScopeId = null): void
@@ -78,73 +76,6 @@ class EventProposalWorkflow extends Component
         );
 
         $this->notice = 'Proposal submitted for review.';
-        $this->dispatchWorkflowUpdated();
-    }
-
-    public function startReview(EventPermitService $permits): void
-    {
-        $this->resetFeedback();
-        try {
-            $permits->startReview($this->event(), auth()->user());
-        } catch (DomainException $exception) {
-            $this->errorNotice = $exception->getMessage();
-
-            return;
-        }
-
-        $this->notice = 'Proposal is now under review.';
-        $this->dispatchWorkflowUpdated();
-    }
-
-    public function approveProposal(EventPermitService $permits): void
-    {
-        $this->resetFeedback();
-        try {
-            $permits->approve($this->event(), auth()->user());
-        } catch (DomainException $exception) {
-            $this->errorNotice = $exception->getMessage();
-
-            return;
-        }
-
-        $this->notice = 'Event proposal approved. Scanning is now unlocked.';
-        $this->dispatchWorkflowUpdated();
-    }
-
-    public function rejectProposal(EventPermitService $permits): void
-    {
-        $this->resetFeedback();
-        try {
-            $permits->reject($this->event(), auth()->user());
-        } catch (DomainException $exception) {
-            $this->errorNotice = $exception->getMessage();
-
-            return;
-        }
-
-        $this->notice = 'Event proposal rejected.';
-        $this->dispatchWorkflowUpdated();
-    }
-
-    public function requestRevision(EventPermitService $permits): void
-    {
-        $this->resetFeedback();
-        $this->validate([
-            'reviewRemarks' => ['required', 'string', 'max:1000'],
-        ], [], [
-            'reviewRemarks' => 'revision note',
-        ]);
-
-        try {
-            $permits->requestRevision($this->event(), auth()->user(), $this->reviewRemarks);
-        } catch (DomainException $exception) {
-            $this->errorNotice = $exception->getMessage();
-
-            return;
-        }
-
-        $this->reviewRemarks = '';
-        $this->notice = 'Event proposal returned for revision.';
         $this->dispatchWorkflowUpdated();
     }
 
@@ -209,11 +140,6 @@ class EventProposalWorkflow extends Component
     private function eventForDisplay(): Event
     {
         return Event::with(['canonicalPpaPacket', 'participationScopes', 'venue', 'permitVersions.approver'])->findOrFail($this->eventId);
-    }
-
-    private function authorizeOsa(): void
-    {
-        abort_unless(auth()->user()?->hasRole('Super Admin (OSA)'), 403);
     }
 
     private function authorizeEventAccess(Event $event): void
