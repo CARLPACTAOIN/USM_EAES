@@ -128,6 +128,18 @@ _Avoid_: CC recipient, notification target
 The recorded outcome of an approval workflow task. Standard decisions are Approved, Rejected, Revision Requested, and Not Required for conditional steps.
 _Avoid_: Signature, signage
 
+**Revision Item**:
+A discrete correction identified within a Revision Requested decision and targeted to one exact Canonical PPA Packet field, section, or attachment. One revision request may contain multiple revision items.
+_Avoid_: Generic revision note, unstructured correction
+
+**Revision Cycle**:
+A numbered correction round inside an existing Workflow Run that groups its Revision Items, packet changes, resubmission, and re-review outcomes. Only one revision cycle may be open for a workflow run at a time.
+_Avoid_: New workflow run, overwritten task decision
+
+**Revision Change Set**:
+The complete before-and-after record of Canonical PPA Packet fields and attachments changed during one Revision Cycle, including changes outside its requested Revision Items.
+_Avoid_: Target-only diff, hidden packet edit
+
 **Approval Trail**:
 The auditable record of completed workflow task decisions for a proposal, including actor, role or scope, decision, remarks, timestamp, affected workflow task, and resulting proposal or workflow state. It replaces physical signature evidence for dashboard approvals.
 _Avoid_: Signature sheet, e-signature image

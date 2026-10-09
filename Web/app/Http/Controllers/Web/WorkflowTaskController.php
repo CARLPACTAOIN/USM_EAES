@@ -35,7 +35,7 @@ class WorkflowTaskController extends Controller
             'task' => $task,
             'event' => $task->workflowRun->event,
             'revisionTargetGroups' => $this->revisionTargets->optionsForTask($task),
-            'eligibleReplacements' => $request->user()->hasRole('Super Admin (OSA)')
+            'eligibleReplacements' => $request->user()->hasRole('Super Admin (OSA)') && in_array($task->status, ProposalWorkflowTask::ACTIVE_STATUSES, true)
                 ? $this->tasks->eligibleReplacements($task)->reject(fn (User $user): bool => $user->id === $task->assigned_user_id)
                 : collect(),
         ]);

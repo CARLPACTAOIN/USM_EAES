@@ -29,13 +29,13 @@ class ProposalWorkflowTaskService
         private readonly ProposalRevisionTargets $revisionTargets,
     ) {}
 
-    private const ACTIVE_STATUSES = [
+    public const ACTIVE_STATUSES = [
         ProposalWorkflowTask::STATUS_BLOCKED,
         ProposalWorkflowTask::STATUS_AVAILABLE,
         ProposalWorkflowTask::STATUS_IN_PROGRESS,
     ];
 
-    private const TERMINAL_STATUSES = [
+    public const TERMINAL_STATUSES = [
         ProposalWorkflowTask::STATUS_APPROVED,
         ProposalWorkflowTask::STATUS_REJECTED,
         ProposalWorkflowTask::STATUS_REVISION_REQUESTED,
@@ -312,7 +312,7 @@ class ProposalWorkflowTaskService
         return $this->userCanViewTaskWithStatuses($user, $task, self::ACTIVE_STATUSES);
     }
 
-    private function userCanViewCompletedTask(User $user, ProposalWorkflowTask $task): bool
+    public function userCanViewCompletedTask(User $user, ProposalWorkflowTask $task): bool
     {
         return $this->userCanViewTaskWithStatuses($user, $task, self::TERMINAL_STATUSES);
     }
@@ -339,11 +339,33 @@ class ProposalWorkflowTaskService
         return true;
     }
 
-    private function userCanAdministerTask(User $user, ProposalWorkflowTask $task): bool
+    public function userCanAdministerTask(User $user, ?ProposalWorkflowTask $task = null): bool
     {
         return $user->hasRole('Super Admin (OSA)')
-            && $user->can('approve-proposals')
-            && in_array($task->status, self::ACTIVE_STATUSES, true);
+            && $user->can('approve-proposals');
+    }
+
+    public function userCanAccessEventTaskContext(User $user, Event $event): bool
+    {
+        if ($event->status === Event::STATUS_DRAFT) {
+            return false;
+        }
+
+        if ($this->userCanAdministerTask($user)) {
+            return true;
+        }
+
+        $tasks = ProposalWorkflowTask::query()
+            ->where('assigned_user_id', $user->id)
+            ->whereHas('workflowRun', function (Builder $query) use ($event): void {
+                $query->where('event_id', $event->id)
+                    ->orWhereHas('participationScope', fn (Builder $scopeQuery) => $scopeQuery->where('event_id', $event->id));
+            })
+            ->get();
+
+        return $tasks->contains(function (ProposalWorkflowTask $task) use ($user): bool {
+            return $this->userCanViewTask($user, $task) || $this->userCanViewCompletedTask($user, $task);
+        });
     }
 
     /**
@@ -353,6 +375,7 @@ class ProposalWorkflowTaskService
     {
         return [
             'assignedUser',
+            'decidedBy',
             'processStep.dependencies.prerequisiteStep',
             'approvalTrails.actor',
             'assignmentHistory.formerAssignee',
@@ -360,11 +383,13 @@ class ProposalWorkflowTaskService
             'assignmentHistory.actor',
             'workflowRun.approvalTrails.actor',
             'workflowRun.tasks.assignedUser',
-            'workflowRun.event.canonicalPpaPacket',
+            'workflowRun.tasks.processStep',
+            'workflowRun.event.canonicalPpaPacket.attachments.uploadedBy',
             'workflowRun.event.organization',
+            'workflowRun.event.department',
             'workflowRun.event.venue',
             'workflowRun.event.permitVersions.approver',
-            'workflowRun.participationScope.canonicalPpaPacket',
+            'workflowRun.participationScope.canonicalPpaPacket.attachments.uploadedBy',
             'workflowRun.participationScope.organization',
         ];
     }

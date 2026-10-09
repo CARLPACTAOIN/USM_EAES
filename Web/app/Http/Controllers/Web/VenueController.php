@@ -7,6 +7,7 @@ use App\Models\Event;
 use App\Models\EventPermitVersion;
 use App\Models\User;
 use App\Services\AdminScopeService;
+use App\Services\ProposalWorkflowTaskService;
 use App\Support\EventTenantScope;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Contracts\View\View;
@@ -109,6 +110,10 @@ class VenueController extends Controller
 
     private function authorizeEvent(User $user, Event $event): void
     {
+        if (app(ProposalWorkflowTaskService::class)->userCanAccessEventTaskContext($user, $event)) {
+            return;
+        }
+
         $scope = app(AdminScopeService::class)->forUser($user);
         abort_unless($scope, 403);
 

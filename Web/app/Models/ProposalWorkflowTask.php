@@ -38,6 +38,19 @@ class ProposalWorkflowTask extends Model
 
     public const DECISION_NOT_REQUIRED = 'not_required';
 
+    public const ACTIVE_STATUSES = [
+        self::STATUS_BLOCKED,
+        self::STATUS_AVAILABLE,
+        self::STATUS_IN_PROGRESS,
+    ];
+
+    public const TERMINAL_STATUSES = [
+        self::STATUS_APPROVED,
+        self::STATUS_REJECTED,
+        self::STATUS_REVISION_REQUESTED,
+        self::STATUS_NOT_REQUIRED,
+    ];
+
     protected $fillable = [
         'workflow_run_id',
         'process_step_id',

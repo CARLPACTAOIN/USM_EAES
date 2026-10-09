@@ -1,0 +1,1574 @@
+// =============================================================================
+// USM Event Attendance & Evaluation System (EAES) — Database Schema
+// Authoritative specification matching PRD_V1.md §7 & PostgreSQL 16 schema
+// Generated: 2026-10-04 08:35:18 PST
+// =============================================================================
+
+Project usm_eaes {
+  database_type: 'PostgreSQL'
+  Note: '''
+    # USM Event Attendance & Evaluation System (EAES)
+    University of Southern Mindanao — Capstone Database Specification
+    - Multi-tenant hierarchy: University -> College -> Department -> Program
+    - Proposal workflow & digital permit evidence
+    - High-throughput QR code scan capture & offline attendance sync
+    - Mandatory evaluation gate unlocking attendance validation
+  '''
+}
+
+Table "admin_assignments" {
+  "id" uuid [pk]
+  "user_id" uuid [not null]
+  "role_name" varchar(255) [not null]
+  "organization_id" uuid
+  "college_id" uuid
+  "academic_year" varchar(255) [not null]
+  "term_start" date
+  "term_end" date
+  "position_title" varchar(255)
+  "status" varchar(255) [not null, default: 'active']
+  "is_primary_admin" boolean [not null, default: true]
+  "approved_by" uuid
+  "approved_at" timestamp
+  "revoked_by" uuid
+  "revoked_at" timestamp
+  "revocation_reason" text
+  "created_at" timestamp
+  "updated_at" timestamp
+  "department_id" uuid
+  "school_year_id" uuid
+  "source_type" varchar(255)
+  "source_id" uuid
+
+  Note: 'Permission-facing Authority Projections mapping users to roles within exact School Year, Department, College, or Organization scopes.'
+
+  indexes {
+    ("role_name", "academic_year") [unique, name: "admin_assignments_active_primary_unique"]
+    ("source_type", "source_id") [unique, name: "admin_assignments_active_source_unique"]
+    ("organization_id", "school_year_id", "status") [name: "admin_assignments_org_school_year_status_index"]
+    ("role_name", "academic_year", "status") [name: "admin_assignments_role_name_academic_year_status_index"]
+    ("source_type", "source_id") [name: "admin_assignments_source_index"]
+    ("user_id", "status") [name: "admin_assignments_user_id_status_index"]
+    ("user_id", "school_year_id", "status") [name: "admin_assignments_user_school_year_status_index"]
+  }
+}
+
+Table "approval_trails" {
+  "id" uuid [pk]
+  "proposal_id" uuid [not null]
+  "workflow_run_id" uuid [not null]
+  "workflow_task_id" uuid [not null]
+  "actor_id" uuid [not null]
+  "decision" varchar(255) [not null]
+  "remarks" text
+  "reference_id" varchar(255) [not null]
+  "previous_status" varchar(255) [not null]
+  "resulting_status" varchar(255) [not null]
+  "assigned_role" varchar(255)
+  "assigned_scope" varchar(255)
+  "decided_at" timestamp [not null]
+  "metadata" json
+  "created_at" timestamp
+  "updated_at" timestamp
+
+  Note: 'Append-only immutable audit trail recording every approval, rejection, comment, and endorsement action.'
+
+  indexes {
+    ("proposal_id", "decided_at") [name: "approval_trails_proposal_id_decided_at_index"]
+    "reference_id" [unique, name: "approval_trails_reference_id_unique"]
+    ("workflow_run_id", "decided_at") [name: "approval_trails_workflow_run_id_decided_at_index"]
+    ("workflow_task_id", "decided_at") [name: "approval_trails_workflow_task_id_decided_at_index"]
+  }
+}
+
+Table "attendance_records" {
+  "id" uuid [pk]
+  "event_id" uuid [not null]
+  "event_day_id" uuid
+  "student_id" uuid [not null]
+  "time_in" timestamp
+  "time_out" timestamp
+  "society_status" varchar(255) [not null]
+  "competition_status" varchar(255) [not null]
+  "left_early" boolean [not null, default: false]
+  "valid" boolean [not null, default: false]
+  "force_validated" boolean [not null, default: false]
+  "validated_by" uuid
+  "created_at" timestamp
+  "updated_at" timestamp
+  "event_participation_scope_id" uuid
+  "event_day_session_id" uuid
+  "completion_status" varchar(255) [not null, default: 'partial']
+
+  Note: 'Resolved student attendance records with check-in/out timestamps, validation states, and evaluation gate status.'
+
+  indexes {
+    ("event_day_session_id", "student_id") [name: "attendance_records_event_day_session_id_student_id_index"]
+    ("event_participation_scope_id", "student_id") [name: "attendance_records_event_participation_scope_id_student_id_inde"]
+    ("event_id", "event_day_id", "student_id") [unique, name: "eaes_attendance_legacy_day_identity_unique"]
+    ("event_id", "student_id") [unique, name: "eaes_attendance_legacy_identity_unique"]
+    ("event_id", "event_day_session_id", "student_id") [unique, name: "eaes_attendance_legacy_session_identity_unique"]
+    ("event_id", "event_day_id", "student_id", "event_participation_scope_id") [unique, name: "eaes_attendance_scoped_day_identity_unique"]
+    ("event_id", "student_id", "event_participation_scope_id") [unique, name: "eaes_attendance_scoped_legacy_day_identity_unique"]
+    ("event_id", "event_day_session_id", "student_id", "event_participation_scope_id") [unique, name: "eaes_attendance_scoped_session_identity_unique"]
+  }
+}
+
+Table "audit_logs" {
+  "id" uuid [pk]
+  "target_id" uuid [not null]
+  "admin_id" uuid [not null]
+  "action" varchar(255) [not null]
+  "details" jsonb
+  "created_at" timestamp
+  "updated_at" timestamp
+
+  Note: 'System-wide administrative security and activity audit logs.'
+}
+
+Table "cache" {
+  "key" varchar(255) [pk]
+  "value" text [not null]
+  "expiration" integer [not null]
+
+  Note: 'Laravel persistent key-value cache store.'
+
+  indexes {
+    "expiration" [name: "cache_expiration_index"]
+  }
+}
+
+Table "cache_locks" {
+  "key" varchar(255) [pk]
+  "owner" varchar(255) [not null]
+  "expiration" integer [not null]
+
+  Note: 'Atomic lock store for distributed concurrency control.'
+
+  indexes {
+    "expiration" [name: "cache_locks_expiration_index"]
+  }
+}
+
+Table "canonical_ppa_attachments" {
+  "id" uuid [pk]
+  "canonical_ppa_packet_id" uuid [not null]
+  "attachment_type" varchar(255) [not null]
+  "path" varchar(255) [not null]
+  "original_name" varchar(255) [not null]
+  "mime_type" varchar(255)
+  "size_bytes" bigint
+  "uploaded_by_user_id" uuid
+  "created_at" timestamp
+  "updated_at" timestamp
+
+  Note: 'Attached budgetary, administrative, and supporting documents for PPA proposals.'
+
+  indexes {
+    ("canonical_ppa_packet_id", "attachment_type") [unique, name: "canonical_ppa_attachments_canonical_ppa_packet_id_attachment_ty"]
+    "path" [name: "canonical_ppa_attachments_path_index"]
+  }
+}
+
+Table "canonical_ppa_packets" {
+  "id" uuid [pk]
+  "event_id" uuid [not null]
+  "activity_role" varchar(255) [not null, default: 'organizer']
+  "proposal_category" varchar(255)
+  "title" varchar(255)
+  "proponent_name" varchar(255)
+  "proponent_position" varchar(255)
+  "proponent_organization" varchar(255)
+  "proponent_email" varchar(255)
+  "proponent_contact_number" varchar(255)
+  "implementing_office" varchar(255)
+  "collaborating_office" varchar(255)
+  "source_of_fund" varchar(255)
+  "budget_cost" numeric(12,2)
+  "start_date" date
+  "end_date" date
+  "location_type" varchar(255)
+  "venue_id" uuid
+  "location_details" varchar(255)
+  "venue_confirmation_office" varchar(255)
+  "venue_confirmation_date" date
+  "venue_confirmation_reference_number" varchar(255)
+  "rationale" text
+  "general_objective" text
+  "specific_objectives" jsonb
+  "methodology" text
+  "major_activities" jsonb
+  "program_activities" jsonb
+  "expected_output" text
+  "beneficiaries" text
+  "budget_breakdown" jsonb
+  "schedule_summary" jsonb
+  "venue_summary" jsonb
+  "prepared_by_user_id" uuid
+  "created_at" timestamp
+  "updated_at" timestamp
+  "venue_confirmation_document_path" varchar(255)
+  "venue_confirmation_document_original_name" varchar(255)
+  "event_participation_scope_id" uuid
+  "delegate_count" integer
+  "supporting_document_path" varchar(255)
+  "supporting_document_original_name" varchar(255)
+
+  Note: 'Digitized Program, Project, and Activity (PPA) proposal packets with full metadata and governance payloads.'
+
+  indexes {
+    ("activity_role", "proposal_category") [name: "canonical_ppa_packets_activity_role_proposal_category_index"]
+    "event_participation_scope_id" [unique, name: "canonical_ppa_packets_event_participation_scope_id_unique"]
+    "event_id" [unique, name: "canonical_ppa_packets_organizer_event_unique"]
+  }
+}
+
+Table "colleges" {
+  "id" uuid [pk]
+  "university_id" uuid [not null]
+  "name" varchar(255) [not null]
+  "code" varchar(255) [not null]
+  "created_at" timestamp
+  "updated_at" timestamp
+
+  Note: 'Academic colleges under the University (e.g., College of Science and Data Science).'
+
+  indexes {
+    "code" [unique, name: "colleges_code_unique"]
+  }
+}
+
+Table "departments" {
+  "id" uuid [pk]
+  "college_id" uuid [not null]
+  "name" varchar(255) [not null]
+  "code" varchar(255) [not null]
+  "status" varchar(255) [not null, default: 'active']
+  "created_at" timestamp
+  "updated_at" timestamp
+
+  Note: 'Academic departments within colleges providing organizational and curriculum scoping.'
+
+  indexes {
+    ("college_id", "code") [unique, name: "departments_college_id_code_unique"]
+    ("college_id", "status") [name: "departments_college_id_status_index"]
+  }
+}
+
+Table "employee_profiles" {
+  "id" uuid [pk]
+  "user_id" uuid [not null]
+  "employee_id" varchar(255)
+  "office_department" varchar(255)
+  "college_id" uuid
+  "position_title" varchar(255)
+  "verification_status" varchar(255) [not null, default: 'pending']
+  "verified_by" uuid
+  "verified_at" timestamp
+  "created_at" timestamp
+  "updated_at" timestamp
+
+  Note: 'Faculty and staff institutional profiles.'
+
+  indexes {
+    "employee_id" [unique, name: "employee_profiles_employee_id_unique"]
+    "user_id" [unique, name: "employee_profiles_user_id_unique"]
+  }
+}
+
+Table "employee_roster_entries" {
+  "id" uuid [pk]
+  "user_id" uuid
+  "employee_id" varchar(255) [not null]
+  "qr_code_value" varchar(255)
+  "email" varchar(255)
+  "name" varchar(255) [not null]
+  "user_type" varchar(255) [not null, default: 'faculty']
+  "office_department" varchar(255)
+  "college_id" uuid
+  "position_title" varchar(255)
+  "status" varchar(255) [not null, default: 'active']
+  "verified_by" uuid
+  "verified_at" timestamp
+  "created_at" timestamp
+  "updated_at" timestamp
+
+  Note: 'Assignments of faculty/employees to administrative and advising roles.'
+
+  indexes {
+    ("college_id", "status") [name: "employee_roster_entries_college_id_status_index"]
+    "email" [unique, name: "employee_roster_entries_email_unique"]
+    "employee_id" [unique, name: "employee_roster_entries_employee_id_unique"]
+    "qr_code_value" [unique, name: "employee_roster_entries_qr_code_value_unique"]
+    ("user_type", "status") [name: "employee_roster_entries_user_type_status_index"]
+  }
+}
+
+Table "evaluation_form_versions" {
+  "id" uuid [pk]
+  "event_id" uuid [not null]
+  "title" varchar(255) [not null, default: 'Event Evaluation']
+  "questions" jsonb [not null]
+  "created_by" uuid
+  "locked_at" timestamp
+  "created_at" timestamp
+  "updated_at" timestamp
+
+  Note: 'Customizable Likert-scale and qualitative question templates versioned per event.'
+}
+
+Table "evaluations" {
+  "id" uuid [pk]
+  "event_id" uuid [not null]
+  "student_id" uuid [not null]
+  "section_scores" jsonb [not null]
+  "open_comment" text
+  "sentiment" varchar(255)
+  "sentiment_score" double
+  "submitted_at" timestamp [not null]
+  "created_at" timestamp
+  "updated_at" timestamp
+  "evaluation_form_version_id" uuid
+
+  Note: 'Student event evaluation responses unlocking official attendance validation and sentiment analytics.'
+}
+
+Table "event_day_sessions" {
+  "id" uuid [pk]
+  "event_day_id" uuid [not null]
+  "session_number" integer [not null]
+  "name" varchar(255) [not null]
+  "start_time" time [not null]
+  "end_time" time [not null]
+  "required_for_attendance" boolean [not null, default: true]
+  "created_at" timestamp
+  "updated_at" timestamp
+
+  Note: 'Morning, afternoon, or evening attendance scanning windows within an event day.'
+
+  indexes {
+    ("event_day_id", "required_for_attendance") [name: "event_day_sessions_event_day_id_required_for_attendance_index"]
+    ("event_day_id", "session_number") [unique, name: "event_day_sessions_event_day_id_session_number_unique"]
+  }
+}
+
+Table "event_days" {
+  "id" uuid [pk]
+  "event_id" uuid [not null]
+  "day_number" integer [not null]
+  "date" date [not null]
+  "start_time" time [not null]
+  "end_time" time [not null]
+  "created_at" timestamp
+  "updated_at" timestamp
+
+  Note: 'Multi-day breakdown of event schedules and operational dates.'
+}
+
+Table "event_participation_scopes" {
+  "id" uuid [pk]
+  "event_id" uuid [not null]
+  "parent_scope_id" uuid
+  "linked_event_id" uuid
+  "participation_role" varchar(255) [not null, default: 'participant']
+  "participant_type" varchar(255) [not null, default: 'organization']
+  "organization_id" uuid
+  "college_id" uuid
+  "program_id" uuid
+  "participant_name_snapshot" varchar(255)
+  "ppa_required" boolean [not null, default: true]
+  "ppa_status" varchar(255) [not null, default: 'draft']
+  "ppa_softcopy_path" varchar(255)
+  "ppa_softcopy_original_name" varchar(255)
+  "hardcopy_submitted" boolean [not null, default: false]
+  "org_head_signed" boolean [not null, default: false]
+  "adviser_signed" boolean [not null, default: false]
+  "submitted_by" uuid
+  "submitted_at" timestamp
+  "reviewed_by" uuid
+  "reviewed_at" timestamp
+  "review_remarks" text
+  "approved_at" timestamp
+  "capture_mode" varchar(255) [not null, default: 'self_scanning']
+  "delegated_to_organization_id" uuid
+  "analytics_rollup_enabled" boolean [not null, default: true]
+  "status" varchar(255) [not null, default: 'active']
+  "created_at" timestamp
+  "updated_at" timestamp
+  "invitation_acknowledged_at" timestamp
+  "invitation_acknowledged_by" uuid
+  "invitation_last_reminded_at" timestamp
+  "late_cutoff_min" integer
+  "school_year_id" uuid
+  "department_id" uuid
+
+  Note: 'Audience eligibility rules defining allowed colleges, departments, programs, and year levels.'
+
+  indexes {
+    ("event_id", "linked_event_id") [unique, name: "eps_active_linked_event_unique"]
+    "event_id" [unique, name: "eps_active_organizer_unique"]
+    ("event_id", "college_id") [unique, name: "eps_active_participant_college_unique"]
+    ("event_id", "department_id") [unique, name: "eps_active_participant_dept_unique"]
+    ("event_id", "organization_id") [unique, name: "eps_active_participant_org_unique"]
+    ("department_id", "status") [name: "eps_department_status_index"]
+    ("invitation_acknowledged_at", "invitation_last_reminded_at") [name: "eps_invitation_ack_reminder_index"]
+    ("school_year_id", "status") [name: "eps_school_year_status_index"]
+    ("college_id", "status") [name: "event_participation_scopes_college_id_status_index"]
+    ("event_id", "participation_role") [name: "event_participation_scopes_event_id_participation_role_index"]
+    ("event_id", "ppa_status") [name: "event_participation_scopes_event_id_ppa_status_index"]
+    ("event_id", "status") [name: "event_participation_scopes_event_id_status_index"]
+    "linked_event_id" [name: "event_participation_scopes_linked_event_id_index"]
+    ("organization_id", "status") [name: "event_participation_scopes_organization_id_status_index"]
+  }
+}
+
+Table "event_permit_versions" {
+  "id" uuid [pk]
+  "event_id" uuid [not null]
+  "version_number" integer [not null]
+  "venue_id" uuid
+  "venue_name_snapshot" varchar(255) [not null]
+  "venue_location_snapshot" varchar(255)
+  "location_type" varchar(255) [not null]
+  "location_details" varchar(255) [not null]
+  "confirmation_office" varchar(255)
+  "confirmation_date" date
+  "confirmation_reference_number" varchar(255)
+  "confirmation_document_path" varchar(255)
+  "confirmation_document_original_name" varchar(255)
+  "ppa_document_path" varchar(255)
+  "ppa_document_original_name" varchar(255)
+  "amendment_reason" text
+  "approved_by" uuid [not null]
+  "approved_at" timestamp [not null]
+  "superseded_at" timestamp
+  "created_at" timestamp
+  "updated_at" timestamp
+  "workflow_run_id" uuid
+  "verification_reference" varchar(255)
+  "canonical_packet_snapshot" json
+  "proposal_snapshot" json
+  "permit_snapshot" json
+  "evidence_snapshot" json
+  "approval_metadata_snapshot" json
+
+  Note: 'Generated immutable event permit version documents and evidence snapshots upon proposal approval.'
+
+  indexes {
+    ("event_id", "superseded_at") [name: "event_permit_versions_event_id_superseded_at_index"]
+    ("event_id", "version_number") [unique, name: "event_permit_versions_event_id_version_number_unique"]
+    "verification_reference" [unique, name: "event_permit_versions_verification_reference_unique"]
+  }
+}
+
+Table "event_scanner_assignments" {
+  "id" uuid [pk]
+  "event_id" uuid [not null]
+  "scanner_user_id" uuid [not null]
+  "assigned_by_user_id" uuid [not null]
+  "label" varchar(255)
+  "status" varchar(255) [not null, default: 'active']
+  "revoked_at" timestamp
+  "revoked_by_user_id" uuid
+  "revocation_reason" text
+  "expires_at" timestamp
+  "max_devices" integer [not null, default: 1]
+  "notes" text
+  "last_activated_at" timestamp
+  "created_at" timestamp
+  "updated_at" timestamp
+  "event_participation_scope_id" uuid
+  "audience_scope_type" varchar(255)
+  "school_year_id" uuid
+
+  Note: 'Delegated scanner permissions authorizing designated student officers to scan attendance for specific sessions.'
+
+  indexes {
+    ("school_year_id", "status") [name: "esa_school_year_status_index"]
+    ("event_id", "scanner_user_id") [name: "event_scanner_assignments_event_id_scanner_user_id_index"]
+    ("event_id", "status") [name: "event_scanner_assignments_event_id_status_index"]
+    ("event_participation_scope_id", "status") [name: "event_scanner_assignments_event_participation_scope_id_status_i"]
+    ("scanner_user_id", "status") [name: "event_scanner_assignments_scanner_user_id_status_index"]
+  }
+}
+
+Table "events" {
+  "id" uuid [pk]
+  "organization_id" uuid [not null]
+  "parent_event_id" uuid
+  "title" varchar(255) [not null]
+  "status" varchar(255) [not null]
+  "start_date" date [not null]
+  "end_date" date [not null]
+  "location_type" varchar(255) [not null, default: 'on-campus']
+  "location_details" varchar(255)
+  "target_demographics" jsonb
+  "budget_allocations" jsonb
+  "society_late_threshold_min" integer [not null, default: 15]
+  "general_competition_threshold_min" integer [not null, default: 30]
+  "left_early_buffer_min" integer [not null, default: 15]
+  "evaluation_open" boolean [not null, default: false]
+  "created_at" timestamp
+  "updated_at" timestamp
+  "proposal_category" varchar(255)
+  "proposal_document_path" varchar(255)
+  "proposal_document_original_name" varchar(255)
+  "resolution_number" varchar(255)
+  "hardcopy_submitted" boolean [not null, default: false]
+  "hardcopy_submitted_at" timestamp
+  "head_organization_signed" boolean [not null, default: false]
+  "adviser_signed" boolean [not null, default: false]
+  "lifecycle_phase" varchar(255) [not null, default: 'scheduled']
+  "event_domain" varchar(255) [not null, default: 'student_affairs']
+  "event_late_cutoff_min" integer
+  "evaluation_form_version_id" uuid
+  "venue_id" uuid
+  "venue_confirmation_office" varchar(255)
+  "venue_confirmation_date" date
+  "venue_confirmation_reference_number" varchar(255)
+  "venue_confirmation_document_path" varchar(255)
+  "venue_confirmation_document_original_name" varchar(255)
+  "permit_version" integer [not null, default: 0]
+  "pending_venue_amendment_reason" text
+  "school_year_id" uuid
+  "college_name_snapshot" varchar(255)
+  "department_name_snapshot" varchar(255)
+  "program_name_snapshot" varchar(255)
+  "organization_name_snapshot" varchar(255)
+  "proponent_name_snapshot" varchar(255)
+  "proponent_user_id" uuid
+  "org_head_user_id" uuid
+  "dept_chair_user_id" uuid
+  "college_dean_user_id" uuid
+  "governance_snapshots" jsonb
+  "department_id" uuid
+
+  Note: 'Master event records detailing dates, venues, organizers, participation scopes, and lifecycle status.'
+
+  indexes {
+    ("department_id", "status") [name: "events_department_id_status_index"]
+    ("school_year_id", "organization_id") [name: "events_sy_org_index"]
+  }
+}
+
+Table "failed_jobs" {
+  "id" bigint [pk, increment]
+  "uuid" varchar(255) [not null]
+  "connection" text [not null]
+  "queue" text [not null]
+  "payload" text [not null]
+  "exception" text [not null]
+  "failed_at" timestamp [not null, default: `now()`]
+
+  Note: 'Logging of failed background queue jobs for diagnostics and replay.'
+
+  indexes {
+    "uuid" [unique, name: "failed_jobs_uuid_unique"]
+  }
+}
+
+Table "job_batches" {
+  "id" varchar(255) [pk]
+  "name" varchar(255) [not null]
+  "total_jobs" integer [not null]
+  "pending_jobs" integer [not null]
+  "failed_jobs" integer [not null]
+  "failed_job_ids" text [not null]
+  "options" text
+  "cancelled_at" integer
+  "created_at" integer [not null]
+  "finished_at" integer
+
+  Note: 'Batched queue job execution tracking.'
+}
+
+Table "jobs" {
+  "id" bigint [pk, increment]
+  "queue" varchar(255) [not null]
+  "payload" text [not null]
+  "attempts" smallint [not null]
+  "reserved_at" integer
+  "available_at" integer [not null]
+  "created_at" integer [not null]
+
+  Note: 'Database queue for asynchronous background jobs and attendance sync resolution.'
+
+  indexes {
+    "queue" [name: "jobs_queue_index"]
+  }
+}
+
+Table "migrations" {
+  "id" integer [pk, increment]
+  "migration" varchar(255) [not null]
+  "batch" integer [not null]
+
+  Note: 'Laravel database schema migration registry.'
+}
+
+Table "model_has_permissions" {
+  "permission_id" bigint [not null]
+  "model_type" varchar(255) [not null]
+  "model_id" uuid [not null]
+
+  Note: 'Spatie RBAC mapping direct permissions to models.'
+
+  indexes {
+    ("permission_id", "model_id", "model_type") [pk]
+    ("model_id", "model_type") [name: "model_has_permissions_model_id_model_type_index"]
+  }
+}
+
+Table "model_has_roles" {
+  "role_id" bigint [not null]
+  "model_type" varchar(255) [not null]
+  "model_id" uuid [not null]
+
+  Note: 'Spatie RBAC mapping assigning roles to user models.'
+
+  indexes {
+    ("role_id", "model_id", "model_type") [pk]
+    ("model_id", "model_type") [name: "model_has_roles_model_id_model_type_index"]
+  }
+}
+
+Table "notifications" {
+  "id" uuid [pk]
+  "type" varchar(255) [not null]
+  "notifiable_type" varchar(255) [not null]
+  "notifiable_id" uuid [not null]
+  "data" json [not null]
+  "read_at" timestamp
+  "created_at" timestamp
+  "updated_at" timestamp
+
+  Note: 'User notifications for proposal status changes, scanning assignments, and event announcements.'
+
+  indexes {
+    ("notifiable_type", "notifiable_id") [name: "notifications_notifiable_type_notifiable_id_index"]
+  }
+}
+
+Table "officer_change_requests" {
+  "id" uuid [pk]
+  "organization_id" uuid [not null]
+  "officer_roster_id" uuid [not null]
+  "old_officer_id" uuid
+  "new_user_id" uuid
+  "created_officer_id" uuid
+  "request_type" varchar(255) [not null]
+  "position_key" varchar(255) [not null]
+  "position_title" varchar(255)
+  "status" varchar(255) [not null, default: 'pending']
+  "reason" text [not null]
+  "evidence_file_path" varchar(255)
+  "evidence_file_name" varchar(255)
+  "evidence_metadata" json
+  "requested_by" uuid
+  "requested_at" timestamp
+  "decided_by" uuid
+  "decided_at" timestamp
+  "decision_remarks" text
+  "created_at" timestamp
+  "updated_at" timestamp
+
+  Note: 'Formal requests and approval trails for mid-term officer appointments or resignations.'
+
+  indexes {
+    "new_user_id" [name: "officer_change_requests_new_user_index"]
+    "old_officer_id" [name: "officer_change_requests_old_officer_index"]
+    ("organization_id", "status") [name: "officer_change_requests_org_status_index"]
+    ("officer_roster_id", "status") [name: "officer_change_requests_roster_status_index"]
+  }
+}
+
+Table "organization_memberships" {
+  "id" uuid [pk]
+  "user_id" uuid [not null]
+  "organization_id" uuid [not null]
+  "college_id" uuid
+  "program_id" uuid
+  "membership_type" varchar(255) [not null, default: 'primary_academic']
+  "status" varchar(255) [not null, default: 'active']
+  "source" varchar(255) [not null, default: 'profile']
+  "verified_by" uuid
+  "verified_at" timestamp
+  "created_at" timestamp
+  "updated_at" timestamp
+  "year_level" varchar(20)
+  "department_id" uuid
+  "school_year_id" uuid
+
+  Note: 'Student memberships within recognized student organizations.'
+
+  indexes {
+    ("college_id", "program_id") [name: "organization_memberships_college_id_program_id_index"]
+    ("department_id", "program_id") [name: "organization_memberships_department_program_index"]
+    ("organization_id", "status") [name: "organization_memberships_organization_id_status_index"]
+    ("school_year_id", "organization_id", "status") [name: "organization_memberships_school_year_org_status_index"]
+    ("user_id", "status") [name: "organization_memberships_user_id_status_index"]
+    "year_level" [name: "organization_memberships_year_level_index"]
+  }
+}
+
+Table "organization_officer_rosters" {
+  "id" uuid [pk]
+  "organization_id" uuid [not null]
+  "school_year_id" uuid [not null]
+  "status" varchar(255) [not null, default: 'draft']
+  "evidence_file_path" varchar(255)
+  "evidence_file_name" varchar(255)
+  "attestation_text" text
+  "evidence_metadata" json
+  "submitted_by" uuid
+  "submitted_at" timestamp
+  "verified_by" uuid
+  "verified_at" timestamp
+  "verification_remarks" text
+  "rejection_remarks" text
+  "created_by" uuid
+  "created_at" timestamp
+  "updated_at" timestamp
+
+  Note: 'Verified annual officer rosters serving as source of truth for student officer authority.'
+
+  indexes {
+    ("organization_id", "status") [name: "officer_rosters_org_status_index"]
+    ("organization_id", "school_year_id") [name: "officer_rosters_org_sy_index"]
+  }
+}
+
+Table "organization_officers" {
+  "id" uuid [pk]
+  "officer_roster_id" uuid [not null]
+  "user_id" uuid [not null]
+  "position_key" varchar(255) [not null]
+  "position_title" varchar(255)
+  "status" varchar(255) [not null, default: 'active']
+  "effective_start" date
+  "effective_end" date
+  "replacement_officer_id" uuid
+  "metadata" json
+  "created_at" timestamp
+  "updated_at" timestamp
+
+  Note: 'Individual officer positions and assigned students within an approved roster.'
+
+  indexes {
+    ("officer_roster_id", "position_key") [name: "organization_officers_roster_position_index"]
+    ("user_id", "status") [name: "organization_officers_user_status_index"]
+  }
+}
+
+Table "organization_programs" {
+  "organization_id" uuid [not null]
+  "program_id" uuid [not null]
+  "created_at" timestamp
+  "updated_at" timestamp
+
+  Note: 'Association between organizations and academic programs.'
+
+  indexes {
+    ("organization_id", "program_id") [pk]
+  }
+}
+
+Table "organizations" {
+  "id" uuid [pk]
+  "college_id" uuid
+  "name" varchar(255) [not null]
+  "acronym" varchar(255) [not null]
+  "type" varchar(255) [not null]
+  "created_at" timestamp
+  "updated_at" timestamp
+  "logo_path" varchar(255)
+  "status" varchar(255) [not null, default: 'active']
+  "department_id" uuid
+
+  Note: 'Student organizations, societies, and councils recognized by the university.'
+
+  indexes {
+    ("type", "acronym") [unique, name: "organizations_type_college_acronym_unique"]
+  }
+}
+
+Table "osa_authority_overrides" {
+  "id" uuid [pk]
+  "action" varchar(255) [not null]
+  "status" varchar(255) [not null, default: 'active']
+  "target_user_id" uuid
+  "role_name" varchar(255)
+  "organization_id" uuid
+  "college_id" uuid
+  "department_id" uuid
+  "school_year_id" uuid
+  "academic_year" varchar(255)
+  "term_start" date
+  "term_end" date
+  "position_title" varchar(255)
+  "reason" text [not null]
+  "starts_at" timestamp
+  "expires_at" timestamp
+  "source_assignment_id" uuid
+  "projected_assignment_id" uuid
+  "actor_id" uuid [not null]
+  "acted_at" timestamp [not null]
+  "created_at" timestamp
+  "updated_at" timestamp
+
+  Note: 'OSA institutional audit authority overrides enabling cross-scope governance interventions.'
+
+  indexes {
+    ("action", "status") [name: "osa_authority_overrides_action_status_index"]
+    ("actor_id", "acted_at") [name: "osa_authority_overrides_actor_acted_index"]
+    ("organization_id", "school_year_id", "status") [name: "osa_authority_overrides_org_sy_status_index"]
+    ("target_user_id", "status") [name: "osa_authority_overrides_target_status_index"]
+  }
+}
+
+Table "password_reset_tokens" {
+  "email" varchar(255) [pk]
+  "token" varchar(255) [not null]
+  "created_at" timestamp
+
+  Note: 'Standard Laravel password reset authentication tokens.'
+}
+
+Table "pending_student_links" {
+  "id" uuid [pk]
+  "event_id" uuid [not null]
+  "organization_id" uuid [not null]
+  "raw_scan_id" uuid
+  "qr_code_value" varchar(255) [not null]
+  "status" varchar(255) [not null, default: 'pending']
+  "resolved_student_id" uuid
+  "resolved_by" uuid
+  "flagged_by" uuid
+  "notes" text
+  "resolved_at" timestamp
+  "flagged_at" timestamp
+  "created_at" timestamp
+  "updated_at" timestamp
+  "event_participation_scope_id" uuid
+
+  Note: 'Staging records for student identity verification and Google profile linkage.'
+
+  indexes {
+    ("event_id", "qr_code_value") [unique, name: "eaes_pending_link_legacy_pending_unique"]
+    ("event_id", "event_participation_scope_id", "qr_code_value") [unique, name: "eaes_pending_link_scope_pending_unique"]
+    ("event_id", "qr_code_value", "status") [name: "pending_student_links_event_id_qr_code_value_status_index"]
+    ("event_participation_scope_id", "status") [name: "pending_student_links_event_participation_scope_id_status_index"]
+  }
+}
+
+Table "permissions" {
+  "id" bigint [pk, increment]
+  "name" varchar(255) [not null]
+  "guard_name" varchar(255) [not null]
+  "created_at" timestamp
+  "updated_at" timestamp
+
+  Note: 'Spatie RBAC granular permissions for fine-grained authorization.'
+
+  indexes {
+    ("name", "guard_name") [unique, name: "permissions_name_guard_name_unique"]
+  }
+}
+
+Table "permit_copy_owners" {
+  "id" uuid [pk]
+  "event_permit_version_id" uuid [not null]
+  "event_id" uuid [not null]
+  "owner_type" varchar(255) [not null]
+  "owner_id" uuid
+  "owner_name" varchar(255) [not null]
+  "owner_role" varchar(255) [not null]
+  "copy_label" varchar(255) [not null]
+  "assigned_at" timestamp [not null]
+  "metadata" json
+  "created_at" timestamp
+  "updated_at" timestamp
+
+  Note: 'Designated stakeholders holding official copies of approved event permits.'
+
+  indexes {
+    ("event_permit_version_id", "owner_type", "owner_name") [unique, name: "permit_copy_owner_unique"]
+    ("event_id", "owner_type") [name: "permit_copy_owners_event_id_owner_type_index"]
+  }
+}
+
+Table "personal_access_tokens" {
+  "id" bigint [pk, increment]
+  "tokenable_type" varchar(255) [not null]
+  "tokenable_id" uuid [not null]
+  "name" text [not null]
+  "token" varchar(64) [not null]
+  "abilities" text
+  "last_used_at" timestamp
+  "expires_at" timestamp
+  "created_at" timestamp
+  "updated_at" timestamp
+
+  Note: 'Laravel Sanctum API tokens used for mobile scanner authentication and web API clients.'
+
+  indexes {
+    "expires_at" [name: "personal_access_tokens_expires_at_index"]
+    "token" [unique, name: "personal_access_tokens_token_unique"]
+    ("tokenable_type", "tokenable_id") [name: "personal_access_tokens_tokenable_type_tokenable_id_index"]
+  }
+}
+
+Table "programs" {
+  "id" uuid [pk]
+  "name" varchar(255) [not null]
+  "code" varchar(255) [not null]
+  "created_at" timestamp
+  "updated_at" timestamp
+  "department_id" uuid [not null]
+
+  Note: 'Degree academic programs (e.g., BS Information Systems) linked to departments.'
+
+  indexes {
+    ("department_id", "code") [unique, name: "programs_department_id_code_unique"]
+  }
+}
+
+Table "proposal_process_step_dependencies" {
+  "id" uuid [pk]
+  "step_id" uuid [not null]
+  "prerequisite_step_id" uuid [not null]
+  "created_at" timestamp
+  "updated_at" timestamp
+
+  Note: 'Prerequisite step dependencies controlling workflow stage transitions.'
+
+  indexes {
+    ("step_id", "prerequisite_step_id") [unique, name: "step_prereq_unique"]
+  }
+}
+
+Table "proposal_process_steps" {
+  "id" uuid [pk]
+  "template_version_id" uuid [not null]
+  "step_key" varchar(255) [not null]
+  "title" varchar(255) [not null]
+  "description" text
+  "step_type" varchar(255) [not null]
+  "phase" varchar(255)
+  "display_order" integer [not null]
+  "is_required" boolean [not null, default: true]
+  "is_gate" boolean [not null, default: false]
+  "condition_config" json
+  "created_at" timestamp
+  "updated_at" timestamp
+
+  Note: 'Sequential and parallel approval stages (OSA, Dean, Adviser, etc.) within a workflow template.'
+
+  indexes {
+    ("template_version_id", "display_order") [name: "proposal_process_steps_template_version_id_display_order_index"]
+    ("template_version_id", "step_key") [unique, name: "proposal_process_steps_template_version_id_step_key_unique"]
+  }
+}
+
+Table "proposal_process_template_versions" {
+  "id" uuid [pk]
+  "template_id" uuid [not null]
+  "version_number" integer [not null]
+  "status" varchar(255) [not null, default: 'draft']
+  "summary" text
+  "published_at" timestamp
+  "published_by" uuid
+  "retired_at" timestamp
+  "retired_by" uuid
+  "created_at" timestamp
+  "updated_at" timestamp
+
+  Note: 'Immutable version snapshots of proposal approval workflow templates.'
+
+  indexes {
+    "status" [name: "proposal_process_template_versions_status_index"]
+    ("template_id", "version_number") [unique, name: "proposal_process_template_versions_template_id_version_number_u"]
+  }
+}
+
+Table "proposal_process_templates" {
+  "id" uuid [pk]
+  "name" varchar(255) [not null]
+  "description" text
+  "status" varchar(255) [not null, default: 'active']
+  "created_by" uuid
+  "archived_at" timestamp
+  "created_at" timestamp
+  "updated_at" timestamp
+
+  Note: 'Configurable workflow templates governing approval steps for event proposals.'
+
+  indexes {
+    "status" [name: "proposal_process_templates_status_index"]
+  }
+}
+
+Table "proposal_template_applicability_rules" {
+  "id" uuid [pk]
+  "template_version_id" uuid [not null]
+  "priority" integer [not null, default: 0]
+  "organizer_role" varchar(255)
+  "organization_type" varchar(255)
+  "college_id" uuid
+  "event_domain" varchar(255)
+  "activity_category" varchar(255)
+  "location_type" varchar(255)
+  "is_default" boolean [not null, default: false]
+  "status" varchar(255) [not null, default: 'active']
+  "effective_start" timestamp
+  "effective_end" timestamp
+  "created_at" timestamp
+  "updated_at" timestamp
+
+  Note: 'Scoping rules determining which template applies based on organization type, venue, or budget.'
+
+  indexes {
+    ("is_default", "status") [name: "proposal_template_applicability_rules_is_default_status_index"]
+    ("priority", "status") [name: "proposal_template_applicability_rules_priority_status_index"]
+  }
+}
+
+Table "proposal_workflow_runs" {
+  "id" uuid [pk]
+  "event_id" uuid [not null]
+  "template_version_id" uuid [not null]
+  "status" varchar(255) [not null, default: 'in_progress']
+  "started_by" uuid
+  "started_at" timestamp
+  "submitted_at" timestamp
+  "completed_at" timestamp
+  "cancelled_at" timestamp
+  "metadata" json
+  "created_at" timestamp
+  "updated_at" timestamp
+  "event_participation_scope_id" uuid
+
+  Note: 'Active workflow execution instances tracking an event proposal through its approval pipeline.'
+
+  indexes {
+    "event_id" [unique, name: "proposal_workflow_runs_event_organizer_unique"]
+    "event_participation_scope_id" [unique, name: "proposal_workflow_runs_scope_unique"]
+    "status" [name: "proposal_workflow_runs_status_index"]
+  }
+}
+
+Table "proposal_workflow_tasks" {
+  "id" uuid [pk]
+  "workflow_run_id" uuid [not null]
+  "process_step_id" uuid [not null]
+  "status" varchar(255) [not null, default: 'blocked']
+  "display_order" integer [not null]
+  "step_key" varchar(255) [not null]
+  "step_type" varchar(255) [not null]
+  "title" varchar(255) [not null]
+  "description" text
+  "assigned_user_id" uuid
+  "assigned_role" varchar(255)
+  "assigned_scope" varchar(255)
+  "available_at" timestamp
+  "completed_at" timestamp
+  "decision" varchar(255)
+  "remarks" text
+  "decided_by" uuid
+  "decided_at" timestamp
+  "metadata" json
+  "created_at" timestamp
+  "updated_at" timestamp
+
+  Note: 'Individual actionable approval tasks assigned to specific administrative authorities.'
+
+  indexes {
+    ("assigned_user_id", "status") [name: "proposal_workflow_tasks_assigned_user_id_status_index"]
+    ("workflow_run_id", "process_step_id") [unique, name: "proposal_workflow_tasks_workflow_run_id_process_step_id_unique"]
+    ("workflow_run_id", "status") [name: "proposal_workflow_tasks_workflow_run_id_status_index"]
+  }
+}
+
+Table "queue_outbox_entries" {
+  "id" uuid [pk]
+  "type" varchar(255) [not null]
+  "dedup_key" varchar(255) [not null]
+  "payload" json [not null]
+  "dispatch_attempts" integer [not null, default: 0]
+  "dispatched_at" timestamp
+  "available_at" timestamp
+  "last_error_class" varchar(255)
+  "created_at" timestamp
+  "updated_at" timestamp
+
+  Note: 'Transactional outbox pattern entries ensuring reliable event publishing.'
+
+  indexes {
+    "dedup_key" [unique, name: "queue_outbox_entries_dedup_key_unique"]
+    ("type", "dispatched_at", "available_at") [name: "queue_outbox_entries_type_dispatched_at_available_at_index"]
+  }
+}
+
+Table "raw_scans" {
+  "id" uuid [pk]
+  "event_id" uuid [not null]
+  "event_day_id" uuid
+  "student_id" uuid
+  "qr_code_value" varchar(255)
+  "scan_type" varchar(255) [not null]
+  "scanned_at" timestamp [not null]
+  "device_id" varchar(255) [not null]
+  "manual_entry" boolean [not null, default: false]
+  "dedup_key" varchar(255) [not null]
+  "created_at" timestamp
+  "updated_at" timestamp
+  "scanner_session_id" uuid
+  "scanner_user_id" uuid
+  "server_received_at" timestamp
+  "processed_at" timestamp
+  "rejection_reason" varchar(255)
+  "event_participation_scope_id" uuid
+  "captured_by_organization_id" uuid
+  "captured_by_admin_scope" varchar(255)
+  "event_day_session_id" uuid
+
+  Note: 'High-throughput append-only raw scan ingestion queue supporting offline sync and conflict resolution.'
+
+  indexes {
+    "dedup_key" [unique, name: "raw_scans_dedup_key_unique"]
+    ("event_day_session_id", "student_id") [name: "raw_scans_event_day_session_id_student_id_index"]
+    ("event_participation_scope_id", "student_id") [name: "raw_scans_event_participation_scope_id_student_id_index"]
+  }
+}
+
+Table "role_has_permissions" {
+  "permission_id" bigint [not null]
+  "role_id" bigint [not null]
+
+  Note: 'Spatie RBAC mapping permissions to roles.'
+
+  indexes {
+    ("permission_id", "role_id") [pk]
+  }
+}
+
+Table "roles" {
+  "id" bigint [pk, increment]
+  "name" varchar(255) [not null]
+  "guard_name" varchar(255) [not null]
+  "created_at" timestamp
+  "updated_at" timestamp
+
+  Note: 'Spatie RBAC roles representing administrative and institutional privileges.'
+
+  indexes {
+    ("name", "guard_name") [unique, name: "roles_name_guard_name_unique"]
+  }
+}
+
+Table "scanner_sessions" {
+  "id" uuid [pk]
+  "event_id" uuid [not null]
+  "scanner_user_id" uuid
+  "token_id" varchar(255)
+  "issued_by" uuid [not null]
+  "label" varchar(255)
+  "device_id" varchar(255)
+  "device_fingerprint_hash" varchar(255)
+  "status" varchar(255) [not null, default: 'active']
+  "issued_at" timestamp [not null]
+  "activated_at" timestamp
+  "expires_at" timestamp
+  "revoked_at" timestamp
+  "revoked_by" uuid
+  "revocation_reason" text
+  "last_seen_at" timestamp
+  "created_at" timestamp
+  "updated_at" timestamp
+  "assignment_id" uuid
+  "event_participation_scope_id" uuid
+
+  Note: 'Active mobile scanning sessions tracking device state, battery, and sync status.'
+
+  indexes {
+    ("assignment_id", "status") [name: "scanner_sessions_assignment_id_status_index"]
+    ("event_participation_scope_id", "status") [name: "scanner_sessions_event_participation_scope_id_status_index"]
+    "token_id" [name: "scanner_sessions_token_id_index"]
+  }
+}
+
+Table "school_years" {
+  "id" uuid [pk]
+  "label" varchar(255) [not null]
+  "starts_on" date [not null]
+  "ends_on" date [not null]
+  "status" varchar(255) [not null, default: 'draft']
+  "activated_at" timestamp
+  "activated_by" uuid
+  "closed_at" timestamp
+  "closed_by" uuid
+  "transition_started_at" timestamp
+  "transition_ends_at" date
+  "transition_opened_by" uuid
+  "transition_closed_at" timestamp
+  "transition_closed_by" uuid
+  "created_at" timestamp
+  "updated_at" timestamp
+
+  Note: 'Academic school years and semestral terms establishing temporal governance boundaries.'
+
+  indexes {
+    "label" [unique, name: "school_years_label_unique"]
+    "status" [unique, name: "school_years_one_active_unique"]
+    "status" [name: "school_years_status_index"]
+  }
+}
+
+Table "sessions" {
+  "id" varchar(255) [pk]
+  "user_id" uuid
+  "ip_address" varchar(45)
+  "user_agent" text
+  "payload" text [not null]
+  "last_activity" integer [not null]
+
+  Note: 'Laravel database session storage.'
+
+  indexes {
+    "last_activity" [name: "sessions_last_activity_index"]
+    "user_id" [name: "sessions_user_id_index"]
+  }
+}
+
+Table "universities" {
+  "id" uuid [pk]
+  "name" varchar(255) [not null]
+  "domain" varchar(255) [not null]
+  "created_at" timestamp
+  "updated_at" timestamp
+
+  Note: 'Top-level educational institution entity (University of Southern Mindanao).'
+
+  indexes {
+    "domain" [unique, name: "universities_domain_unique"]
+  }
+}
+
+Table "users" {
+  "id" uuid [pk]
+  "google_sub" varchar(255)
+  "email" varchar(255) [not null]
+  "email_verified_at" timestamp
+  "name" varchar(255) [not null]
+  "password" varchar(255)
+  "organization_id" uuid
+  "student_id_number" varchar(255)
+  "qr_code_value" varchar(255)
+  "program_code" varchar(6)
+  "remember_token" varchar(100)
+  "created_at" timestamp
+  "updated_at" timestamp
+  "college_id" uuid
+  "program_id" uuid
+  "user_type" varchar(255) [not null, default: 'student']
+  "year_level" varchar(20)
+  "department_id" uuid
+
+  Note: 'Unified institutional user accounts supporting Google OAuth (@usm.edu.ph), student profiles, and administrative staff credentials.'
+
+  indexes {
+    "email" [unique, name: "users_email_unique"]
+    "google_sub" [unique, name: "users_google_sub_unique"]
+    "qr_code_value" [unique, name: "users_qr_code_value_unique"]
+    "student_id_number" [unique, name: "users_student_id_number_unique"]
+    "year_level" [name: "users_year_level_index"]
+  }
+}
+
+Table "venues" {
+  "id" uuid [pk]
+  "name" varchar(255) [not null]
+  "campus_location" varchar(255) [not null]
+  "college_id" uuid
+  "managing_office" varchar(255) [not null]
+  "inquiry_instructions" text
+  "is_active" boolean [not null, default: true]
+  "retired_at" timestamp
+  "created_at" timestamp
+  "updated_at" timestamp
+
+  Note: 'University campus venues and facilities bookable for campus events.'
+
+  indexes {
+    "is_active" [name: "venues_is_active_index"]
+    ("name", "campus_location") [unique, name: "venues_name_campus_location_unique"]
+  }
+}
+
+Table "workflow_task_assignment_history" {
+  "id" uuid [pk]
+  "workflow_task_id" uuid [not null]
+  "former_assignee_id" uuid
+  "new_assignee_id" uuid [not null]
+  "actor_id" uuid
+  "reason" text [not null]
+  "reassigned_at" timestamp [not null]
+  "metadata" json
+  "created_at" timestamp
+  "updated_at" timestamp
+
+  Note: 'Audit history of task assignments, reassignments, and delegations.'
+
+  indexes {
+    ("new_assignee_id", "reassigned_at") [name: "workflow_task_assignment_history_new_assignee_idx"]
+    ("workflow_task_id", "reassigned_at") [name: "workflow_task_assignment_history_task_time_idx"]
+  }
+}
+
+// =============================================================================
+// FOREIGN KEY RELATIONSHIPS
+// =============================================================================
+
+Ref: "admin_assignments"."approved_by" > "users"."id" [delete: set null]
+Ref: "admin_assignments"."college_id" > "colleges"."id" [delete: set null]
+Ref: "admin_assignments"."department_id" > "departments"."id" [delete: set null]
+Ref: "admin_assignments"."organization_id" > "organizations"."id" [delete: set null]
+Ref: "admin_assignments"."revoked_by" > "users"."id" [delete: set null]
+Ref: "admin_assignments"."school_year_id" > "school_years"."id" [delete: set null]
+Ref: "admin_assignments"."user_id" > "users"."id" [delete: cascade]
+Ref: "approval_trails"."actor_id" > "users"."id" [delete: restrict]
+Ref: "approval_trails"."proposal_id" > "events"."id"
+Ref: "approval_trails"."workflow_run_id" > "proposal_workflow_runs"."id"
+Ref: "approval_trails"."workflow_task_id" > "proposal_workflow_tasks"."id"
+Ref: "attendance_records"."event_day_id" > "event_days"."id" [delete: set null]
+Ref: "attendance_records"."event_day_session_id" > "event_day_sessions"."id" [delete: set null]
+Ref: "attendance_records"."event_id" > "events"."id" [delete: cascade]
+Ref: "attendance_records"."event_participation_scope_id" > "event_participation_scopes"."id" [delete: set null]
+Ref: "attendance_records"."student_id" > "users"."id" [delete: cascade]
+Ref: "attendance_records"."validated_by" > "users"."id" [delete: set null]
+Ref: "audit_logs"."admin_id" > "users"."id" [delete: cascade]
+Ref: "canonical_ppa_attachments"."canonical_ppa_packet_id" > "canonical_ppa_packets"."id" [delete: cascade]
+Ref: "canonical_ppa_attachments"."uploaded_by_user_id" > "users"."id" [delete: set null]
+Ref: "canonical_ppa_packets"."event_id" > "events"."id" [delete: cascade]
+Ref: "canonical_ppa_packets"."event_participation_scope_id" > "event_participation_scopes"."id" [delete: cascade]
+Ref: "canonical_ppa_packets"."prepared_by_user_id" > "users"."id" [delete: set null]
+Ref: "canonical_ppa_packets"."venue_id" > "venues"."id" [delete: restrict]
+Ref: "colleges"."university_id" > "universities"."id" [delete: cascade]
+Ref: "departments"."college_id" > "colleges"."id" [delete: cascade]
+Ref: "employee_profiles"."college_id" > "colleges"."id" [delete: set null]
+Ref: "employee_profiles"."user_id" > "users"."id" [delete: cascade]
+Ref: "employee_profiles"."verified_by" > "users"."id" [delete: set null]
+Ref: "employee_roster_entries"."college_id" > "colleges"."id" [delete: set null]
+Ref: "employee_roster_entries"."user_id" > "users"."id" [delete: set null]
+Ref: "employee_roster_entries"."verified_by" > "users"."id" [delete: set null]
+Ref: "evaluation_form_versions"."created_by" > "users"."id" [delete: set null]
+Ref: "evaluation_form_versions"."event_id" > "events"."id" [delete: cascade]
+Ref: "evaluations"."evaluation_form_version_id" > "evaluation_form_versions"."id" [delete: set null]
+Ref: "evaluations"."event_id" > "events"."id" [delete: cascade]
+Ref: "evaluations"."student_id" > "users"."id" [delete: cascade]
+Ref: "event_day_sessions"."event_day_id" > "event_days"."id" [delete: cascade]
+Ref: "event_days"."event_id" > "events"."id" [delete: cascade]
+Ref: "event_participation_scopes"."college_id" > "colleges"."id" [delete: set null]
+Ref: "event_participation_scopes"."delegated_to_organization_id" > "organizations"."id" [delete: set null]
+Ref: "event_participation_scopes"."department_id" > "departments"."id" [delete: set null]
+Ref: "event_participation_scopes"."event_id" > "events"."id" [delete: cascade]
+Ref: "event_participation_scopes"."invitation_acknowledged_by" > "users"."id" [delete: set null]
+Ref: "event_participation_scopes"."linked_event_id" > "events"."id" [delete: set null]
+Ref: "event_participation_scopes"."organization_id" > "organizations"."id" [delete: set null]
+Ref: "event_participation_scopes"."parent_scope_id" > "event_participation_scopes"."id" [delete: set null]
+Ref: "event_participation_scopes"."program_id" > "programs"."id" [delete: set null]
+Ref: "event_participation_scopes"."reviewed_by" > "users"."id" [delete: set null]
+Ref: "event_participation_scopes"."school_year_id" > "school_years"."id" [delete: set null]
+Ref: "event_participation_scopes"."submitted_by" > "users"."id" [delete: set null]
+Ref: "event_permit_versions"."approved_by" > "users"."id" [delete: restrict]
+Ref: "event_permit_versions"."event_id" > "events"."id" [delete: cascade]
+Ref: "event_permit_versions"."venue_id" > "venues"."id" [delete: restrict]
+Ref: "event_permit_versions"."workflow_run_id" > "proposal_workflow_runs"."id" [delete: restrict]
+Ref: "event_scanner_assignments"."assigned_by_user_id" > "users"."id" [delete: cascade]
+Ref: "event_scanner_assignments"."event_id" > "events"."id" [delete: cascade]
+Ref: "event_scanner_assignments"."event_participation_scope_id" > "event_participation_scopes"."id" [delete: set null]
+Ref: "event_scanner_assignments"."revoked_by_user_id" > "users"."id" [delete: set null]
+Ref: "event_scanner_assignments"."scanner_user_id" > "users"."id" [delete: cascade]
+Ref: "event_scanner_assignments"."school_year_id" > "school_years"."id" [delete: set null]
+Ref: "events"."college_dean_user_id" > "users"."id" [delete: set null]
+Ref: "events"."department_id" > "departments"."id" [delete: set null]
+Ref: "events"."dept_chair_user_id" > "users"."id" [delete: set null]
+Ref: "events"."evaluation_form_version_id" > "evaluation_form_versions"."id" [delete: set null]
+Ref: "events"."org_head_user_id" > "users"."id" [delete: set null]
+Ref: "events"."organization_id" > "organizations"."id" [delete: cascade]
+Ref: "events"."parent_event_id" > "events"."id" [delete: set null]
+Ref: "events"."proponent_user_id" > "users"."id" [delete: set null]
+Ref: "events"."school_year_id" > "school_years"."id" [delete: set null]
+Ref: "events"."venue_id" > "venues"."id" [delete: restrict]
+Ref: "model_has_permissions"."permission_id" > "permissions"."id" [delete: cascade]
+Ref: "model_has_roles"."role_id" > "roles"."id" [delete: cascade]
+Ref: "officer_change_requests"."created_officer_id" > "organization_officers"."id" [delete: set null]
+Ref: "officer_change_requests"."decided_by" > "users"."id" [delete: set null]
+Ref: "officer_change_requests"."new_user_id" > "users"."id" [delete: set null]
+Ref: "officer_change_requests"."officer_roster_id" > "organization_officer_rosters"."id" [delete: cascade]
+Ref: "officer_change_requests"."old_officer_id" > "organization_officers"."id" [delete: set null]
+Ref: "officer_change_requests"."organization_id" > "organizations"."id" [delete: cascade]
+Ref: "officer_change_requests"."requested_by" > "users"."id" [delete: set null]
+Ref: "organization_memberships"."college_id" > "colleges"."id" [delete: set null]
+Ref: "organization_memberships"."department_id" > "departments"."id" [delete: set null]
+Ref: "organization_memberships"."organization_id" > "organizations"."id" [delete: cascade]
+Ref: "organization_memberships"."program_id" > "programs"."id" [delete: set null]
+Ref: "organization_memberships"."school_year_id" > "school_years"."id" [delete: set null]
+Ref: "organization_memberships"."user_id" > "users"."id" [delete: cascade]
+Ref: "organization_memberships"."verified_by" > "users"."id" [delete: set null]
+Ref: "organization_officer_rosters"."created_by" > "users"."id" [delete: set null]
+Ref: "organization_officer_rosters"."organization_id" > "organizations"."id" [delete: cascade]
+Ref: "organization_officer_rosters"."school_year_id" > "school_years"."id" [delete: cascade]
+Ref: "organization_officer_rosters"."submitted_by" > "users"."id" [delete: set null]
+Ref: "organization_officer_rosters"."verified_by" > "users"."id" [delete: set null]
+Ref: "organization_officers"."officer_roster_id" > "organization_officer_rosters"."id" [delete: cascade]
+Ref: "organization_officers"."replacement_officer_id" > "organization_officers"."id" [delete: set null]
+Ref: "organization_officers"."user_id" > "users"."id" [delete: cascade]
+Ref: "organization_programs"."organization_id" > "organizations"."id" [delete: cascade]
+Ref: "organization_programs"."program_id" > "programs"."id" [delete: cascade]
+Ref: "organizations"."college_id" > "colleges"."id" [delete: cascade]
+Ref: "organizations"."department_id" > "departments"."id" [delete: set null]
+Ref: "osa_authority_overrides"."actor_id" > "users"."id" [delete: cascade]
+Ref: "osa_authority_overrides"."college_id" > "colleges"."id" [delete: set null]
+Ref: "osa_authority_overrides"."department_id" > "departments"."id" [delete: set null]
+Ref: "osa_authority_overrides"."organization_id" > "organizations"."id" [delete: set null]
+Ref: "osa_authority_overrides"."projected_assignment_id" > "admin_assignments"."id" [delete: set null]
+Ref: "osa_authority_overrides"."school_year_id" > "school_years"."id" [delete: set null]
+Ref: "osa_authority_overrides"."source_assignment_id" > "admin_assignments"."id" [delete: set null]
+Ref: "osa_authority_overrides"."target_user_id" > "users"."id" [delete: set null]
+Ref: "pending_student_links"."event_id" > "events"."id" [delete: cascade]
+Ref: "pending_student_links"."event_participation_scope_id" > "event_participation_scopes"."id" [delete: set null]
+Ref: "pending_student_links"."flagged_by" > "users"."id" [delete: set null]
+Ref: "pending_student_links"."organization_id" > "organizations"."id" [delete: cascade]
+Ref: "pending_student_links"."raw_scan_id" > "raw_scans"."id" [delete: set null]
+Ref: "pending_student_links"."resolved_by" > "users"."id" [delete: set null]
+Ref: "pending_student_links"."resolved_student_id" > "users"."id" [delete: set null]
+Ref: "permit_copy_owners"."event_id" > "events"."id" [delete: cascade]
+Ref: "permit_copy_owners"."event_permit_version_id" > "event_permit_versions"."id" [delete: cascade]
+Ref: "programs"."department_id" > "departments"."id" [delete: restrict]
+Ref: "proposal_process_step_dependencies"."prerequisite_step_id" > "proposal_process_steps"."id" [delete: cascade]
+Ref: "proposal_process_step_dependencies"."step_id" > "proposal_process_steps"."id" [delete: cascade]
+Ref: "proposal_process_steps"."template_version_id" > "proposal_process_template_versions"."id" [delete: cascade]
+Ref: "proposal_process_template_versions"."published_by" > "users"."id" [delete: set null]
+Ref: "proposal_process_template_versions"."retired_by" > "users"."id" [delete: set null]
+Ref: "proposal_process_template_versions"."template_id" > "proposal_process_templates"."id" [delete: cascade]
+Ref: "proposal_process_templates"."created_by" > "users"."id" [delete: set null]
+Ref: "proposal_template_applicability_rules"."college_id" > "colleges"."id" [delete: set null]
+Ref: "proposal_template_applicability_rules"."template_version_id" > "proposal_process_template_versions"."id" [delete: cascade]
+Ref: "proposal_workflow_runs"."event_id" > "events"."id" [delete: cascade]
+Ref: "proposal_workflow_runs"."event_participation_scope_id" > "event_participation_scopes"."id" [delete: cascade]
+Ref: "proposal_workflow_runs"."started_by" > "users"."id" [delete: set null]
+Ref: "proposal_workflow_runs"."template_version_id" > "proposal_process_template_versions"."id" [delete: cascade]
+Ref: "proposal_workflow_tasks"."assigned_user_id" > "users"."id" [delete: set null]
+Ref: "proposal_workflow_tasks"."decided_by" > "users"."id" [delete: set null]
+Ref: "proposal_workflow_tasks"."process_step_id" > "proposal_process_steps"."id" [delete: cascade]
+Ref: "proposal_workflow_tasks"."workflow_run_id" > "proposal_workflow_runs"."id" [delete: cascade]
+Ref: "raw_scans"."captured_by_organization_id" > "organizations"."id" [delete: set null]
+Ref: "raw_scans"."event_day_id" > "event_days"."id" [delete: set null]
+Ref: "raw_scans"."event_day_session_id" > "event_day_sessions"."id" [delete: set null]
+Ref: "raw_scans"."event_id" > "events"."id" [delete: cascade]
+Ref: "raw_scans"."event_participation_scope_id" > "event_participation_scopes"."id" [delete: set null]
+Ref: "raw_scans"."scanner_session_id" > "scanner_sessions"."id" [delete: set null]
+Ref: "raw_scans"."scanner_user_id" > "users"."id" [delete: set null]
+Ref: "raw_scans"."student_id" > "users"."id" [delete: set null]
+Ref: "role_has_permissions"."permission_id" > "permissions"."id" [delete: cascade]
+Ref: "role_has_permissions"."role_id" > "roles"."id" [delete: cascade]
+Ref: "scanner_sessions"."assignment_id" > "event_scanner_assignments"."id" [delete: set null]
+Ref: "scanner_sessions"."event_id" > "events"."id" [delete: cascade]
+Ref: "scanner_sessions"."event_participation_scope_id" > "event_participation_scopes"."id" [delete: set null]
+Ref: "scanner_sessions"."issued_by" > "users"."id" [delete: cascade]
+Ref: "scanner_sessions"."revoked_by" > "users"."id" [delete: set null]
+Ref: "scanner_sessions"."scanner_user_id" > "users"."id" [delete: set null]
+Ref: "school_years"."activated_by" > "users"."id" [delete: set null]
+Ref: "school_years"."closed_by" > "users"."id" [delete: set null]
+Ref: "school_years"."transition_closed_by" > "users"."id" [delete: set null]
+Ref: "school_years"."transition_opened_by" > "users"."id" [delete: set null]
+Ref: "users"."college_id" > "colleges"."id" [delete: set null]
+Ref: "users"."department_id" > "departments"."id" [delete: set null]
+Ref: "users"."organization_id" > "organizations"."id" [delete: set null]
+Ref: "users"."program_id" > "programs"."id" [delete: set null]
+Ref: "venues"."college_id" > "colleges"."id" [delete: restrict]
+Ref: "workflow_task_assignment_history"."actor_id" > "users"."id" [delete: set null]
+Ref: "workflow_task_assignment_history"."former_assignee_id" > "users"."id" [delete: set null]
+Ref: "workflow_task_assignment_history"."new_assignee_id" > "users"."id" [delete: cascade]
+Ref: "workflow_task_assignment_history"."workflow_task_id" > "proposal_workflow_tasks"."id" [delete: cascade]
+
+// =============================================================================
+// TABLE GROUPS (Logical Module Clustering)
+// =============================================================================
+
+TableGroup Identity_And_Access {
+  "users"
+  "password_reset_tokens"
+  "personal_access_tokens"
+  "roles"
+  "permissions"
+  "model_has_roles"
+  "model_has_permissions"
+  "role_has_permissions"
+  "admin_assignments"
+  "pending_student_links"
+  "osa_authority_overrides"
+}
+
+TableGroup Academic_Hierarchy_And_Organizations {
+  "universities"
+  "colleges"
+  "departments"
+  "programs"
+  "school_years"
+  "organizations"
+  "organization_programs"
+  "organization_memberships"
+  "organization_officer_rosters"
+  "organization_officers"
+  "officer_change_requests"
+  "employee_profiles"
+  "employee_roster_entries"
+  "venues"
+}
+
+TableGroup Proposal_Workflow_And_Permits {
+  "canonical_ppa_packets"
+  "canonical_ppa_attachments"
+  "proposal_process_templates"
+  "proposal_process_template_versions"
+  "proposal_process_steps"
+  "proposal_process_step_dependencies"
+  "proposal_template_applicability_rules"
+  "proposal_workflow_runs"
+  "proposal_workflow_tasks"
+  "workflow_task_assignment_history"
+  "approval_trails"
+  "event_permit_versions"
+  "permit_copy_owners"
+}
+
+TableGroup Events_And_Attendance {
+  "events"
+  "event_days"
+  "event_day_sessions"
+  "event_participation_scopes"
+  "event_scanner_assignments"
+  "scanner_sessions"
+  "raw_scans"
+  "attendance_records"
+}
+
+TableGroup Evaluations {
+  "evaluation_form_versions"
+  "evaluations"
+}
+
+TableGroup System_And_Queues {
+  "audit_logs"
+  "notifications"
+  "sessions"
+  "cache"
+  "cache_locks"
+  "jobs"
+  "job_batches"
+  "failed_jobs"
+  "queue_outbox_entries"
+  "migrations"
+}

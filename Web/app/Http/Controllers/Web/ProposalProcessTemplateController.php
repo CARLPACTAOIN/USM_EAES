@@ -9,6 +9,7 @@ use App\Models\College;
 use App\Models\ProposalProcessStep;
 use App\Models\ProposalProcessTemplate;
 use App\Models\ProposalProcessTemplateVersion;
+use App\Models\ProposalWorkflowRun;
 use App\Services\OrganizationManagementService;
 use App\Services\ProposalProcessTemplateManagementService;
 use Illuminate\Http\RedirectResponse;
@@ -34,11 +35,19 @@ class ProposalProcessTemplateController extends Controller
             ->paginate(12)
             ->withQueryString();
 
+        $stats = [
+            'total_templates' => ProposalProcessTemplate::query()->count(),
+            'active_versions' => ProposalProcessTemplateVersion::query()->where('status', ProposalProcessTemplateVersion::STATUS_PUBLISHED)->count(),
+            'draft_versions' => ProposalProcessTemplateVersion::query()->where('status', ProposalProcessTemplateVersion::STATUS_DRAFT)->count(),
+            'total_runs' => ProposalWorkflowRun::query()->count(),
+        ];
+
         return view('dashboard.proposal-process-templates.index', [
             'templates' => $templates,
             'colleges' => College::query()->orderBy('name')->get(),
             'stepTypes' => $this->stepTypes(),
             'organizationTypes' => OrganizationManagementService::ORGANIZATION_TYPES,
+            'stats' => $stats,
         ]);
     }
 
@@ -50,7 +59,7 @@ class ProposalProcessTemplateController extends Controller
 
         return redirect()
             ->route('dashboard.proposal-process-templates.index', ['version' => $version->id])
-            ->with('success', 'Proposal process template draft created.');
+            ->with('success', 'Workflow template draft created successfully.');
     }
 
     public function update(
@@ -69,7 +78,7 @@ class ProposalProcessTemplateController extends Controller
 
         return redirect()
             ->route('dashboard.proposal-process-templates.index', ['version' => $version->id])
-            ->with('success', 'Proposal process template draft updated.');
+            ->with('success', 'Workflow template draft updated successfully.');
     }
 
     public function publish(
@@ -89,7 +98,7 @@ class ProposalProcessTemplateController extends Controller
 
         return redirect()
             ->route('dashboard.proposal-process-templates.index', ['version' => $version->id])
-            ->with('success', 'Proposal process template version published and locked.');
+            ->with('success', 'Workflow template version published successfully and is now active.');
     }
 
     public function retire(
@@ -109,7 +118,7 @@ class ProposalProcessTemplateController extends Controller
 
         return redirect()
             ->route('dashboard.proposal-process-templates.index', ['version' => $version->id])
-            ->with('success', 'Proposal process template version retired.');
+            ->with('success', 'Workflow template version retired successfully.');
     }
 
     public function createDraft(
@@ -123,7 +132,7 @@ class ProposalProcessTemplateController extends Controller
 
         return redirect()
             ->route('dashboard.proposal-process-templates.index', ['version' => $draft->id])
-            ->with('success', 'New draft version created from the locked template version.');
+            ->with('success', 'New draft version created successfully.');
     }
 
     private function authorizeOsa(Request $request): void

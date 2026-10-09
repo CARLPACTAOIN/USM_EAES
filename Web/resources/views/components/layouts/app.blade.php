@@ -98,7 +98,7 @@
     @endif
     @vite(['resources/css/app.css', 'resources/js/app.js'])
     <link rel="stylesheet" href="{{ asset('css/site-refresh.css') }}">
-    @if(request()->routeIs('dashboard.events*') || request()->routeIs('dashboard.venues*') || request()->routeIs('dashboard.venue-availability*') || request()->routeIs('dashboard.admin-users*') || request()->routeIs('dashboard.admin-access*') || request()->routeIs('dashboard.analytics*') || request()->routeIs('portal.profile*'))
+    @if(request()->routeIs('dashboard.events*') || request()->routeIs('dashboard.venues*') || request()->routeIs('dashboard.venue-availability*') || request()->routeIs('dashboard.admin-users*') || request()->routeIs('dashboard.admin-access*') || request()->routeIs('dashboard.analytics*') || request()->routeIs('portal.profile*') || request()->routeIs('dashboard.proposal-process-templates*'))
         <link rel="stylesheet" href="{{ asset('css/proposal-modal.css') }}">
     @endif
     @livewireStyles
