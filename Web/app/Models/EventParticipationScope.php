@@ -55,9 +55,6 @@ class EventParticipationScope extends Model
         'ppa_status',
         'ppa_softcopy_path',
         'ppa_softcopy_original_name',
-        'hardcopy_submitted',
-        'org_head_signed',
-        'adviser_signed',
         'submitted_by',
         'submitted_at',
         'reviewed_by',
@@ -78,9 +75,6 @@ class EventParticipationScope extends Model
     {
         return [
             'ppa_required' => 'boolean',
-            'hardcopy_submitted' => 'boolean',
-            'org_head_signed' => 'boolean',
-            'adviser_signed' => 'boolean',
             'analytics_rollup_enabled' => 'boolean',
             'late_cutoff_min' => 'integer',
             'submitted_at' => 'datetime',

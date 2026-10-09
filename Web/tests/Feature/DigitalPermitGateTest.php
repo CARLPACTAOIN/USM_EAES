@@ -89,24 +89,12 @@ class DigitalPermitGateTest extends TestCase
         $this->assertDatabaseCount('event_permit_versions', 0);
     }
 
-    public function test_direct_legacy_signature_mutation_cannot_bypass_digital_permit_workflow_gates(): void
+    public function test_digital_permit_workflow_gate_blocks_issuance_until_gate_task_decision_completed(): void
     {
         $osa = $this->osaUser();
-        $event = $this->eventReadyForApproval($osa, [
-            'hardcopy_submitted' => false,
-            'hardcopy_submitted_at' => null,
-            'head_organization_signed' => false,
-            'adviser_signed' => false,
-        ]);
+        $event = $this->eventReadyForApproval($osa);
         $run = $this->workflowRun($event, $osa);
         $osaTask = $this->workflowTask($run, $this->step($run, 'osa_final_approval', 'OSA Final Permit Approval', 1, isGate: true), $osa, ProposalWorkflowTask::STATUS_AVAILABLE);
-
-        $event->forceFill([
-            'hardcopy_submitted' => true,
-            'hardcopy_submitted_at' => now(),
-            'head_organization_signed' => true,
-            'adviser_signed' => true,
-        ])->save();
 
         $issuedEvent = app(EventPermitService::class)
             ->issueIfCompletedOrganizerOsaPermitGateDecision($osaTask, $osa);
@@ -147,15 +135,10 @@ class DigitalPermitGateTest extends TestCase
         $this->assertDatabaseCount('event_permit_versions', 0);
     }
 
-    public function test_legacy_signature_flags_are_projected_from_workflow_task_decisions(): void
+    public function test_workflow_task_decisions_record_approval_trails_without_legacy_compatibility_projections(): void
     {
         $approver = $this->osaUser();
-        $event = $this->eventReadyForApproval($approver, [
-            'hardcopy_submitted' => false,
-            'hardcopy_submitted_at' => null,
-            'head_organization_signed' => false,
-            'adviser_signed' => false,
-        ]);
+        $event = $this->eventReadyForApproval($approver);
         $run = $this->workflowRun($event, $approver);
         $organizationHeadTask = $this->workflowTask(
             $run,
@@ -176,10 +159,13 @@ class DigitalPermitGateTest extends TestCase
             ProposalWorkflowTask::DECISION_APPROVED
         );
 
-        $event->refresh();
-        $this->assertTrue($event->head_organization_signed);
-        $this->assertFalse($event->adviser_signed);
-        $this->assertFalse($event->hardcopy_submitted);
+        $this->assertDatabaseHas('approval_trails', [
+            'workflow_task_id' => $organizationHeadTask->id,
+            'actor_id' => $approver->id,
+            'decision' => ProposalWorkflowTask::DECISION_APPROVED,
+        ]);
+        $this->assertSame(ProposalWorkflowTask::STATUS_APPROVED, $organizationHeadTask->fresh()->status);
+        $this->assertSame(ProposalWorkflowRun::STATUS_IN_PROGRESS, $run->fresh()->status);
 
         app(ProposalWorkflowTaskService::class)->decide(
             $adviserTask->fresh(),
@@ -187,12 +173,13 @@ class DigitalPermitGateTest extends TestCase
             ProposalWorkflowTask::DECISION_APPROVED
         );
 
-        $event->refresh();
+        $this->assertDatabaseHas('approval_trails', [
+            'workflow_task_id' => $adviserTask->id,
+            'actor_id' => $approver->id,
+            'decision' => ProposalWorkflowTask::DECISION_APPROVED,
+        ]);
+        $this->assertSame(ProposalWorkflowTask::STATUS_APPROVED, $adviserTask->fresh()->status);
         $this->assertSame(ProposalWorkflowRun::STATUS_APPROVED, $run->fresh()->status);
-        $this->assertTrue($event->head_organization_signed);
-        $this->assertTrue($event->adviser_signed);
-        $this->assertTrue($event->hardcopy_submitted);
-        $this->assertNotNull($event->hardcopy_submitted_at);
     }
 
     public function test_final_approval_creates_immutable_version_snapshots_and_copy_owners(): void
@@ -319,8 +306,7 @@ class DigitalPermitGateTest extends TestCase
             'venue_confirmation_document_original_name' => 'venue-confirmation.pdf',
             'proposal_document_path' => 'proposal-documents/digital-permit.pdf',
             'proposal_document_original_name' => 'digital-permit.pdf',
-            'hardcopy_submitted' => true,
-            'hardcopy_submitted_at' => now(),
+
             'organization_name_snapshot' => $this->organization->name,
             'proponent_name_snapshot' => 'Permit Proponent',
         ], $overrides));

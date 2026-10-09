@@ -428,8 +428,6 @@ class ProposalWorkflowTest extends TestCase
             'venue_confirmation_document_original_name' => 'confirmation.pdf',
             'proposal_document_path' => 'proposal-documents/proposal.pdf',
             'proposal_document_original_name' => 'proposal.pdf',
-            'hardcopy_submitted' => true,
-            'hardcopy_submitted_at' => now(),
             'college_name_snapshot' => $organization->resolvedCollege()?->name,
             'department_name_snapshot' => $organization->department?->name,
             'organization_name_snapshot' => $organization->name,

@@ -216,9 +216,6 @@ class ProposalGovernanceSnapshotTest extends TestCase
             'target_demographics' => ['CS Students'],
             'budget_allocations' => ['budget_cost' => 5000],
             'resolution_number' => 'RES-2026-001',
-            'hardcopy_submitted' => false,
-            'head_organization_signed' => false,
-            'adviser_signed' => false,
             'parent_event_id' => null,
         ];
     }

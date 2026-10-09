@@ -147,9 +147,6 @@ class EventDaySessionTest extends TestCase
             'target_demographics' => ['All members'],
             'budget_allocations' => [['item' => 'Materials', 'amount' => 1000]],
             'resolution_number' => null,
-            'hardcopy_submitted' => false,
-            'head_organization_signed' => false,
-            'adviser_signed' => false,
             'evaluation_questions' => null,
             'event_days' => [[
                 'date' => Carbon::today()->toDateString(),

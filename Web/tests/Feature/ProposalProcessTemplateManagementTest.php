@@ -273,6 +273,39 @@ class ProposalProcessTemplateManagementTest extends TestCase
             ->assertSessionHasErrors('steps.0.prerequisites');
     }
 
+    public function test_osa_can_view_proposal_process_templates_index_with_metrics_and_pipelines(): void
+    {
+        $version = $this->createDraftVersion();
+
+        $response = $this->actingAs($this->osa)
+            ->get(route('dashboard.proposal-process-templates.index'));
+
+        $response->assertOk();
+        $response->assertSee('Workflow Templates');
+        $response->assertSee('Template Catalog');
+        $response->assertSee('Active Workflows');
+        $response->assertSee('Draft Versions');
+        $response->assertSee('Proposals Processed');
+        $response->assertSee($version->template->name);
+        $response->assertSee('Version 1');
+        $response->assertSee('Adviser Endorsement');
+        $response->assertSee('adviser_endorsement');
+        $response->assertSee('OSA Review');
+        $response->assertSee('Gate');
+    }
+
+    public function test_non_osa_user_is_forbidden_from_viewing_proposal_process_templates_index(): void
+    {
+        $student = User::factory()->create([
+            'email' => 'student.templates@usm.edu.ph',
+        ]);
+        $student->assignRole('Student');
+
+        $this->actingAs($student)
+            ->get(route('dashboard.proposal-process-templates.index'))
+            ->assertForbidden();
+    }
+
     private function createDraftVersion(?College $college = null, array $overrides = []): ProposalProcessTemplateVersion
     {
         $college ??= College::factory()->create();
@@ -519,8 +552,6 @@ class ProposalProcessTemplateManagementTest extends TestCase
             'venue_confirmation_document_original_name' => 'confirmation.pdf',
             'proposal_document_path' => 'proposal-documents/proposal.pdf',
             'proposal_document_original_name' => 'proposal.pdf',
-            'hardcopy_submitted' => true,
-            'hardcopy_submitted_at' => now(),
             'college_name_snapshot' => $organization->resolvedCollege()?->name,
             'department_name_snapshot' => $organization->department?->name,
             'organization_name_snapshot' => $organization->name,

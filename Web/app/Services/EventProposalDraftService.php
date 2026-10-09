@@ -108,10 +108,6 @@ class EventProposalDraftService
                     'proposal_document_path' => $documentPath,
                     'proposal_document_original_name' => $proposalDocument?->getClientOriginalName(),
                     'resolution_number' => $data['resolution_number'],
-                    'hardcopy_submitted' => false,
-                    'hardcopy_submitted_at' => null,
-                    'head_organization_signed' => false,
-                    'adviser_signed' => false,
                 ]);
 
                 $this->replaceEventDays($event, $this->sessionSchedules->normalizeEventDays($data['event_days']));

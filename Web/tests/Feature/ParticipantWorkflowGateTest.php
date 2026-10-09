@@ -125,9 +125,6 @@ class ParticipantWorkflowGateTest extends TestCase
         $fixture['scope']->forceFill([
             'ppa_softcopy_path' => 'participant-ppa-documents/spoofed.pdf',
             'ppa_softcopy_original_name' => 'spoofed.pdf',
-            'hardcopy_submitted' => true,
-            'org_head_signed' => true,
-            'adviser_signed' => true,
         ])->save();
 
         try {
@@ -203,7 +200,7 @@ class ParticipantWorkflowGateTest extends TestCase
             ProposalWorkflowTask::DECISION_APPROVED
         );
 
-        $this->assertTrue($fixture['scope']->fresh()->hardcopy_submitted);
+        $this->assertSame(EventParticipationScope::PPA_APPROVED, $fixture['scope']->fresh()->ppa_status);
 
         $assignment = app(ScannerAssignmentService::class)->assign(
             event: $fixture['event'],
@@ -377,9 +374,7 @@ class ParticipantWorkflowGateTest extends TestCase
             'end_date' => today(),
             'location_type' => 'on-campus',
             'location_details' => 'Main Campus Ground',
-            'hardcopy_submitted' => true,
-            'head_organization_signed' => true,
-            'adviser_signed' => true,
+
         ]);
 
         CanonicalPpaPacket::factory()->for($event)->create([

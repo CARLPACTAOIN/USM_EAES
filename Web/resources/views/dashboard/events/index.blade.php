@@ -134,17 +134,6 @@
                                 <span id="proposal-detail-softcopy-missing">Not attached</span>
                             </span>
                         </div>
-                        <div class="proposal-detail-item">
-                            <span class="proposal-detail-label">Hardcopy</span>
-                            <span id="proposal-detail-hardcopy" class="proposal-detail-value"></span>
-                        </div>
-                        <div class="proposal-detail-item">
-                            <span class="proposal-detail-label">Signatures</span>
-                            <span class="proposal-detail-value">
-                                Head <span id="proposal-detail-head-signed"></span>,
-                                Adviser <span id="proposal-detail-adviser-signed"></span>
-                            </span>
-                        </div>
                     </div>
                 </section>
 
@@ -494,9 +483,7 @@
                     sourceOfFund: document.getElementById('proposal-detail-source-of-fund'),
                     budgetCost: document.getElementById('proposal-detail-budget-cost'),
                     resolutionNumber: document.getElementById('proposal-detail-resolution-number'),
-                    hardcopy: document.getElementById('proposal-detail-hardcopy'),
-                    headSigned: document.getElementById('proposal-detail-head-signed'),
-                    adviserSigned: document.getElementById('proposal-detail-adviser-signed'),
+
                     evaluationQuestions: document.getElementById('proposal-detail-evaluation-questions'),
                 };
 

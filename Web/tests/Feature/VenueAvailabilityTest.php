@@ -135,9 +135,6 @@ class VenueAvailabilityTest extends TestCase
         $data = $this->proposalData($organization);
         $data['venue_id'] = null;
         $data['location_details'] = 'Main Gym';
-        $data['hardcopy_submitted'] = true;
-        $data['head_organization_signed'] = true;
-        $data['adviser_signed'] = true;
 
         $event = app(EventProposalDraftService::class)->create(
             $organizer,
@@ -328,9 +325,6 @@ class VenueAvailabilityTest extends TestCase
             'location_type' => 'on-campus',
             'venue_confirmation_office' => 'Campus Facilities Office',
             'venue_confirmation_date' => today(),
-            'hardcopy_submitted' => true,
-            'head_organization_signed' => true,
-            'adviser_signed' => true,
         ], $overrides));
 
         EventDay::create([
@@ -384,9 +378,6 @@ class VenueAvailabilityTest extends TestCase
                 'budget_cost' => 1500,
             ],
             'resolution_number' => null,
-            'hardcopy_submitted' => false,
-            'head_organization_signed' => false,
-            'adviser_signed' => false,
             'event_days' => [['date' => $date, 'start_time' => '08:00', 'end_time' => '12:00']],
             'evaluation_questions' => EvaluationQuestions::defaultSchema(),
         ];

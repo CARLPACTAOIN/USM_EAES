@@ -103,12 +103,6 @@ class EventProposalCreate extends Component
 
     public $proposalDocument = null;
 
-    public bool $hardcopySubmitted = false;
-
-    public bool $headOrganizationSigned = false;
-
-    public bool $adviserSigned = false;
-
     public bool $sameTimeForAllDays = true;
 
     public array $eventDays = [];
@@ -570,9 +564,6 @@ class EventProposalCreate extends Component
         $this->methodology = (string) ($packet?->methodology ?? '');
         $this->majorActivities = implode(PHP_EOL, $packet?->major_activities ?? []);
         $this->expectedOutput = (string) ($packet?->expected_output ?? '');
-        $this->hardcopySubmitted = (bool) $event->hardcopy_submitted;
-        $this->headOrganizationSigned = (bool) $event->head_organization_signed;
-        $this->adviserSigned = (bool) $event->adviser_signed;
         $this->sameTimeForAllDays = true;
         $this->eventDays = $event->eventDays
             ->sortBy('day_number')
@@ -688,8 +679,6 @@ class EventProposalCreate extends Component
             'specificObjectives' => 'specific objectives',
             'majorActivities' => 'major activities',
             'expectedOutput' => 'expected output',
-            'hardcopySubmitted' => 'hardcopy submitted',
-            'headOrganizationSigned' => 'head signed',
             'sameTimeForAllDays' => 'same time for all days',
             'eventDays' => 'event days',
             'eventDays.*.date' => 'event day date',
@@ -758,9 +747,6 @@ class EventProposalCreate extends Component
         $this->methodology = (string) data_get($old, 'methodology', '');
         $this->majorActivities = (string) data_get($old, 'major_activities', '');
         $this->expectedOutput = (string) data_get($old, 'expected_output', '');
-        $this->hardcopySubmitted = $this->oldBoolean($old, 'hardcopy_submitted');
-        $this->headOrganizationSigned = $this->oldBoolean($old, 'head_organization_signed');
-        $this->adviserSigned = $this->oldBoolean($old, 'adviser_signed');
         $this->sameTimeForAllDays = $this->oldBoolean($old, 'same_time_for_all_days', true);
         $this->eventDays = $this->normalizeEventDays(data_get($old, 'event_days'));
         $this->evaluationQuestions = $this->normalizeEvaluationQuestions(data_get($old, 'evaluation_questions'));

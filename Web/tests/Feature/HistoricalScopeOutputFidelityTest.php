@@ -285,8 +285,6 @@ class HistoricalScopeOutputFidelityTest extends TestCase
             'venue_confirmation_document_original_name' => 'venue-conf.pdf',
             'proposal_document_path' => 'proposal-documents/historical.pdf',
             'proposal_document_original_name' => 'conclave-proposal.pdf',
-            'hardcopy_submitted' => true,
-            'hardcopy_submitted_at' => now(),
             'college_name_snapshot' => 'Historical Science College',
             'department_name_snapshot' => 'Historical Math Department',
             'program_name_snapshot' => 'Historical BS Mathematics',

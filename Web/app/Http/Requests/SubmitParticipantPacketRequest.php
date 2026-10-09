@@ -14,9 +14,6 @@ class SubmitParticipantPacketRequest extends ParticipantPacketRequest
         return array_merge($this->commonRules(), [
             'delegate_count' => ['nullable', 'integer', 'min:1'],
             'ppa_softcopy' => ['nullable', 'file', 'mimes:pdf,doc,docx', 'max:10240'],
-            'hardcopy_submitted' => ['nullable', 'boolean'],
-            'org_head_signed' => ['nullable', 'boolean'],
-            'adviser_signed' => ['nullable', 'boolean'],
         ]);
     }
 }

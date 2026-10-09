@@ -193,9 +193,6 @@ class DashboardController extends Controller
             'expected_output' => 'nullable|string|max:5000',
             'parent_event_id' => 'nullable|uuid|exists:events,id',
             'proposal_document' => 'nullable|file|mimes:pdf,doc,docx|max:10240',
-            'hardcopy_submitted' => 'nullable|boolean',
-            'head_organization_signed' => 'nullable|boolean',
-            'adviser_signed' => 'nullable|boolean',
             'event_days' => 'required|array|min:1',
             'event_days.*.date' => 'required|date',
             'event_days.*.start_time' => 'required|date_format:H:i',
@@ -376,9 +373,6 @@ class DashboardController extends Controller
             'expected_output' => 'nullable|string|max:5000',
             'parent_event_id' => 'nullable|uuid|exists:events,id',
             'proposal_document' => 'nullable|file|mimes:pdf,doc,docx|max:10240',
-            'hardcopy_submitted' => 'nullable|boolean',
-            'head_organization_signed' => 'nullable|boolean',
-            'adviser_signed' => 'nullable|boolean',
             'event_days' => 'required|array|min:1',
             'event_days.*.date' => 'required|date',
             'event_days.*.start_time' => 'required|date_format:H:i',
@@ -542,19 +536,6 @@ class DashboardController extends Controller
         $this->authorizeEventAccess($event, $request->user());
 
         return view('dashboard.events.checklist', $this->organizerChecklists->viewData($event, $request->user()));
-    }
-
-    /**
-     * Mark a proposal hardcopy as submitted to OSA.
-     */
-    public function markHardcopy(Request $request, $eventId)
-    {
-        abort_unless($request->user()->can('create-proposals'), 403);
-
-        $event = Event::findOrFail($eventId);
-        $this->authorizeEventAccess($event, $request->user());
-
-        return redirect()->back()->with('error', 'Legacy hardcopy and signature fields are read-only workflow projections.');
     }
 
     public function startVenueAmendment(Request $request, Event $event): RedirectResponse

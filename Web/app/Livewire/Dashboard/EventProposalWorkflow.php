@@ -42,20 +42,6 @@ class EventProposalWorkflow extends Component
         // Listener method intentionally empty; Livewire re-renders the action set.
     }
 
-    public function markHardcopy(): void
-    {
-        $this->resetFeedback();
-
-        abort_unless(auth()->user()?->can('create-proposals'), 403);
-
-        $event = $this->event();
-        $this->authorizeEventAccess($event);
-        $this->authorizeOrganizerMutation($event);
-
-        $this->errorNotice = 'Legacy hardcopy and signature fields are read-only workflow projections.';
-        $this->dispatchWorkflowUpdated();
-    }
-
     public function submitProposal(EventPermitService $permits, EventNotificationService $notifications): void
     {
         $this->resetFeedback();

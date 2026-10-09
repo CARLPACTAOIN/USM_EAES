@@ -18,7 +18,6 @@ class ParticipantPpaPacketService
         private readonly EventProposalSubmissionGuard $submissionGuard,
         private readonly EventNotificationService $notifications,
         private readonly ProposalWorkflowService $workflows,
-        private readonly LegacyProposalCompatibilityProjection $legacyProjection,
     ) {}
 
     public function getOrCreatePacket(EventParticipationScope $scope, ?User $actor = null): CanonicalPpaPacket
@@ -178,8 +177,6 @@ class ParticipantPpaPacketService
                 $scope->fresh(['event.organization', 'organization']),
                 $actor
             );
-
-            $this->legacyProjection->syncParticipantScope($scope->fresh());
         });
 
         $this->notifications->notifyParticipantScopeSubmitted(

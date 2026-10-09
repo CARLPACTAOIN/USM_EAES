@@ -386,9 +386,6 @@ class UsmEaesTest extends TestCase
                     'program_materials' => 10000,
                 ],
                 'resolution_number' => 'USG-2026-001',
-                'hardcopy_submitted' => '1',
-                'head_organization_signed' => '1',
-                'adviser_signed' => '1',
                 'proposal_document' => UploadedFile::fake()->create('usg-assembly.docx', 128, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'),
                 'evaluation_questions' => EvaluationQuestions::defaultSchema(),
                 'event_days' => [[
@@ -411,9 +408,6 @@ class UsmEaesTest extends TestCase
             'venue_id' => $venue->id,
             'venue_confirmation_document_original_name' => null,
             'resolution_number' => 'USG-2026-001',
-            'hardcopy_submitted' => false,
-            'head_organization_signed' => false,
-            'adviser_signed' => false,
         ]);
         $event = Event::findOrFail($eventId);
         $this->assertDatabaseHas('event_days', [
@@ -431,9 +425,6 @@ class UsmEaesTest extends TestCase
             'participation_role' => EventParticipationScope::ROLE_ORGANIZER,
             'organization_id' => $usgOrg->id,
             'ppa_softcopy_original_name' => 'usg-assembly.docx',
-            'hardcopy_submitted' => false,
-            'org_head_signed' => false,
-            'adviser_signed' => false,
         ]);
         Storage::disk('local')->assertExists($event->proposal_document_path);
 
@@ -612,9 +603,6 @@ class UsmEaesTest extends TestCase
         $payload = $this->apiProposalPayload('Revised API Proposal');
         $payload['proposal_category'] = 'project';
         $payload['resolution_number'] = 'REV-2026-001';
-        $payload['hardcopy_submitted'] = '1';
-        $payload['head_organization_signed'] = '1';
-        $payload['adviser_signed'] = '1';
         $payload['event_late_cutoff_min'] = 99;
         $payload['event_days'][0]['day_number'] = 42;
         $payload['proposal_document'] = UploadedFile::fake()->create('replacement-proposal.docx', 128, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
@@ -629,9 +617,6 @@ class UsmEaesTest extends TestCase
         $this->assertSame(25, $event->event_late_cutoff_min);
         $this->assertSame('replacement-proposal.docx', $event->proposal_document_original_name);
         $this->assertSame('REV-2026-001', $event->resolution_number);
-        $this->assertFalse($event->hardcopy_submitted);
-        $this->assertFalse($event->head_organization_signed);
-        $this->assertFalse($event->adviser_signed);
         $this->assertDatabaseHas('event_days', [
             'event_id' => $event->id,
             'day_number' => 1,
@@ -647,9 +632,6 @@ class UsmEaesTest extends TestCase
             'participation_role' => EventParticipationScope::ROLE_ORGANIZER,
             'ppa_status' => EventParticipationScope::PPA_REVISION_REQUESTED,
             'ppa_softcopy_original_name' => 'replacement-proposal.docx',
-            'hardcopy_submitted' => false,
-            'org_head_signed' => false,
-            'adviser_signed' => false,
         ]);
         Storage::disk('local')->assertMissing($oldDocumentPath);
         Storage::disk('local')->assertExists($event->proposal_document_path);

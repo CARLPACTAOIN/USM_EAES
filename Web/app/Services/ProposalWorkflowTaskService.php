@@ -26,7 +26,6 @@ class ProposalWorkflowTaskService
     public function __construct(
         private readonly EventNotificationService $notifications,
         private readonly EventPermitService $eventPermits,
-        private readonly LegacyProposalCompatibilityProjection $legacyProjection,
         private readonly ProposalRevisionTargets $revisionTargets,
     ) {}
 
@@ -288,8 +287,6 @@ class ProposalWorkflowTaskService
             } elseif ($resultingStatus === ProposalWorkflowTask::STATUS_REVISION_REQUESTED) {
                 $this->markRunAndProposalRevisionRequested($lockedTask->workflowRun, $event, $actor, $remarks);
             }
-
-            $this->syncLegacyProjection($lockedTask->workflowRun);
 
             $freshTask = $lockedTask->fresh(['workflowRun.event.organization', 'assignedUser']);
             if ($decision === ProposalWorkflowTask::DECISION_APPROVED) {
@@ -730,18 +727,5 @@ class ProposalWorkflowTaskService
         }
 
         return $run->participationScope()->first();
-    }
-
-    private function syncLegacyProjection(ProposalWorkflowRun $run): void
-    {
-        $run->loadMissing(['event', 'participationScope']);
-
-        if ($run->participationScope) {
-            $this->legacyProjection->syncParticipantScope($run->participationScope);
-
-            return;
-        }
-
-        $this->legacyProjection->syncOrganizer($run->event);
     }
 }

@@ -25,14 +25,6 @@
                 @endif
                 Packet
             </span>
-            <span class="ppa-status-item {{ $primaryParticipantScope->hardcopy_submitted ? 'ppa-status-item--ok' : 'ppa-status-item--warn' }}">
-                @if($primaryParticipantScope->hardcopy_submitted)
-                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-                @else
-                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01"/></svg>
-                @endif
-                Hardcopy
-            </span>
         </div>
 
         <span class="ppa-status-item ppa-status-item--muted">
@@ -64,35 +56,6 @@
                     Packet
                 </span>
             @endif
-            <span class="ppa-status-item {{ $event->hardcopy_submitted ? 'ppa-status-item--ok' : 'ppa-status-item--warn' }}">
-                @if($event->hardcopy_submitted)
-                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-                @else
-                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01"/></svg>
-                @endif
-                Hardcopy
-            </span>
-        </div>
-
-        <hr class="ppa-status-divider">
-
-        <div class="ppa-status-group">
-            <span class="ppa-status-item {{ $event->head_organization_signed ? 'ppa-status-item--ok' : 'ppa-status-item--warn' }}">
-                @if($event->head_organization_signed)
-                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-                @else
-                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01"/></svg>
-                @endif
-                Head
-            </span>
-            <span class="ppa-status-item {{ $event->adviser_signed ? 'ppa-status-item--ok' : 'ppa-status-item--warn' }}">
-                @if($event->adviser_signed)
-                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-                @else
-                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01"/></svg>
-                @endif
-                Adviser
-            </span>
         </div>
 
         <div class="ppa-status-group" style="margin-top: 0.125rem;">

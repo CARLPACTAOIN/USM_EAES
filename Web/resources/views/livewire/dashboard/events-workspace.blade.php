@@ -208,10 +208,10 @@
                             );
 
                         // --- Exposed CTA & attention dot logic ---
-                        $needsHardcopy = !$isParticipatingWorkspace && $canCreateProposals && in_array($event->status, ['draft', 'revision_requested'], true) && !$event->hardcopy_submitted;
+
                         $needsRevisionAttention = $canEditProposal && $event->status === 'revision_requested';
                         $needsRulesAttention = $canUseAttendanceRules && !$event->attendance_policy_locked && $event->event_late_cutoff_min === null && in_array($event->status, ['draft', 'revision_requested', 'submitted', 'approved'], true);
-                        $overflowNeedsAttention = $needsHardcopy || $needsRevisionAttention || $needsRulesAttention;
+                        $overflowNeedsAttention = $needsRevisionAttention || $needsRulesAttention;
                     @endphp
                     <tr wire:key="events-workspace-row-{{ $event->id }}-{{ $workspace }}"
                         data-event-search="{{ Str::lower($event->title . ' ' . ($event->organization?->name ?? '') . ' ' . ($event->organization?->acronym ?? '') . ' ' . ($event->proposal_category ?? '') . ' ' . $event->status . ' ' . $scheduleSummary) }}"
@@ -378,9 +378,9 @@
                                             data-detail-resolution-number="{{ $event->resolution_number ?: 'N/A' }}"
                                             data-detail-softcopy-url="{{ $event->proposal_document_path ? route('dashboard.events.proposal-document', $event->id) : '' }}"
                                             data-detail-softcopy-name="{{ $event->proposal_document_original_name ?: 'Not attached' }}"
-                                            data-detail-hardcopy="{{ $event->hardcopy_submitted ? 'Submitted' : 'Pending' }}"
-                                            data-detail-head-signed="{{ $event->head_organization_signed ? 'Signed' : 'Pending' }}"
-                                            data-detail-adviser-signed="{{ $event->adviser_signed ? 'Signed' : 'Pending' }}"
+
+
+
                                             data-detail-evaluation-questions="{{ $eventEvaluationQuestionsSummary ?: 'No evaluation questions recorded' }}">
                                         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M2.25 12s3.75-6.75 9.75-6.75S21.75 12 21.75 12 18 18.75 12 18.75 2.25 12 2.25 12z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
                                         View Details

@@ -26,7 +26,6 @@ class EventPermitService
         private readonly AdminScopeService $adminScopes,
         private readonly EventNotificationService $notifications,
         private readonly ProposalWorkflowService $proposalWorkflows,
-        private readonly LegacyProposalCompatibilityProjection $legacyProjection,
     ) {}
 
     public function submit(Event $event, User $actor, bool $returnedTasksAddressed = false): Event
@@ -189,7 +188,6 @@ class EventPermitService
                 ->each(fn (ScannerSession $session) => $this->scannerSessions->revoke($session, $actor, 'Venue amendment started; approved permit superseded.'));
 
             $returnedTasks = $this->proposalWorkflows->returnVenueDependentTasksForAmendment($event, $actor, $reason);
-            $this->legacyProjection->syncOrganizer($event);
 
             $event->update([
                 'status' => Event::STATUS_REVISION_REQUESTED,

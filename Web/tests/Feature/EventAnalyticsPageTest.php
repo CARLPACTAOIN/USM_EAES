@@ -308,9 +308,6 @@ class EventAnalyticsPageTest extends TestCase
             'location_type' => 'on-campus',
             'location_details' => 'USM Auditorium',
             'target_demographics' => ['target_participants' => 'Organizer and invited society students'],
-            'hardcopy_submitted' => true,
-            'head_organization_signed' => true,
-            'adviser_signed' => true,
         ]);
         $form = EventEvaluationForm::createForEvent(
             $event,
@@ -361,7 +358,6 @@ class EventAnalyticsPageTest extends TestCase
             'participant_name_snapshot' => 'JMS - Junior Managers Society',
             'ppa_required' => true,
             'ppa_status' => EventParticipationScope::PPA_APPROVED,
-            'hardcopy_submitted' => true,
             'capture_mode' => 'self_scanning',
             'analytics_rollup_enabled' => true,
             'status' => EventParticipationScope::STATUS_ACTIVE,

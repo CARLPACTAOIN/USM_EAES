@@ -96,7 +96,6 @@ class VenueConfirmationTest extends TestCase
             UploadedFile::fake()->create('proposal.pdf', 100, 'application/pdf'),
             UploadedFile::fake()->create('confirmation.jpg', 100, 'image/jpeg')
         );
-        $event->update(['hardcopy_submitted' => true, 'hardcopy_submitted_at' => now()]);
 
         app(EventPermitService::class)->submit($event->fresh(), $organizer);
         $approved = $this->approveAvailableWorkflowTasks($event->fresh());
@@ -143,7 +142,6 @@ class VenueConfirmationTest extends TestCase
             UploadedFile::fake()->create('proposal.docx', 100, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'),
             UploadedFile::fake()->create('confirmation.pdf', 100, 'application/pdf')
         );
-        $event->update(['hardcopy_submitted' => true, 'hardcopy_submitted_at' => now()]);
 
         $submitted = app(EventPermitService::class)->submit($event->fresh(), $organizer);
 
@@ -260,7 +258,6 @@ class VenueConfirmationTest extends TestCase
             UploadedFile::fake()->create('proposal.pdf', 100, 'application/pdf'),
             UploadedFile::fake()->create('confirmation.jpg', 100, 'image/jpeg')
         );
-        $event->update(['hardcopy_submitted' => true, 'hardcopy_submitted_at' => now()]);
 
         app(EventPermitService::class)->submit($event->fresh(), $organizer);
         $run = $event->fresh()->workflowRun()->firstOrFail();
@@ -740,9 +737,6 @@ class VenueConfirmationTest extends TestCase
                 'budget_cost' => 1500,
             ],
             'resolution_number' => null,
-            'hardcopy_submitted' => false,
-            'head_organization_signed' => false,
-            'adviser_signed' => false,
             'event_days' => [[
                 'date' => today()->addMonth()->toDateString(),
                 'start_time' => '08:00',
@@ -757,7 +751,7 @@ class VenueConfirmationTest extends TestCase
     {
         Storage::put('proposal-documents/proposal.pdf', 'ppa');
         Storage::put('venue-confirmations/confirmation.pdf', 'evidence');
-        $event = Event::create(array_merge(['organization_id' => $organization->id, 'title' => 'Approved Venue Event', 'proposal_category' => 'activity', 'status' => Event::STATUS_SUBMITTED, 'lifecycle_phase' => 'scheduled', 'event_domain' => 'student_affairs', 'start_date' => today()->addMonth(), 'end_date' => today()->addMonth(), 'location_type' => 'on-campus', 'venue_id' => $venue->id, 'location_details' => $venue->displayName(), 'venue_confirmation_office' => $venue->managing_office, 'venue_confirmation_date' => today(), 'venue_confirmation_reference_number' => 'VC-100', 'venue_confirmation_document_path' => 'venue-confirmations/confirmation.pdf', 'venue_confirmation_document_original_name' => 'confirmation.pdf', 'proposal_document_path' => 'proposal-documents/proposal.pdf', 'proposal_document_original_name' => 'proposal.pdf', 'hardcopy_submitted' => true, 'hardcopy_submitted_at' => now()], $overrides));
+        $event = Event::create(array_merge(['organization_id' => $organization->id, 'title' => 'Approved Venue Event', 'proposal_category' => 'activity', 'status' => Event::STATUS_SUBMITTED, 'lifecycle_phase' => 'scheduled', 'event_domain' => 'student_affairs', 'start_date' => today()->addMonth(), 'end_date' => today()->addMonth(), 'location_type' => 'on-campus', 'venue_id' => $venue->id, 'location_details' => $venue->displayName(), 'venue_confirmation_office' => $venue->managing_office, 'venue_confirmation_date' => today(), 'venue_confirmation_reference_number' => 'VC-100', 'venue_confirmation_document_path' => 'venue-confirmations/confirmation.pdf', 'venue_confirmation_document_original_name' => 'confirmation.pdf', 'proposal_document_path' => 'proposal-documents/proposal.pdf', 'proposal_document_original_name' => 'proposal.pdf'], $overrides));
         EventDay::create(['event_id' => $event->id, 'day_number' => 1, 'date' => today()->addMonth(), 'start_time' => '08:00', 'end_time' => '12:00']);
         CanonicalPpaPacket::factory()->for($event)->create([
             'proposal_category' => 'activity',

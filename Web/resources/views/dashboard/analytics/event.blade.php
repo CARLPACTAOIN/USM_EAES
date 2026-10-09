@@ -1137,7 +1137,7 @@
                     <div class="analytics-context-list">
                         @foreach([
                             ['label' => 'Organizer', 'value' => $eventData['organizer']['acronym'] ?: $eventData['organizer']['name'], 'accent' => '#0e5d36'],
-                            ['label' => 'Proposal / PPA State', 'value' => $label($eventData['status']).' / '.($eventData['proposal_state']['hardcopy_submitted'] ? 'Hardcopy submitted' : 'Hardcopy pending'), 'accent' => '#d97706'],
+                            ['label' => 'Proposal / PPA State', 'value' => $label($eventData['status']), 'accent' => '#d97706'],
                             ['label' => 'Schedule', 'value' => $eventData['start_date'].' to '.$eventData['end_date'], 'accent' => '#2563eb'],
                             ['label' => 'Venue', 'value' => $eventData['location_details'] ?: $label($eventData['location_type']), 'accent' => '#4f46e5'],
                             ['label' => 'Who was expected', 'value' => $eventData['audience']['source_label'].' ('.$attendance['expected_audience'].' people)', 'accent' => '#0f766e'],

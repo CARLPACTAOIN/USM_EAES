@@ -88,7 +88,6 @@ Route::middleware(['auth'])->group(function () {
             Route::get('/events/{event}/proposal-preview', [DashboardController::class, 'proposalPreview'])->name('dashboard.events.proposal-preview');
             Route::get('/events/{event}/permit-preview', [DashboardController::class, 'permitPreview'])->name('dashboard.events.permit-preview');
             Route::post('/events/{event}/link', [DashboardController::class, 'linkEvent'])->name('dashboard.events.link');
-            Route::post('/events/{event}/hardcopy', [DashboardController::class, 'markHardcopy'])->name('dashboard.events.hardcopy');
             Route::post('/events/{event}/attendance-policy', [DashboardController::class, 'updateEventAttendancePolicy'])->name('dashboard.events.attendance-policy');
             Route::post('/events/{event}/participant-scopes', [DashboardController::class, 'storeParticipantScope'])->name('dashboard.events.participant-scopes.store');
             Route::post('/events/{event}/participant-scopes/{participationScope}/draft', [DashboardController::class, 'saveParticipantScopeDraft'])->name('dashboard.events.participant-scopes.draft');

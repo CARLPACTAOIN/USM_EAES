@@ -190,9 +190,6 @@ class EventAnalyticsService
             'schedule' => $schedule,
             'target_demographics' => $event->target_demographics ?: [],
             'proposal_state' => [
-                'hardcopy_submitted' => (bool) $event->hardcopy_submitted,
-                'head_organization_signed' => (bool) $event->head_organization_signed,
-                'adviser_signed' => (bool) $event->adviser_signed,
                 'resolution_number' => $event->resolution_number,
                 'evaluation_open' => (bool) $event->evaluation_open,
             ],

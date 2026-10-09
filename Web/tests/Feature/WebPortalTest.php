@@ -382,7 +382,6 @@ class WebPortalTest extends TestCase
             'participant_name_snapshot' => $participantOrg->name,
             'ppa_required' => true,
             'ppa_status' => $ppaStatus,
-            'hardcopy_submitted' => in_array($ppaStatus, [EventParticipationScope::PPA_SUBMITTED, EventParticipationScope::PPA_UNDER_REVIEW, EventParticipationScope::PPA_REVISION_REQUESTED, EventParticipationScope::PPA_APPROVED], true),
             'capture_mode' => 'self_scanning',
             'analytics_rollup_enabled' => true,
             'status' => EventParticipationScope::STATUS_ACTIVE,
@@ -425,10 +424,6 @@ class WebPortalTest extends TestCase
             ],
             'proposal_document_path' => 'proposal-documents/exportable.docx',
             'proposal_document_original_name' => 'exportable.docx',
-            'hardcopy_submitted' => true,
-            'hardcopy_submitted_at' => now()->subDays(2),
-            'head_organization_signed' => true,
-            'adviser_signed' => true,
         ]);
         $form = EventEvaluationForm::createForEvent(
             $event,
@@ -1378,10 +1373,6 @@ class WebPortalTest extends TestCase
             'end_date' => today()->addDays(7),
             'proposal_document_path' => 'proposal-documents/status-test.docx',
             'proposal_document_original_name' => 'status-test.docx',
-            'hardcopy_submitted' => true,
-            'hardcopy_submitted_at' => now(),
-            'head_organization_signed' => true,
-            'adviser_signed' => true,
         ]);
         EventEvaluationForm::createForEvent($event, $societyAdmin, $this->customEvaluationQuestions(), 'Evaluation - '.$event->title);
         $this->confirmVenueForEvent($event, 'Status Test Venue');
@@ -1416,10 +1407,6 @@ class WebPortalTest extends TestCase
             'end_date' => today()->addDays(7),
             'proposal_document_path' => 'proposal-documents/livewire-submit.docx',
             'proposal_document_original_name' => 'livewire-submit.docx',
-            'hardcopy_submitted' => true,
-            'hardcopy_submitted_at' => now(),
-            'head_organization_signed' => true,
-            'adviser_signed' => true,
         ]);
         EventEvaluationForm::createForEvent($event, $societyAdmin, $this->customEvaluationQuestions(), 'Evaluation - '.$event->title);
         $this->confirmVenueForEvent($event, 'Livewire Submit Venue');
@@ -1442,36 +1429,29 @@ class WebPortalTest extends TestCase
         ]);
     }
 
-    public function test_livewire_event_proposal_workflow_keeps_legacy_hardcopy_projection_read_only(): void
+    public function test_legacy_hardcopy_action_and_projection_are_retired(): void
     {
         $h = $this->createHierarchy();
         $societyAdmin = $this->createAdmin('Society Admin', $h['org']);
 
         $event = Event::create([
             'organization_id' => $h['org']->id,
-            'title' => 'Livewire Hardcopy Proposal',
+            'title' => 'Retired Hardcopy Action Proposal',
             'proposal_category' => 'activity',
             'status' => 'draft',
             'start_date' => today()->addDays(7),
             'end_date' => today()->addDays(7),
-            'proposal_document_path' => 'proposal-documents/livewire-hardcopy.docx',
-            'proposal_document_original_name' => 'livewire-hardcopy.docx',
-            'hardcopy_submitted' => false,
-            'head_organization_signed' => false,
-            'adviser_signed' => false,
+            'proposal_document_path' => 'proposal-documents/retired-hardcopy.docx',
+            'proposal_document_original_name' => 'retired-hardcopy.docx',
         ]);
 
-        Livewire::actingAs($societyAdmin)
-            ->test(EventProposalWorkflow::class, ['eventId' => $event->id])
-            ->call('markHardcopy')
-            ->assertSet('errorNotice', 'Legacy hardcopy and signature fields are read-only workflow projections.');
-
-        $this->assertFalse((bool) $event->fresh()->hardcopy_submitted);
+        $this->actingAs($societyAdmin)
+            ->post("/dashboard/events/{$event->id}/hardcopy")
+            ->assertNotFound();
 
         Livewire::actingAs($societyAdmin)
             ->test(EventsWorkspace::class)
-            ->assertSee('Hardcopy')
-            ->assertSee('ppa-status-item--warn', false);
+            ->assertDontSee('data-detail-hardcopy', false);
     }
 
     public function test_livewire_event_proposal_workflow_does_not_expose_global_osa_decisions(): void
@@ -1489,10 +1469,6 @@ class WebPortalTest extends TestCase
             'end_date' => today()->addDays(7),
             'proposal_document_path' => 'proposal-documents/livewire-review.docx',
             'proposal_document_original_name' => 'livewire-review.docx',
-            'hardcopy_submitted' => true,
-            'hardcopy_submitted_at' => now(),
-            'head_organization_signed' => true,
-            'adviser_signed' => true,
         ]);
         EventEvaluationForm::createForEvent($event, $societyAdmin, $this->customEvaluationQuestions(), 'Evaluation - '.$event->title);
         $this->confirmVenueForEvent($event, 'Livewire Review Venue');
@@ -1527,10 +1503,6 @@ class WebPortalTest extends TestCase
             'end_date' => today()->addDays(7),
             'proposal_document_path' => 'proposal-documents/original.docx',
             'proposal_document_original_name' => 'original.docx',
-            'hardcopy_submitted' => true,
-            'hardcopy_submitted_at' => now(),
-            'head_organization_signed' => true,
-            'adviser_signed' => true,
         ]);
         EventDay::create([
             'event_id' => $event->id,
@@ -1595,9 +1567,6 @@ class WebPortalTest extends TestCase
             ->set('budgetCost', '1750')
             ->set('majorActivities', "Planning workshop\nOperations review")
             ->set('resolutionNumber', 'RES-2026-01')
-            ->set('hardcopySubmitted', true)
-            ->set('headOrganizationSigned', true)
-            ->set('adviserSigned', true)
             ->set('eventDays', [[
                 'date' => today()->addDays(8)->toDateString(),
                 'start_time' => '09:00',
@@ -1658,8 +1627,6 @@ class WebPortalTest extends TestCase
             'end_date' => today()->addDays(7),
             'proposal_document_path' => 'proposal-documents/livewire-missing-form.docx',
             'proposal_document_original_name' => 'livewire-missing-form.docx',
-            'hardcopy_submitted' => true,
-            'hardcopy_submitted_at' => now(),
         ]);
 
         Livewire::actingAs($osaAdmin)
@@ -1683,8 +1650,6 @@ class WebPortalTest extends TestCase
             'end_date' => today()->addDays(7),
             'proposal_document_path' => 'proposal-documents/missing-evaluation.docx',
             'proposal_document_original_name' => 'missing-evaluation.docx',
-            'hardcopy_submitted' => true,
-            'hardcopy_submitted_at' => now(),
         ]);
 
         $this->actingAs($osaAdmin)
@@ -2071,7 +2036,6 @@ class WebPortalTest extends TestCase
             'end_date' => today()->addDays(7),
             'proposal_document_path' => 'proposal-documents/draft.docx',
             'proposal_document_original_name' => 'draft.docx',
-            'hardcopy_submitted' => true,
         ]);
 
         $this->actingAs($osaAdmin)
@@ -2099,7 +2063,6 @@ class WebPortalTest extends TestCase
             'end_date' => today()->addDays(7),
             'proposal_document_path' => 'proposal-documents/society-draft.docx',
             'proposal_document_original_name' => 'society-draft.docx',
-            'hardcopy_submitted' => true,
         ]);
         $this->confirmVenueForEvent($draft, 'Society Draft Venue');
 
@@ -2181,9 +2144,6 @@ class WebPortalTest extends TestCase
             'proposal_document_path' => 'proposal-documents/metadata.docx',
             'proposal_document_original_name' => 'metadata.docx',
             'resolution_number' => 'RES-2026-001',
-            'hardcopy_submitted' => true,
-            'head_organization_signed' => true,
-            'adviser_signed' => true,
         ]);
         EventEvaluationForm::createForEvent($event, null, $this->customEvaluationQuestions(), 'Evaluation - Metadata Review Event');
 
@@ -2248,9 +2208,6 @@ class WebPortalTest extends TestCase
             'methodology' => 'Normal multipart form submission.',
             'major_activities' => "Preparation\nSubmission",
             'expected_output' => 'One structured canonical packet.',
-            'hardcopy_submitted' => '1',
-            'head_organization_signed' => '1',
-            'adviser_signed' => '1',
             'event_days' => [[
                 'date' => today()->addDays(10)->toDateString(),
                 'start_time' => '08:00',
@@ -2285,9 +2242,6 @@ class WebPortalTest extends TestCase
         $event = Event::with('canonicalPpaPacket')->where('title', 'Documented PPA Event')->first();
         $this->assertNotNull($event);
         $this->assertSame('activity', $event->proposal_category);
-        $this->assertFalse($event->hardcopy_submitted);
-        $this->assertFalse($event->head_organization_signed);
-        $this->assertFalse($event->adviser_signed);
         $this->assertSame('official-ppa.docx', $event->proposal_document_original_name);
         $this->assertNotNull($event->canonicalPpaPacket);
         $this->assertSame(CanonicalPpaPacket::ROLE_ORGANIZER, $event->canonicalPpaPacket->activity_role);
@@ -2325,9 +2279,6 @@ class WebPortalTest extends TestCase
                 'source_of_fund' => 'Organization fund',
                 'budget_cost' => 2500,
                 'resolution_number' => 'RES-2026-010',
-                'hardcopy_submitted' => '1',
-                'head_organization_signed' => '1',
-                'adviser_signed' => '1',
                 'venue_confirmation_document' => UploadedFile::fake()->create('invalid-confirmation.exe', 128, 'application/octet-stream'),
                 'same_time_for_all_days' => '1',
                 'event_days' => [
@@ -2382,9 +2333,6 @@ class WebPortalTest extends TestCase
                 'source_of_fund' => 'Organization fund',
                 'budget_cost' => 2500,
                 'resolution_number' => 'RES-2026-002',
-                'hardcopy_submitted' => '1',
-                'head_organization_signed' => '1',
-                'adviser_signed' => '1',
                 'proposal_document' => UploadedFile::fake()->create('official-ppa.docx', 128, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'),
                 'event_days' => [[
                     'date' => '2026-01-17',
@@ -2420,9 +2368,6 @@ class WebPortalTest extends TestCase
                 'source_of_fund' => 'Organization fund',
                 'budget_cost' => 2500,
                 'resolution_number' => 'RES-2026-003',
-                'hardcopy_submitted' => '1',
-                'head_organization_signed' => '1',
-                'adviser_signed' => '1',
                 'proposal_document' => UploadedFile::fake()->create('official-ppa.docx', 128, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'),
                 'event_days' => [[
                     'date' => '2026-07-17',
@@ -2460,9 +2405,6 @@ class WebPortalTest extends TestCase
             ->set('sourceOfFund', 'Organization fund')
             ->set('budgetCost', '2500')
             ->set('resolutionNumber', 'RES-LW-2026')
-            ->set('hardcopySubmitted', true)
-            ->set('headOrganizationSigned', true)
-            ->set('adviserSigned', true)
             ->set('proposalDocument', UploadedFile::fake()->create('livewire-official-ppa.docx', 128, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'))
             ->set('eventDays', [[
                 'date' => today()->addDays(10)->toDateString(),
@@ -2479,9 +2421,6 @@ class WebPortalTest extends TestCase
         $this->assertSame($h['org']->id, $event->organization_id);
         $this->assertSame('draft', $event->status);
         $this->assertSame('student_affairs', $event->event_domain);
-        $this->assertFalse($event->hardcopy_submitted);
-        $this->assertFalse($event->head_organization_signed);
-        $this->assertFalse($event->adviser_signed);
         $this->assertSame('livewire-official-ppa.docx', $event->proposal_document_original_name);
         $this->assertNotNull($event->evaluation_form_version_id);
         $this->assertDatabaseHas('event_days', [
@@ -2637,7 +2576,7 @@ class WebPortalTest extends TestCase
         ]);
     }
 
-    public function test_draft_without_hardcopy_cannot_be_submitted(): void
+    public function test_draft_without_canonical_packet_cannot_be_submitted(): void
     {
         $h = $this->createHierarchy();
         $societyAdmin = $this->createAdmin('Society Admin', $h['org']);
@@ -2651,7 +2590,6 @@ class WebPortalTest extends TestCase
             'end_date' => today()->addDays(7),
             'proposal_document_path' => 'proposal-documents/softcopy-only.docx',
             'proposal_document_original_name' => 'softcopy-only.docx',
-            'hardcopy_submitted' => false,
         ]);
 
         $this->actingAs($societyAdmin)
@@ -2704,7 +2642,6 @@ class WebPortalTest extends TestCase
 
         $event = Event::with('canonicalPpaPacket')->where('title', 'Generated Online PPA')->firstOrFail();
         $this->assertNull($event->proposal_document_path);
-        $this->assertFalse($event->hardcopy_submitted);
         $this->assertSame('online', $event->canonicalPpaPacket->location_type);
 
         $this->actingAs($societyAdmin)
@@ -3711,9 +3648,6 @@ class WebPortalTest extends TestCase
         $this->actingAs($partnerAdmin)
             ->post(route('dashboard.events.participant-scopes.submit', [$event->id, $ownScope->id]), [
                 'ppa_softcopy' => UploadedFile::fake()->create('partner-ppa.pdf', 128, 'application/pdf'),
-                'hardcopy_submitted' => '1',
-                'org_head_signed' => '1',
-                'adviser_signed' => '1',
             ])
             ->assertSessionHas('success');
 
@@ -3726,9 +3660,6 @@ class WebPortalTest extends TestCase
         $this->actingAs($partnerAdmin)
             ->post(route('dashboard.events.participant-scopes.submit', [$event->id, $otherScope->id]), [
                 'ppa_softcopy' => UploadedFile::fake()->create('other-ppa.pdf', 128, 'application/pdf'),
-                'hardcopy_submitted' => '1',
-                'org_head_signed' => '1',
-                'adviser_signed' => '1',
             ])
             ->assertForbidden();
     }
@@ -3795,7 +3726,6 @@ class WebPortalTest extends TestCase
             'proposal_category' => 'activity',
             'status' => 'draft',
             'proposal_document_path' => 'proposal-documents/deferred.pdf',
-            'hardcopy_submitted' => true,
             'start_date' => today()->addDays(5),
             'end_date' => today()->addDays(5),
         ]);
@@ -3889,9 +3819,6 @@ class WebPortalTest extends TestCase
         $this->actingAs($partnerAdmin)
             ->post(route('dashboard.events.participant-scopes.submit', [$event->id, $scope->id]), [
                 'ppa_softcopy' => UploadedFile::fake()->create('partner-review-ppa.pdf', 128, 'application/pdf'),
-                'hardcopy_submitted' => '1',
-                'org_head_signed' => '1',
-                'adviser_signed' => '1',
             ])
             ->assertSessionHas('success');
 
@@ -3986,9 +3913,6 @@ class WebPortalTest extends TestCase
 
         $this->assertSame(EventParticipationScope::PPA_SUBMITTED, $scope->ppa_status);
         $this->assertSame($partnerAdmin->id, $scope->submitted_by);
-        $this->assertFalse($scope->hardcopy_submitted);
-        $this->assertFalse($scope->org_head_signed);
-        $this->assertFalse($scope->adviser_signed);
         $this->assertNotNull($scope->ppa_softcopy_path);
     }
 
@@ -4016,7 +3940,6 @@ class WebPortalTest extends TestCase
         $scope->update([
             'ppa_softcopy_path' => 'participant-ppa-documents/livewire-review.pdf',
             'ppa_softcopy_original_name' => 'livewire-review.pdf',
-            'hardcopy_submitted' => true,
         ]);
 
         Livewire::actingAs($osa)
@@ -4044,7 +3967,6 @@ class WebPortalTest extends TestCase
         $rejectedScope->update([
             'ppa_softcopy_path' => 'participant-ppa-documents/livewire-reject.pdf',
             'ppa_softcopy_original_name' => 'livewire-reject.pdf',
-            'hardcopy_submitted' => true,
         ]);
 
         Livewire::actingAs($osa)
@@ -4085,7 +4007,6 @@ class WebPortalTest extends TestCase
         $scope->update([
             'ppa_softcopy_path' => 'participant-ppa-documents/original.pdf',
             'ppa_softcopy_original_name' => 'original.pdf',
-            'hardcopy_submitted' => true,
         ]);
 
         Livewire::actingAs($osa)

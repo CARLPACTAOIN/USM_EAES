@@ -556,10 +556,6 @@ class DemoDataSeeder extends Seeder
                         'source_of_fund' => 'Trust fund',
                         'budget_cost' => 3000,
                     ],
-                    'hardcopy_submitted' => true,
-                    'hardcopy_submitted_at' => now()->subDays(5),
-                    'head_organization_signed' => true,
-                    'adviser_signed' => true,
                     'evaluation_open' => true,
                 ]
             );
@@ -699,10 +695,6 @@ class DemoDataSeeder extends Seeder
                         'source_of_fund' => 'Sponsorships',
                         'budget_cost' => 5000,
                     ],
-                    'hardcopy_submitted' => true,
-                    'hardcopy_submitted_at' => now()->subDays(1),
-                    'head_organization_signed' => true,
-                    'adviser_signed' => true,
                     'evaluation_open' => false,
                 ]
             );

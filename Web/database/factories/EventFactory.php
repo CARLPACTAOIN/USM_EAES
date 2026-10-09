@@ -31,9 +31,6 @@ class EventFactory extends Factory
             'end_date' => today()->addMonth(),
             'location_type' => 'on-campus',
             'location_details' => null,
-            'hardcopy_submitted' => false,
-            'head_organization_signed' => false,
-            'adviser_signed' => false,
         ];
     }
 
