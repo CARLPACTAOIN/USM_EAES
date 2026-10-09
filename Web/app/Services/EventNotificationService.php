@@ -296,7 +296,7 @@ class EventNotificationService
                 'title' => 'Workflow task rejected',
                 'body' => "{$task->title} was rejected for {$event->title}.{$remarks}",
                 'action_label' => 'Open Organizer Checklist',
-                'action_url' => route('dashboard.events.checklist', $event),
+                'action_url' => $this->organizerChecklistUrl($event, $task),
                 'severity' => 'error',
                 'needs_action' => false,
                 'workflow_task_id' => $task->id,
@@ -445,7 +445,7 @@ class EventNotificationService
                 'title' => 'Workflow task returned for revision',
                 'body' => "{$task->title} returned {$event->title} for organizer correction.{$remarks}",
                 'action_label' => 'Open Organizer Checklist',
-                'action_url' => route('dashboard.events.checklist', $event),
+                'action_url' => $this->organizerChecklistUrl($event, $task),
                 'severity' => 'warning',
                 'needs_action' => true,
                 'workflow_task_id' => $task->id,
@@ -796,5 +796,13 @@ class EventNotificationService
     private function participationScopesForNotification(Event $event): EventParticipationScope
     {
         return app(ParticipationScopeService::class)->ensureOrganizerScope($event->fresh(['organization']));
+    }
+
+    private function organizerChecklistUrl(Event $event, ProposalWorkflowTask $task): string
+    {
+        return route('dashboard.events.checklist', [
+            'event' => $event,
+            'focus_task' => $task,
+        ]).'#workflow-task-'.$task->id;
     }
 }

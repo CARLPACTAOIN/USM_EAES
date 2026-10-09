@@ -11,6 +11,7 @@ use App\Models\Event;
 use App\Models\EventParticipationScope;
 use App\Models\Organization;
 use App\Models\ProposalProcessStep;
+use App\Models\ProposalProcessStepDependency;
 use App\Models\ProposalProcessTemplate;
 use App\Models\ProposalProcessTemplateVersion;
 use App\Models\ProposalWorkflowRun;
@@ -19,6 +20,7 @@ use App\Models\SchoolYear;
 use App\Models\User;
 use App\Notifications\EventWorkflowNotification;
 use App\Services\AdminAssignmentService;
+use App\Services\OrganizerChecklistService;
 use App\Support\ProposalRevisionTargets;
 use Database\Seeders\RolePermissionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -159,7 +161,7 @@ class ProposalOrganizerChecklistTest extends TestCase
                 'Available',
                 '4',
                 'Security Clearance',
-                'Pending',
+                'In Progress',
                 '5',
                 'OSA Approval',
                 'Blocked',
@@ -170,6 +172,169 @@ class ProposalOrganizerChecklistTest extends TestCase
             ->assertSee('Edit returned packet')
             ->assertSee('modal=proposal-edit', false)
             ->assertSee('Resubmit proposal');
+    }
+
+    public function test_checklist_lists_parallel_actions_prerequisite_blockers_and_latest_decision(): void
+    {
+        $event = $this->eventWithPacket(Event::STATUS_SUBMITTED);
+        $run = $this->workflowRun($event, ProposalWorkflowRun::STATUS_IN_PROGRESS);
+        $adviserTask = $this->task($run, 'adviser_review', 'Adviser Review', 1, ProposalWorkflowTask::STATUS_AVAILABLE);
+        $securityTask = $this->task($run, 'security_review', 'Security Review', 2, ProposalWorkflowTask::STATUS_AVAILABLE);
+        $osaTask = $this->task($run, 'osa_approval', 'OSA Approval', 3, ProposalWorkflowTask::STATUS_BLOCKED);
+
+        ProposalProcessStepDependency::create([
+            'step_id' => $osaTask->process_step_id,
+            'prerequisite_step_id' => $adviserTask->process_step_id,
+        ]);
+        ProposalProcessStepDependency::create([
+            'step_id' => $osaTask->process_step_id,
+            'prerequisite_step_id' => $securityTask->process_step_id,
+        ]);
+
+        $adviserTask->forceFill(['available_at' => now()->subHours(2)])->save();
+        $securityTask->forceFill(['available_at' => now()->subHour()])->save();
+        $adviserTask->refresh();
+
+        $olderTrail = ApprovalTrail::create([
+            'proposal_id' => $event->id,
+            'workflow_run_id' => $run->id,
+            'workflow_task_id' => $adviserTask->id,
+            'actor_id' => $this->approver->id,
+            'decision' => ProposalWorkflowTask::DECISION_APPROVED,
+            'remarks' => 'Older decision.',
+            'reference_id' => 'AT-checklist-old',
+            'previous_status' => ProposalWorkflowTask::STATUS_AVAILABLE,
+            'resulting_status' => ProposalWorkflowTask::STATUS_APPROVED,
+            'assigned_role' => 'osa',
+            'assigned_scope' => 'university',
+            'decided_at' => now()->subHours(3),
+        ]);
+        $newestTrail = ApprovalTrail::create([
+            'proposal_id' => $event->id,
+            'workflow_run_id' => $run->id,
+            'workflow_task_id' => $securityTask->id,
+            'actor_id' => $this->approver->id,
+            'decision' => ProposalWorkflowTask::DECISION_REVISION_REQUESTED,
+            'remarks' => 'Newest decision remarks.',
+            'reference_id' => 'AT-checklist-new',
+            'previous_status' => ProposalWorkflowTask::STATUS_AVAILABLE,
+            'resulting_status' => ProposalWorkflowTask::STATUS_REVISION_REQUESTED,
+            'assigned_role' => 'osa',
+            'assigned_scope' => 'university',
+            'decided_at' => now()->subMinute(),
+        ]);
+
+        $viewData = app(OrganizerChecklistService::class)->viewData($event->fresh(), $this->organizer);
+
+        $this->assertSame($newestTrail->id, $viewData['latestDecision']?->id);
+        $this->assertNotSame($olderTrail->id, $viewData['latestDecision']?->id);
+        $this->assertSame('institutional_action', $viewData['nextExpectedAction']['kind']);
+        $this->assertCount(2, $viewData['actionableTasks']);
+        $this->assertSame($adviserTask->available_at?->toIso8601String(), data_get($viewData['taskSummaries']->get($adviserTask->id), 'elapsed_since')?->toIso8601String());
+
+        $this->actingAs($this->organizer)
+            ->get(route('dashboard.events.checklist', $event))
+            ->assertOk()
+            ->assertSee('Institutional action in progress')
+            ->assertSee('Adviser Review')
+            ->assertSee('Security Review')
+            ->assertSee('OSA Approval')
+            ->assertSee('Waiting for Adviser Review (Available).')
+            ->assertSee('Waiting for Security Review (Available).')
+            ->assertSee('Elapsed:')
+            ->assertSee('Newest decision remarks.');
+    }
+
+    public function test_checklist_uses_the_revision_request_time_for_organizer_elapsed_time(): void
+    {
+        $event = $this->eventWithPacket(Event::STATUS_REVISION_REQUESTED);
+        $run = $this->workflowRun($event, ProposalWorkflowRun::STATUS_REVISION_REQUESTED);
+        $requestedAt = now()->subMinutes(15)->startOfSecond();
+        $task = $this->task(
+            $run,
+            'adviser_review',
+            'Adviser Review',
+            1,
+            ProposalWorkflowTask::STATUS_REVISION_REQUESTED,
+            'Clarify the program flow.',
+            ['revision' => ['requested_at' => $requestedAt->toIso8601String()]],
+        );
+        $task->forceFill([
+            'available_at' => now()->subHours(2),
+            'decided_at' => now()->subHour(),
+        ])->save();
+
+        $viewData = app(OrganizerChecklistService::class)->viewData($event->fresh(), $this->organizer);
+
+        $this->assertSame(
+            $requestedAt->toIso8601String(),
+            data_get($viewData['taskSummaries']->get($task->id), 'elapsed_since')?->toIso8601String()
+        );
+        $this->assertSame('organizer_correction', $viewData['nextExpectedAction']['kind']);
+    }
+
+    public function test_checklist_keeps_paused_and_not_required_steps_visible(): void
+    {
+        $event = $this->eventWithPacket(Event::STATUS_SUBMITTED);
+        $run = $this->workflowRun($event, ProposalWorkflowRun::STATUS_IN_PROGRESS);
+        $this->task($run, 'venue_hold', 'Venue Hold', 1, ProposalWorkflowTask::STATUS_PAUSED);
+        $this->task($run, 'security_review', 'Security Review', 2, ProposalWorkflowTask::STATUS_NOT_REQUIRED);
+
+        $this->actingAs($this->organizer)
+            ->get(route('dashboard.events.checklist', $event))
+            ->assertOk()
+            ->assertSeeTextInOrder(['Venue Hold', 'Paused', 'Security Review', 'Not Required'])
+            ->assertSee('Workflow paused');
+    }
+
+    public function test_checklist_focuses_the_requested_task_and_keeps_remarks_visible(): void
+    {
+        $event = $this->eventWithPacket(Event::STATUS_REJECTED);
+        $run = $this->workflowRun($event, ProposalWorkflowRun::STATUS_REJECTED);
+        $task = $this->task(
+            $run,
+            'osa_approval',
+            'OSA Approval',
+            1,
+            ProposalWorkflowTask::STATUS_REJECTED,
+            'The proposed dates cannot be accommodated.'
+        );
+
+        $this->actingAs($this->organizer)
+            ->get(route('dashboard.events.checklist', ['event' => $event, 'focus_task' => $task]))
+            ->assertOk()
+            ->assertSee('id="workflow-task-'.$task->id.'"', false)
+            ->assertSee('href="#workflow-task-'.$task->id.'"', false)
+            ->assertSee('The proposed dates cannot be accommodated.');
+    }
+
+    public function test_organizer_cannot_view_another_organization_checklist(): void
+    {
+        $event = $this->eventWithPacket(Event::STATUS_SUBMITTED);
+        $otherOrganization = Organization::create([
+            'college_id' => $this->college->id,
+            'name' => 'Other Checklist Society',
+            'acronym' => 'OCS',
+            'type' => 'society',
+            'status' => 'active',
+        ]);
+        $otherOrganizer = User::factory()->create(['email' => 'other.checklist@usm.edu.ph']);
+        app(AdminAssignmentService::class)->createAssignment(
+            user: $otherOrganizer,
+            roleName: 'Society Admin',
+            organization: $otherOrganization,
+            college: $this->college,
+            academicYear: $this->schoolYear->label,
+            termStart: today()->subMonth()->toDateString(),
+            termEnd: today()->addYear()->toDateString(),
+            positionTitle: 'President',
+            approvedBy: $otherOrganizer,
+            isPrimaryAdmin: true,
+        );
+
+        $this->actingAs($otherOrganizer)
+            ->get(route('dashboard.events.checklist', $event))
+            ->assertForbidden();
     }
 
     public function test_revision_resubmission_reuses_workflow_run_reopens_returned_tasks_and_notifies_approver(): void
@@ -356,6 +521,7 @@ class ProposalOrganizerChecklistTest extends TestCase
 
         $this->assertSame(Event::STATUS_SUBMITTED, $event->fresh()->status);
         $this->assertSame(ProposalWorkflowTask::STATUS_AVAILABLE, $returnedTask->fresh()->status);
+        $this->assertTrue($returnedTask->fresh()->available_at?->greaterThan($returnedAt));
     }
 
     private function eventWithPacket(string $status): Event

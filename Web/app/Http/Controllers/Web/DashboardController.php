@@ -27,6 +27,7 @@ use App\Services\EventSessionScheduleService;
 use App\Services\OrganizerChecklistService;
 use App\Services\ParticipantPpaPacketService;
 use App\Services\ParticipationScopeService;
+use App\Services\ProposalWorkflowTaskService;
 use App\Services\ScannerAssignmentService;
 use App\Services\ScannerSessionService;
 use App\Support\AdminScope;
@@ -56,6 +57,7 @@ class DashboardController extends Controller
         private readonly EventSessionScheduleService $sessionSchedules,
         private readonly OrganizerChecklistService $organizerChecklists,
         private readonly ParticipantPpaPacketService $participantPackets,
+        private readonly ProposalWorkflowTaskService $proposalWorkflowTasks,
     ) {}
 
     /**
@@ -535,7 +537,11 @@ class DashboardController extends Controller
     {
         $this->authorizeEventAccess($event, $request->user());
 
-        return view('dashboard.events.checklist', $this->organizerChecklists->viewData($event, $request->user()));
+        return view('dashboard.events.checklist', $this->organizerChecklists->viewData(
+            $event,
+            $request->user(),
+            $request->string('focus_task')->toString(),
+        ));
     }
 
     public function startVenueAmendment(Request $request, Event $event): RedirectResponse
@@ -1562,6 +1568,10 @@ class DashboardController extends Controller
 
     private function authorizeEventAccess(Event $event, User $user): void
     {
+        if ($this->proposalWorkflowTasks->userCanAccessEventTaskContext($user, $event)) {
+            return;
+        }
+
         $scope = $this->adminScopes->forUser($user);
 
         if (! $scope) {

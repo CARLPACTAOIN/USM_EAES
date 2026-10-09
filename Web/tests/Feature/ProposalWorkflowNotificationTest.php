@@ -284,7 +284,10 @@ class ProposalWorkflowNotificationTest extends TestCase
         $this->assertNotNull($notification);
         $data = $notification->data;
         $this->assertSame('workflow_task_rejected', $data['kind']);
-        $this->assertSame(route('dashboard.events.checklist', $event), $data['link']);
+        $this->assertSame(
+            route('dashboard.events.checklist', ['event' => $event, 'focus_task' => $task]).'#workflow-task-'.$task->id,
+            $data['link']
+        );
         $this->assertStringContainsString('Event does not align with academic priorities.', $data['message']);
         $this->assertSame('error', $data['severity']);
     }
@@ -372,7 +375,10 @@ class ProposalWorkflowNotificationTest extends TestCase
         $this->assertNotNull($notification);
         $data = $notification->data;
         $this->assertSame('workflow_task_revision_requested', $data['kind']);
-        $this->assertSame(route('dashboard.events.checklist', $event), $data['link']);
+        $this->assertSame(
+            route('dashboard.events.checklist', ['event' => $event, 'focus_task' => $task]).'#workflow-task-'.$task->id,
+            $data['link']
+        );
         $this->assertStringContainsString('Please update the venue risk assessment section.', $data['message']);
         $this->assertTrue($data['needs_action']);
         $this->assertSame('warning', $data['severity']);
