@@ -35,10 +35,13 @@
             </p>
         </div>
         @if($canCreateProposals)
-        <button type="button" onclick="const modal = document.getElementById('create-event-modal'); modal.showModal(); setTimeout(() => document.getElementById('title')?.focus(), 50)" class="btn btn-primary shrink-0">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-            New Event
-        </button>
+            <form method="POST" action="{{ route('dashboard.proposal-drafts.start') }}">
+                @csrf
+                <button type="submit" class="btn btn-primary shrink-0">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                    Start proposal
+                </button>
+            </form>
         @endif
     </div>
 

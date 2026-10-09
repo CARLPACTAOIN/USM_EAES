@@ -753,3 +753,9 @@
   - Added focused coverage for retired shortcuts; assigned, available task decisions; unassigned, blocked, completed, cross-tenant, and wrong-scope denial without state mutation; internal review activation; and final-task permit rollback safety.
   - Verified the complete Laravel backend suite after the authority change: 441 tests and 2,989 assertions passing.
   - Corrected overall PPA digitization and Features 2.1, 2.3, and 2.4 to `In Progress`; Features 2.2, 2.5, and 2.6 retain their agreed statuses while the remaining Issue #64 tickets are implemented.
+
+- **2026-10-09 (Issue #67 - Permissive organizer draft foundation):**
+  - Added an organizer-only draft start/resume flow that immediately creates exactly one draft Event and organizer Canonical PPA Packet with active School Year, governance snapshots, proponent, and prepared-by context, while allowing title, category, schedule, venue, packet answers, attachments, and evaluation questions to remain empty.
+  - Added patch-based Web and API autosave endpoints plus a dedicated draft page. Omitted fields remain unchanged, intentional blank values clear persisted fields, and repeated saves retain the same event and packet without creating duplicate or downstream records.
+  - Deferred Event Days, evaluation form versions, participation scopes, Workflow Runs, and Workflow Tasks until their later required lifecycle actions. Organizer and tenant boundaries are enforced for every start, view, and save; existing participant packet paths remain separate.
+  - Added authenticated PHPUnit coverage for empty creation, partial saves, clearing, retries, resume, cross-organizer and OSA denial, API parity, and no-premature-dependent-record behavior (26 focused tests / 188 assertions across the draft, participant-scope, and governance suites).

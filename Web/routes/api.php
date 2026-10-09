@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\EvaluationController;
 use App\Http\Controllers\Api\EventProposalController;
 use App\Http\Controllers\Api\NlpQueryController;
+use App\Http\Controllers\Api\OrganizerProposalDraftController;
 use App\Http\Controllers\Api\PendingStudentLinkController;
 use App\Http\Controllers\Api\ScannerAssignmentController;
 use App\Http\Controllers\Api\VenueController;
@@ -33,6 +34,9 @@ Route::prefix('v1')->group(function () {
         // Event Proposals (PPA)
         Route::get('/events', [EventProposalController::class, 'index']);
         Route::get('/venues', [VenueController::class, 'index']);
+        Route::post('/proposal-drafts', [OrganizerProposalDraftController::class, 'store'])->middleware(['tenant.scope:create-proposals', 'throttle:api-write']);
+        Route::get('/proposal-drafts/{event}', [OrganizerProposalDraftController::class, 'show'])->middleware('tenant.scope:create-proposals');
+        Route::patch('/proposal-drafts/{event}', [OrganizerProposalDraftController::class, 'update'])->middleware(['tenant.scope:create-proposals', 'throttle:api-write']);
         Route::post('/events', [EventProposalController::class, 'store'])->middleware(['tenant.scope:create-proposals', 'throttle:api-write']);
         Route::post('/events/{event}/submit', [EventProposalController::class, 'submit'])->middleware(['tenant.scope:create-proposals', 'throttle:api-write']);
         Route::patch('/events/{event}', [EventProposalController::class, 'update'])->middleware(['tenant.scope:create-proposals', 'throttle:api-write']);

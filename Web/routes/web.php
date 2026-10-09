@@ -14,6 +14,7 @@ use App\Http\Controllers\Web\EventExportController;
 use App\Http\Controllers\Web\NotificationController;
 use App\Http\Controllers\Web\OfficerRosterController;
 use App\Http\Controllers\Web\OrganizationProfileController;
+use App\Http\Controllers\Web\OrganizerProposalDraftController;
 use App\Http\Controllers\Web\PortalController;
 use App\Http\Controllers\Web\ProposalProcessTemplateController;
 use App\Http\Controllers\Web\SchoolYearController;
@@ -76,6 +77,9 @@ Route::middleware(['auth'])->group(function () {
 
             // Events / PPA
             Route::get('/events', [DashboardController::class, 'events'])->name('dashboard.events');
+            Route::post('/proposal-drafts', [OrganizerProposalDraftController::class, 'start'])->name('dashboard.proposal-drafts.start');
+            Route::get('/proposal-drafts/{event}/edit', [OrganizerProposalDraftController::class, 'edit'])->name('dashboard.proposal-drafts.edit');
+            Route::patch('/proposal-drafts/{event}', [OrganizerProposalDraftController::class, 'save'])->name('dashboard.proposal-drafts.save');
             Route::post('/events', [DashboardController::class, 'createEvent'])->name('dashboard.events.create');
             Route::post('/events/{event}/update', [DashboardController::class, 'updateEvent'])->name('dashboard.events.update');
             Route::post('/events/{event}/submit', [DashboardController::class, 'submitEvent'])->name('dashboard.events.submit');
